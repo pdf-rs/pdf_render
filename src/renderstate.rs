@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use pdf::file::File as PdfFile;
 use pdf::object::*;
-use pdf::primitive::Primitive;
+use pdf::primitive::{Primitive, Name};
 use pdf::backend::Backend;
 use pdf::content::Operation;
 use pdf::error::{PdfError, Result};
@@ -27,7 +27,7 @@ use pathfinder_renderer::{
 use super::{
     graphicsstate::{GraphicsState, DrawMode},
     textstate::{TextState, TextMode},
-    cache::{Cache, FontMap},
+    cache::{FontMap},
     BBox,
 };
 
@@ -160,14 +160,19 @@ impl<'a, B: Backend> RenderState<'a, B> {
             "'" => op_tick,
             "\"" => op_doubletick,
             "Do" => op_Do,
+            "MP" => op_MP,
+            "DP" => op_DP,
+            "BMC" => op_BMC,
+            "BDC" => op_BDC,
+            "EMC" => op_nop,
         });
         ctx!(f(s), op)
     }
 
-    fn trace_bbox(&mut self, bb: BBox) {
+    fn trace_bbox(&mut self, _bb: BBox) {
 
     }
-    fn trace_rect(&mut self, rect: RectF) {
+    fn trace_rect(&mut self, _rect: RectF) {
 
     }
 }
@@ -204,17 +209,17 @@ fn convert_color(cs: &ColorSpace, ops: &OpArgs) -> Result<Paint> {
         ColorSpace::DeviceCMYK => ops!(ops, c: f32, m: f32, y: f32, k: f32 => {
             Ok(cmyk2fill(c, m, y, k))
         }),
-        ColorSpace::Separation(ref name, ref alt, ref f) => ops!(ops, x: f32 => {
+        ColorSpace::Separation(ref _name, ref alt, ref f) => ops!(ops, x: f32 => {
             match &**alt {
                 &ColorSpace::DeviceCMYK => {
                     let mut cmyk = [0.0; 4];
-                    f.apply(x, &mut cmyk);
+                    f.apply(x, &mut cmyk)?;
                     let [c, m, y, k] = cmyk;
                     Ok(cmyk2fill(c, m, y, k))
                 },
                 &ColorSpace::DeviceRGB => {
                     let mut rgb = [0.0, 0.0, 0.0];
-                    f.apply(x, &mut rgb);
+                    f.apply(x, &mut rgb)?;
                     let [r, g, b] = rgb;
                     Ok(rgb2fill(r, g, b))
                 },
@@ -679,6 +684,41 @@ impl<'a, B: Backend> RenderState<'a, B> {
                 Err(e) => warn!("failed to decode image: {}", e)
             }
         });
+        Ok(())
+    }
+
+    fn op_MP(&mut self, ops: &OpArgs) -> Result<()> {
+        // Designate a marked-content point. tag shall be a name object indicating the role or significance of the point.
+        ops!(ops, tag: Name => {
+            debug!("MP {}", tag);
+        });
+        Ok(())
+    }
+    fn op_DP(&mut self, ops: &OpArgs) -> Result<()> {
+        // Designate a marked-content point with an associated property list.
+        ops!(ops, tag: Name, properties: &Primitive => {
+            let properties = properties.clone().into_dictionary(self.file)?;
+            debug!("DP {} {:?}", tag, properties);
+        });
+        Ok(())
+    }
+    fn op_BMC(&mut self, ops: &OpArgs) -> Result<()> {
+        // Begin a marked-content sequence terminated by a balancing EMC
+        // operator. tag shall be a name object indicating the role or significance of
+        // the sequence.
+        ops!(ops, tag: Name => {
+            debug!("BMC {}", tag);
+        });
+        Ok(())
+    }
+    fn op_BDC(&mut self, ops: &OpArgs) -> Result<()> {
+        ops!(ops, tag: Name, properties: &Primitive => {
+            let properties = properties.clone().into_dictionary(self.file)?;
+            debug!("BDC {} {:?}", tag, properties);
+        });
+        Ok(())
+    }
+    fn op_EMC(&mut self, ops: &OpArgs) -> Result<()> {
         Ok(())
     }
     fn op_nop(&mut self, ops: &OpArgs) -> Result<()> {
