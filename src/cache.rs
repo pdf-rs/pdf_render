@@ -25,6 +25,8 @@ use super::{BBox, STANDARD_FONTS, fontentry::FontEntry, renderstate::RenderState
 
 use std::time::{Duration, Instant};
 
+const SCALE: f32 = 25.4 / 72.;
+
 pub type FontMap = HashMap<String, FontEntry>;
 pub struct Cache {
     // shared mapping of fontname -> font
@@ -116,22 +118,22 @@ impl Cache {
         self.fonts.insert(pdf_font.name.clone(), entry);
     }
 
-    pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, transform: Transform2F) -> Result<(Scene, ItemMap)> {
+    pub fn page_bounds<B: Backend>(&self, file: &PdfFile<B>, page: &Page) -> RectF {
         let Rect { left, right, top, bottom } = page.media_box(file).expect("no media box");
-        let rect = RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top));
-        
-        let scale = 25.4 / 72.;
+        RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top)) * SCALE
+    }
+    pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, transform: Transform2F) -> Result<(Scene, ItemMap)> {
         let mut scene = Scene::new();
-        let view_box = transform * RectF::new(Vector2F::default(), rect.size() * scale);
+        let bounds = self.page_bounds(file, page);
+        let view_box = transform * bounds;
         scene.set_view_box(view_box);
         
         let white = scene.push_paint(&Paint::from_color(ColorU::white()));
-
         scene.push_draw_path(DrawPath::new(Outline::from_rect(view_box), white));
 
         let mut items = ItemMap::new();
 
-        let root_transformation = transform * Transform2F::from_scale(scale) * Transform2F::row_major(1.0, 0.0, -left, 0.0, -1.0, top);
+        let root_transformation = transform * Transform2F::row_major(SCALE, 0.0, -bounds.min_x(), 0.0, -SCALE, bounds.max_y());
         
         let resources = page.resources(file)?;
         // make sure all fonts are in the cache, so we can reference them

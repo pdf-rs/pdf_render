@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use pdf::file::File as PdfFile;
 use pdf::object::*;
-use pdf::primitive::{Primitive, Name};
+use pdf::primitive::{Primitive, Name, Dictionary};
 use pdf::backend::Backend;
 use pdf::content::Operation;
 use pdf::error::{PdfError, Result};
@@ -694,10 +694,24 @@ impl<'a, B: Backend> RenderState<'a, B> {
         });
         Ok(())
     }
+    fn get_properties<'b>(&'b self, p: &'b Primitive) -> Result<&'b Dictionary> {
+        match p {
+            Primitive::Dictionary(ref dict) => Ok(dict),
+            Primitive::Name(ref name) => self.resources.properties.get(name)
+                .map(|rc| &**rc)
+                .ok_or_else(|| {
+                    PdfError::MissingEntry { typ: "Properties", field: name.into() }
+                }),
+            p => Err(PdfError::UnexpectedPrimitive {
+                expected: "Dictionary or Name",
+                found: p.get_debug_name()
+            })
+        }
+    }
     fn op_DP(&mut self, ops: &OpArgs) -> Result<()> {
         // Designate a marked-content point with an associated property list.
         ops!(ops, tag: Name, properties: &Primitive => {
-            let properties = properties.clone().into_dictionary(self.file)?;
+            let properties = self.get_properties(properties)?;
             debug!("DP {} {:?}", tag, properties);
         });
         Ok(())
@@ -713,7 +727,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
     }
     fn op_BDC(&mut self, ops: &OpArgs) -> Result<()> {
         ops!(ops, tag: Name, properties: &Primitive => {
-            let properties = properties.clone().into_dictionary(self.file)?;
+            let properties = self.get_properties(properties)?;
             debug!("BDC {} {:?}", tag, properties);
         });
         Ok(())
@@ -725,6 +739,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
         Ok(())
     }
 }
+
 
 fn rgb2fill(r: f32, g: f32, b: f32) -> Paint {
     let c = |v: f32| (v * 255.) as u8;

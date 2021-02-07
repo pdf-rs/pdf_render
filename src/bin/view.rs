@@ -41,6 +41,9 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
     }
     fn scene(&mut self, ctx: &mut Context) -> Scene {
         let page = self.file.get_page(ctx.page_nr as u32).unwrap();
+
+        ctx.set_bounds(self.cache.page_bounds(&self.file, &page));
+
         let (scene, map) = self.cache.render_page(&self.file, &page, ctx.view_transform()).unwrap();
         self.map = Some(map);
         scene
