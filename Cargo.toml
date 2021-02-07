@@ -1,19 +1,48 @@
-[workspace]
-members = [
-    "pdf",
-    "pdf_derive",
-    "view",
-    "render",
-    "convert",
-    "examples/read",
-    "examples/text",
-    "examples/names",
-    "examples/metadata",
-]
-default-members = [
-    "pdf",
-    "pdf_derive",
-]
+[package]
+name = "pdf_view"
+version = "0.1.0"
+authors = ["Sebastian Köln <s3bk@protonmail.com>"]
+edition = "2018"
+
+[features]
+unstable = []
+
+[[bench]]
+name = "render"
+harness = false
+
+[dependencies]
+pdf = { git = "https://github.com/pdf-rs/pdf", default-features=false }
+pathfinder_renderer = { git = "https://github.com/servo/pathfinder" }
+pathfinder_color = { git = "https://github.com/servo/pathfinder" }
+pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
+pathfinder_resources = { git = "https://github.com/servo/pathfinder" }
+pathfinder_content = { git = "https://github.com/servo/pathfinder" }
+pathfinder_export = { git = "https://github.com/servo/pathfinder" }
+pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view" }
+log = "0.4"
+structopt = "0.3"
+font = { git = "https://github.com/pdf-rs/font" }
+pdf_encoding = "0.1"
+itertools = "*"
+
+[dev-dependencies]
+criterion = "0.3"
+
+[target.wasm32-unknown-unknown.dependencies]
+wasm-bindgen = "0.2.48"
+js-sys = "0.3"
+web-sys = { version = "*", features = ["HtmlCanvasElement"] }
+console_log = "0.2"
+console_error_panic_hook = "0.1.6"
+
+[target.'cfg(unix)'.dependencies]
+env_logger = "0.8"
+image = "0.23"
+pathfinder_view = { git = "https://github.com/s3bk/pathfinder_view", features = ["icon"] }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [patch.crates-io]
 pathfinder_gl = { git = "https://github.com/servo/pathfinder" }

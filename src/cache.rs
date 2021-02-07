@@ -23,9 +23,13 @@ use font::{self};
 
 use super::{BBox, STANDARD_FONTS, fontentry::FontEntry, renderstate::RenderState};
 
+use std::time::{Duration, Instant};
+
+pub type FontMap = HashMap<String, FontEntry>;
 pub struct Cache {
     // shared mapping of fontname -> font
-    fonts: HashMap<String, FontEntry>
+    fonts: FontMap,
+    op_stats: HashMap<String, (usize, Duration)>,
 }
 #[derive(Debug)]
 pub struct ItemMap(Vec<(RectF, Box<dyn std::fmt::Debug>)>);
@@ -67,7 +71,8 @@ impl ItemMap {
 impl Cache {
     pub fn new() -> Cache {
         Cache {
-            fonts: HashMap::new()
+            fonts: HashMap::new(),
+            op_stats: HashMap::new(),
         }
     }
     fn load_font(&mut self, pdf_font: &PdfFont) {
@@ -108,9 +113,6 @@ impl Cache {
         
         self.fonts.insert(pdf_font.name.clone(), entry);
     }
-    pub fn get_font(&self, font_name: &str) -> Option<&FontEntry> {
-        self.fonts.get(font_name)
-    }
 
     pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, transform: Transform2F) -> Result<(Scene, ItemMap)> {
         let Rect { left, right, top, bottom } = page.media_box(file).expect("no media box");
@@ -141,12 +143,27 @@ impl Cache {
         }
 
         let contents = try_opt!(page.contents.as_ref());
-        let mut renderstate = RenderState::new(self, &mut scene, file, &resources, root_transformation);
+        let mut renderstate = RenderState::new(&mut scene, &self.fonts, file, &resources, root_transformation);
         
         for op in contents.operations.iter() {
+            let t0 = Instant::now();
             renderstate.draw_op(op)?;
+            let dt = t0.elapsed();
+
+            let s = op.operator.as_str();
+            let slot = self.op_stats.entry(s.into()).or_default(); 
+            slot.0 += 1;
+            slot.1 += dt;
         }
 
         Ok((scene, items))
+    }
+    pub fn report(&self) {
+        let mut ops: Vec<_> = self.op_stats.iter().map(|(name, &(count, duration))| (count, name.as_str(), duration)).collect();
+        ops.sort_unstable();
+
+        for (count, name, duration) in ops {
+            println!("{:6}  {:5}  {}ms", count, name, duration.as_millis());
+        }
     }
 }

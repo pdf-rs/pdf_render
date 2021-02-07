@@ -4,7 +4,7 @@ extern crate test;
 use pdf::file::File as PdfFile;
 use pdf::object::*;
 use std::path::Path;
-use pdf_render::Cache;
+use pdf_view::Cache;
 use pathfinder_renderer::scene::Scene;
 use test::Bencher;
 
@@ -27,7 +27,7 @@ macro_rules! bench_file {
         }
     )
 }
-
+/*
 bench_file!("example.pdf", example);
 bench_file!("ep.pdf", ep);
 bench_file!("ep2.pdf", ep2);
@@ -36,3 +36,4 @@ bench_file!("pdf-sample.pdf", pdf_sample);
 bench_file!("xelatex-drawboard.pdf", xelatex_drawboard);
 bench_file!("xelatex.pdf", xelatex);
 bench_file!("PDF32000_2008.pdf", pdf32000);
+*/

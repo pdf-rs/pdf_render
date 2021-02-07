@@ -1,13 +1,15 @@
 #[macro_use] extern crate log;
 
-use pdf::file::File as PdfFile;
-use pdf::backend::Backend;
-use pdf::error::PdfError;
-use pdf_render::{Cache, ItemMap};
-
-use pathfinder_view::{*};
+use pathfinder_view::{show, Config, Interactive, Context, Emitter, ElementState, KeyCode, KeyEvent};
+use pathfinder_resources::embedded::EmbeddedResourceLoader;
+use pathfinder_color::ColorF;
 use pathfinder_renderer::scene::Scene;
 use pathfinder_geometry::vector::Vector2F;
+
+use pdf::file::File as PdfFile;
+use pdf::backend::Backend;
+use pdf_view::{Cache, ItemMap};
+
 
 pub struct PdfView<B: Backend> {
     file: PdfFile<B>,
@@ -35,7 +37,7 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
     }
     fn init(&mut self, ctx: &mut Context, sender: Emitter<Self::Event>) {
         ctx.num_pages = self.num_pages;
-        ctx.set_icon(image::load_from_memory_with_format(include_bytes!("../logo.png"), image::ImageFormat::Png).unwrap().to_rgba8().into());
+        ctx.set_icon(image::load_from_memory_with_format(include_bytes!("../../logo.png"), image::ImageFormat::Png).unwrap().to_rgba8().into());
     }
     fn scene(&mut self, ctx: &mut Context) -> Scene {
         let page = self.file.get_page(ctx.page_nr as u32).unwrap();
@@ -60,6 +62,7 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
         match event.keycode {
             KeyCode::Right | KeyCode::PageDown => ctx.next_page(),
             KeyCode::Left | KeyCode::PageUp => ctx.prev_page(),
+            KeyCode::S => self.cache.report(),
             _ => return
         }
         ctx.request_redraw();
@@ -102,4 +105,17 @@ pub fn show(canvas: HtmlCanvasElement, data: &Uint8Array) -> WasmView {
         config,
         Box::new(view) as _
     )
+}
+
+
+fn main() {
+    env_logger::init();
+    let path = std::env::args().nth(1).unwrap();
+    let file = PdfFile::<Vec<u8>>::open(&path).unwrap();
+    let view = PdfView::new(file);
+    let mut config = Config::new(Box::new(EmbeddedResourceLoader));
+    config.zoom = true;
+    config.pan = true;
+    config.background = ColorF::new(0.9, 0.9, 0.9, 1.0);
+    show(view, config);
 }

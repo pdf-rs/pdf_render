@@ -27,7 +27,7 @@ use pathfinder_renderer::{
 use super::{
     graphicsstate::{GraphicsState, DrawMode},
     textstate::{TextState, TextMode},
-    cache::{Cache},
+    cache::{Cache, FontMap},
     BBox,
 };
 
@@ -40,7 +40,7 @@ pub struct RenderState<'a, B: Backend> {
     scene: &'a mut Scene,
     file: &'a PdfFile<B>,
     resources: &'a Resources,
-    cache: &'a Cache,
+    fonts: &'a FontMap,
 }
 
 /*
@@ -63,9 +63,8 @@ macro_rules! op_match {
     };
 }
 
-
 impl<'a, B: Backend> RenderState<'a, B> {
-    pub fn new(cache: &'a Cache, scene: &'a mut Scene, file: &'a PdfFile<B>, resources: &'a Resources, root_transformation: Transform2F) -> Self {
+    pub fn new(scene: &'a mut Scene, fonts: &'a FontMap, file: &'a PdfFile<B>, resources: &'a Resources, root_transformation: Transform2F) -> Self {
         let black = scene.push_paint(&Paint::from_color(ColorU::black()));
 
         let graphics_state = GraphicsState {
@@ -93,7 +92,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
             current_outline,
             current_contour,
             scene,
-            cache,
+            fonts,
             resources,
             file,
         }
@@ -104,9 +103,13 @@ impl<'a, B: Backend> RenderState<'a, B> {
         let ops = &op.operands;
 
         let mut f = op_match!((self, ops), {
-            "m" => op_m,
-            "l" => op_l,
             "c" => op_c,
+            "l" => op_l,
+            "Tm" => op_Tm,
+            "TJ" => op_TJ,
+            "Tf" => op_Tf,
+            "Tj" => op_Tj,
+            "m" => op_m,
             "v" => op_v,
             "y" => op_y,
             "h" => op_h,
@@ -149,17 +152,13 @@ impl<'a, B: Backend> RenderState<'a, B> {
             "Tw" => op_Tw,
             "Tz" => op_Tz,
             "TL" => op_TL,
-            "Tf" => op_Tf,
             "Tr" => op_Tr,
             "Ts" => op_Ts,
             "Td" => op_Td,
             "TD" => op_TD,
-            "Tm" => op_Tm,
             "T*" => op_T_star,
-            "Tj" => op_Tj,
             "'" => op_tick,
             "\"" => op_doubletick,
-            "TJ" => op_TJ,
             "Do" => op_Do,
         });
         ctx!(f(s), op)
@@ -418,7 +417,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
                 self.graphics_state.stroke_style.line_width = lw;
             }
             if let Some((ref font, size)) = gs.font {
-                if let Some(e) = self.cache.get_font(&font.name) {
+                if let Some(e) = self.fonts.get(&font.name) {
                     self.text_state.font_entry = Some(e);
                     self.text_state.font_size = size;
                     debug!("new font: {} at size {}", font.name, size);
@@ -525,7 +524,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
         ops!(ops, font_name: &Primitive, size: f32 => {
             let font_name = font_name.as_name()?;
             let font = try_opt!(self.resources.fonts.get(font_name));
-            if let Some(e) = self.cache.get_font(&font.name) {
+            if let Some(e) = self.fonts.get(&font.name) {
                 self.text_state.font_entry = Some(e);
                 debug!("new font: {} (is_cid={:?})", font.name, e.is_cid);
                 self.text_state.font_size = size;
