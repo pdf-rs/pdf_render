@@ -38,6 +38,6 @@ Over all you will need in the `fonts` directory:
  - `ArialMT.ttf`
  - `Arial-ItalicMT.otf`
 
-**Note**: If you do not have this exact list, update `STANDARD_FONTS` in `pdf/src/fonts.rs` accordingly.
+**Note**: If you do not have this exact list, update `STANDARD_FONTS` in `src/cache.rs` accordingly.
 
 Once you have the fonts, you can enable the `standard-fonts` feature for the pdf crate.

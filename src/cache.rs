@@ -1,4 +1,4 @@
-use std::path::{PathBuf};
+use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::fs;
 use std::borrow::Cow;
@@ -30,6 +30,7 @@ pub struct Cache {
     // shared mapping of fontname -> font
     fonts: FontMap,
     op_stats: HashMap<String, (usize, Duration)>,
+    standard_fonts: PathBuf,
 }
 #[derive(Debug)]
 pub struct ItemMap(Vec<(RectF, Box<dyn std::fmt::Debug>)>);
@@ -73,6 +74,7 @@ impl Cache {
         Cache {
             fonts: HashMap::new(),
             op_stats: HashMap::new(),
+            standard_fonts: std::env::var_os("STANDARD_FONTS").map(PathBuf::from).unwrap_or(PathBuf::from("fonts"))
         }
     }
     fn load_font(&mut self, pdf_font: &PdfFont) {
@@ -94,7 +96,7 @@ impl Cache {
             None => {
                 match STANDARD_FONTS.iter().find(|&&(name, _)| pdf_font.name == name) {
                     Some(&(_, file_name)) => {
-                        if let Ok(data) = std::fs::read(file_name) {
+                        if let Ok(data) = std::fs::read(self.standard_fonts.join(file_name)) {
                             data.into()
                         } else {
                             warn!("can't open {} for {}", file_name, pdf_font.name);
