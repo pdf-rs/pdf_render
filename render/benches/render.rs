@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use pdf::file::File as PdfFile;
-use pdf_view::Cache;
+use pdf_render::Cache;
 use std::time::Duration;
 
 fn bench_render_page(c: &mut Criterion) {

@@ -4,7 +4,7 @@ extern crate test;
 use pdf::file::File as PdfFile;
 use pdf::object::*;
 use std::path::Path;
-use pdf_view::Cache;
+use pdf_render::Cache;
 use pathfinder_renderer::scene::Scene;
 use test::Bencher;
 

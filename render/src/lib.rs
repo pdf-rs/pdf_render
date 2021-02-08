@@ -9,7 +9,7 @@ mod graphicsstate;
 mod renderstate;
 mod textstate;
 
-pub use cache::{Cache, ItemMap};
+pub use cache::{Cache, ItemMap, TraceItem};
 
 pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
     ("Courier", "CourierStd.otf"),
@@ -54,5 +54,10 @@ impl BBox {
     }
     pub fn rect(self) -> Option<RectF> {
         self.0
+    }
+}
+impl From<RectF> for BBox {
+    fn from(r: RectF) -> Self {
+        BBox(Some(r))
     }
 }

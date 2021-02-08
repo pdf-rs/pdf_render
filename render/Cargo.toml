@@ -1,0 +1,31 @@
+[package]
+name = "pdf_render"
+version = "0.1.0"
+authors = ["Sebastian Köln <s3bk@protonmail.com>"]
+edition = "2018"
+
+[features]
+unstable = []
+
+[[bench]]
+name = "render"
+harness = false
+
+[dependencies.pdf]
+default-features=false 
+git = "https://github.com/pdf-rs/pdf"
+
+[dependencies]
+pathfinder_renderer = { git = "https://github.com/servo/pathfinder" }
+pathfinder_color = { git = "https://github.com/servo/pathfinder" }
+pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
+pathfinder_resources = { git = "https://github.com/servo/pathfinder" }
+pathfinder_content = { git = "https://github.com/servo/pathfinder" }
+log = "0.4"
+font = { git = "https://github.com/pdf-rs/font" }
+pdf_encoding = "0.1"
+itertools = "*"
+image = "0.23"
+
+[dev-dependencies]
+criterion = "0.3"

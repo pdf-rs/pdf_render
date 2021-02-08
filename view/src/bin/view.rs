@@ -8,7 +8,7 @@ use pathfinder_geometry::vector::Vector2F;
 
 use pdf::file::File as PdfFile;
 use pdf::backend::Backend;
-use pdf_view::{Cache, ItemMap};
+use pdf_render::{Cache, ItemMap, TraceItem};
 
 
 pub struct PdfView<B: Backend> {
@@ -37,7 +37,7 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
     }
     fn init(&mut self, ctx: &mut Context, sender: Emitter<Self::Event>) {
         ctx.num_pages = self.num_pages;
-        ctx.set_icon(image::load_from_memory_with_format(include_bytes!("../../logo.png"), image::ImageFormat::Png).unwrap().to_rgba8().into());
+        ctx.set_icon(image::load_from_memory_with_format(include_bytes!("../../../logo.png"), image::ImageFormat::Png).unwrap().to_rgba8().into());
     }
     fn scene(&mut self, ctx: &mut Context) -> Scene {
         let page = self.file.get_page(ctx.page_nr as u32).unwrap();
@@ -53,8 +53,13 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
         info!("x={}, y={}", pos.x(), pos.y());
 
         if let Some(ref map) = self.map {
-            if let Some(text) = map.get_string(pos) {
-                info!("{}", text);
+            for item in map.matches(pos) {
+                match item {
+                    TraceItem::Single(_, op) => info!("{}", op),
+                    TraceItem::Multi(ref ops) => for &(_, ref op) in ops {
+                        info!("{}", op);
+                    }
+                }
             }
         }
     }

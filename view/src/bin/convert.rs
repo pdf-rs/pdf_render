@@ -4,7 +4,7 @@ use pdf::error::PdfError;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::PathBuf;
-use pdf_view::Cache;
+use pdf_render::Cache;
 use pathfinder_export::{FileFormat, Export};
 use pathfinder_geometry::transform2d::Transform2F;
 use structopt::StructOpt;

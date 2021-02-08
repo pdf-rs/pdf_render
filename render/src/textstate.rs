@@ -99,7 +99,7 @@ impl<'a> TextState<'a> {
             let gid = match gid {
                 Some(gid) => gid,
                 None => {
-                    warn!("no glyph for cid {}", cid);
+                    debug!("no glyph for cid {}", cid);
                     GlyphId(0)
                 } // lets hope that works…
             };
@@ -121,7 +121,7 @@ impl<'a> TextState<'a> {
                     gs.draw_transform(scene, &path, draw_mode, FillRule::Winding, transform);
                 }
             } else {
-                info!("no glyph for gid {:?}", gid);
+                debug!("no glyph for gid {:?}", gid);
             }
             let advance = self.char_space * self.horiz_scale * self.font_size + width;
             self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));

@@ -5,6 +5,7 @@ use std::borrow::Cow;
 
 use pdf::file::File as PdfFile;
 use pdf::object::*;
+use pdf::content::Operation;
 use pdf::backend::Backend;
 use pdf::font::{Font as PdfFont};
 use pdf::error::{Result};
@@ -34,40 +35,21 @@ pub struct Cache {
     op_stats: HashMap<String, (usize, Duration)>,
     standard_fonts: PathBuf,
 }
+
 #[derive(Debug)]
-pub struct ItemMap(Vec<(RectF, Box<dyn std::fmt::Debug>)>);
+pub struct ItemMap(Vec<(RectF, TraceItem)>);
 impl ItemMap {
-    pub fn print(&self, p: Vector2F) {
-        for &(rect, ref op) in self.0.iter() {
-            if rect.contains_point(p) {
-                println!("{:?}", op);
-            }
-        }
-    }
-    pub fn get_string(&self, p: Vector2F) -> Option<String> {
-        use itertools::Itertools;
-        let mut iter = self.0.iter().filter_map(|&(rect, ref op)| {
-            if rect.contains_point(p) {
-                Some(op)
-            } else {
-                None
-            }
-        }).peekable();
-        if iter.peek().is_some() {
-            Some(format!("{:?}", iter.format(", ")))
-        } else {
-            None
-        }
+    pub fn matches(&self, p: Vector2F) -> impl Iterator<Item=&TraceItem> + '_ {
+        self.0.iter()
+            .filter(move |&(rect, _)| rect.contains_point(p))
+            .map(|&(_, ref item)| item)
     }
     pub fn new() -> Self {
         ItemMap(Vec::new())
     }
-    pub fn add_rect(&mut self, rect: RectF, item: impl std::fmt::Debug + 'static) {
-        self.0.push((rect, Box::new(item) as _));
-    }
-    pub fn add_bbox(&mut self, bbox: BBox, item: impl std::fmt::Debug + 'static) {
+    pub fn add(&mut self, bbox: BBox, item: TraceItem) {
         if let Some(r) = bbox.rect() {
-            self.add_rect(r, item);
+            self.0.push((r, item));
         }
     }
 }
@@ -131,8 +113,6 @@ impl Cache {
         let white = scene.push_paint(&Paint::from_color(ColorU::white()));
         scene.push_draw_path(DrawPath::new(Outline::from_rect(view_box), white));
 
-        let mut items = ItemMap::new();
-
         let root_transformation = transform * Transform2F::row_major(SCALE, 0.0, -bounds.min_x(), 0.0, -SCALE, bounds.max_y());
         
         let resources = page.resources(file)?;
@@ -148,10 +128,16 @@ impl Cache {
 
         let contents = try_opt!(page.contents.as_ref());
         let mut renderstate = RenderState::new(&mut scene, &self.fonts, file, &resources, root_transformation);
-        
-        for op in contents.operations.iter() {
+        let mut tracer = Tracer {
+            nr: 0,
+            ops: &contents.operations,
+            stash: vec![],
+            map: ItemMap::new()
+        };
+        for (nr, op) in contents.operations.iter().enumerate() {
+            tracer.nr = nr;
             let t0 = Instant::now();
-            renderstate.draw_op(op)?;
+            renderstate.draw_op(op, &mut tracer)?;
             let dt = t0.elapsed();
 
             let s = op.operator.as_str();
@@ -160,7 +146,7 @@ impl Cache {
             slot.1 += dt;
         }
 
-        Ok((scene, items))
+        Ok((scene, tracer.map))
     }
     pub fn report(&self) {
         let mut ops: Vec<_> = self.op_stats.iter().map(|(name, &(count, duration))| (count, name.as_str(), duration)).collect();
@@ -170,4 +156,32 @@ impl Cache {
             println!("{:6}  {:5}  {}ms", count, name, duration.as_millis());
         }
     }
+}
+
+pub struct Tracer<'a> {
+    nr: usize,
+    ops: &'a [Operation],
+    stash: Vec<usize>,
+    map: ItemMap,
+}
+impl<'a> Tracer<'a> {
+    pub fn single(&mut self, bb: impl Into<BBox>) {
+        self.map.add(bb.into(), TraceItem::Single(self.nr, self.ops[self.nr].clone()));
+    }
+    pub fn stash_multi(&mut self) {
+        self.stash.push(self.nr);
+    }
+    pub fn multi(&mut self, bb: impl Into<BBox>) {
+        self.stash.push(self.nr);
+        self.map.add(bb.into(), TraceItem::Multi(self.stash.iter().map(|&n| (n, self.ops[n].clone())).collect()));
+    }
+    pub fn clear(&mut self) {
+        self.stash.clear();
+    }
+}
+
+#[derive(Debug)]
+pub enum TraceItem {
+    Single(usize, Operation),
+    Multi(Vec<(usize, Operation)>)
 }

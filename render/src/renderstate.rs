@@ -27,7 +27,7 @@ use pathfinder_renderer::{
 use super::{
     graphicsstate::{GraphicsState, DrawMode},
     textstate::{TextState, TextMode},
-    cache::{FontMap},
+    cache::{FontMap, ItemMap, Tracer},
     BBox,
 };
 
@@ -41,6 +41,7 @@ pub struct RenderState<'a, B: Backend> {
     file: &'a PdfFile<B>,
     resources: &'a Resources,
     fonts: &'a FontMap,
+    items: ItemMap,
 }
 
 /*
@@ -55,9 +56,9 @@ macro_rules! op_match {
 }
 */
 macro_rules! op_match {
-    (($self:ident, $arg:ident), { $($name:tt => $fun:ident,)* }) => {
+    (($self:ident, $arg1:ident, $arg2:ident), { $($name:tt => $fun:ident,)* }) => {
         |key| match key {
-            $($name => $self.$fun($arg), )*
+            $($name => $self.$fun($arg1, $arg2), )*
             _ => Ok(())
         }
     };
@@ -85,6 +86,8 @@ impl<'a, B: Backend> RenderState<'a, B> {
         let current_outline = Outline::new();
         let current_contour = Contour::new();
 
+        let items = ItemMap::new();
+
         RenderState {
             graphics_state,
             text_state,
@@ -95,14 +98,15 @@ impl<'a, B: Backend> RenderState<'a, B> {
             fonts,
             resources,
             file,
+            items,
         }
     }
-    pub fn draw_op(&mut self, op: &Operation) -> Result<()> {
+    pub fn draw_op(&mut self, op: &Operation, tracer: &mut Tracer) -> Result<()> {
         debug!("{}", op);
         let s = op.operator.as_str();
         let ops = &op.operands;
 
-        let mut f = op_match!((self, ops), {
+        let mut f = op_match!((self, ops, tracer), {
             "c" => op_c,
             "l" => op_l,
             "Tm" => op_Tm,
@@ -164,16 +168,9 @@ impl<'a, B: Backend> RenderState<'a, B> {
             "DP" => op_DP,
             "BMC" => op_BMC,
             "BDC" => op_BDC,
-            "EMC" => op_nop,
+            "EMC" => op_EMC,
         });
         ctx!(f(s), op)
-    }
-
-    fn trace_bbox(&mut self, _bb: BBox) {
-
-    }
-    fn trace_rect(&mut self, _rect: RectF) {
-
     }
 }
 
@@ -252,122 +249,142 @@ impl<'a, B: Backend> RenderState<'a, B> {
             self.current_contour.clear();
         }
     }
-    fn op_m(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_m(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // move x y
         ops_p!(ops, p => {
             self.flush();
             self.current_contour.push_endpoint(p);
         });
+        tracer.stash_multi();
         Ok(())
     }
-    fn op_l(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_l(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // line x y
         ops_p!(ops, p => {
             self.current_contour.push_endpoint(p);
         });
+        tracer.stash_multi();
         Ok(())
     }
-    fn op_c(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_c(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // cubic bezier c1.x c1.y c2.x c2.y p.x p.y
         ops_p!(ops, c1, c2, p => {
             self.current_contour.push_cubic(c1, c2, p);
         });
+        tracer.stash_multi();
         Ok(())
     }
-    fn op_v(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_v(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // cubic bezier c2.x c2.y p.x p.y
         ops_p!(ops, c2, p => {
             let c1 = self.current_contour.last_position().unwrap_or_default();
             self.current_contour.push_cubic(c1, c2, p);
         });
+        tracer.stash_multi();
         Ok(())
     }
-    fn op_y(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_y(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // cubic c1.x c1.y p.x p.y
         ops_p!(ops, c1, p => {
             self.current_contour.push_cubic(c1, p, p);
         });
+        tracer.stash_multi();
         Ok(())
     }
-    fn op_h(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_h(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // close
         self.current_contour.close();
+        tracer.stash_multi();
         Ok(())
     }
-    fn op_re(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_re(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // rect x y width height
         ops_p!(ops, origin, size => {
             self.flush();
             self.current_outline.push_contour(Contour::from_rect(RectF::new(origin, size)));
         });
+        tracer.stash_multi();
         Ok(())
     }
-    fn op_S(&mut self, ops: &OpArgs) -> Result<()> {
+    fn trace_outline(&self, tracer: &mut Tracer) {
+        tracer.multi(self.graphics_state.transform * self.current_outline.bounds());
+    }
+    fn op_S(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // stroke
         self.flush();
         self.graphics_state.draw(self.scene, &self.current_outline, DrawMode::Stroke, FillRule::Winding);
+        self.trace_outline(tracer);
         self.current_outline.clear();
+        tracer.clear();
         Ok(())
     }
-    fn op_s(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_s(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // close and stroke
         self.current_contour.close();
         self.flush();
         self.graphics_state.draw(self.scene, &self.current_outline, DrawMode::Stroke, FillRule::Winding);
+        self.trace_outline(tracer);
         self.current_outline.clear();
         Ok(())
     }
-    fn close_and_fill(&mut self, fill_rule: FillRule) {
+    fn close_and_fill(&mut self, fill_rule: FillRule, tracer: &mut Tracer) {
         self.current_contour.close();
         self.flush();
         self.graphics_state.draw(self.scene, &self.current_outline, DrawMode::Fill, fill_rule);
+        self.trace_outline(tracer);
+        tracer.clear();
         self.current_outline.clear();
     }
-    fn op_f(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_f(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // close and fill (winding)
-        self.close_and_fill(FillRule::Winding);
+        self.close_and_fill(FillRule::Winding, tracer);
         Ok(())
     }
-    fn op_f_star(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_f_star(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // close and fill (even-odd)
-        self.close_and_fill(FillRule::EvenOdd);
+        self.close_and_fill(FillRule::EvenOdd, tracer);
         Ok(())
     }
-    fn fill_stroke(&mut self, fill_rule: FillRule) {
+    fn fill_stroke(&mut self, fill_rule: FillRule, tracer: &mut Tracer) {
         self.flush();
         self.graphics_state.draw(self.scene, &self.current_outline, DrawMode::FillStroke, fill_rule);
+        self.trace_outline(tracer);
+        tracer.clear();
         self.current_outline.clear();
     }
-    fn op_B(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_B(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // fill and stroke (winding)
-        self.fill_stroke(FillRule::Winding);
+        self.fill_stroke(FillRule::Winding, tracer);
         Ok(())
     }
-    fn op_B_star(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_B_star(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // fill and stroke (even-odd)
-        self.fill_stroke(FillRule::EvenOdd);
+        self.fill_stroke(FillRule::EvenOdd, tracer);
         Ok(())
     }
-    fn close_stroke_fill(&mut self, fill_rule: FillRule) {
+    fn close_stroke_fill(&mut self, fill_rule: FillRule, tracer: &mut Tracer) {
         self.current_contour.close();
         self.flush();
         self.graphics_state.draw(self.scene, &self.current_outline, DrawMode::FillStroke, fill_rule);
+        self.trace_outline(tracer);
+        tracer.clear();
         self.current_outline.clear();
     }
-    fn op_b(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_b(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // close, stroke and fill (winding)
-        self.close_stroke_fill(FillRule::Winding);
+        self.close_stroke_fill(FillRule::Winding, tracer);
         Ok(())
     }
-    fn op_b_star(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_b_star(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // close, stroke and fill (winding)
-        self.close_stroke_fill(FillRule::EvenOdd);
+        self.close_stroke_fill(FillRule::EvenOdd, tracer);
         Ok(())
     }
-    fn op_n(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_n(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // clear path
         self.current_outline.clear();
         self.current_contour.clear();
+        tracer.clear();
         Ok(())
     }
     fn clip_path(&mut self, fill_rule: FillRule) {
@@ -378,43 +395,43 @@ impl<'a, B: Backend> RenderState<'a, B> {
         let clip_path_id = self.scene.push_clip_path(clip_path);
         self.graphics_state.clip_path = Some(clip_path_id);
     }
-    fn op_W(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_W(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // merge clip path (winding)
         self.clip_path(FillRule::Winding);
         Ok(())
     }
-    fn op_W_star(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_W_star(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // merge clip path (even-odd)
         self.clip_path(FillRule::EvenOdd);
         Ok(())
     }
-    fn op_q(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_q(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // save stack
         self.stack.push((self.graphics_state.clone(), self.text_state));
         Ok(())
     }
-    fn op_Q(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_Q(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // restore stack
         let (g, t) = self.stack.pop().expect("graphcs stack is empty");
         self.graphics_state = g;
         self.text_state = t;
         Ok(())
     }
-    fn op_cm(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_cm(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // modify transformation matrix 
         ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {
             self.graphics_state.transform = self.graphics_state.transform * Transform2F::row_major(a, c, e, b, d, f);
         });
         Ok(())
     }
-    fn op_w(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_w(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // line width
         ops!(ops, width: f32 => {
             self.graphics_state.stroke_style.line_width = width;
         });
         Ok(())
     }
-    fn op_gs(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_gs(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         ops!(ops, gs: &Primitive => { // set from graphic state dictionary
             let gs = gs.as_name()?;
             let gs = try_opt!(self.resources.graphics_states.get(gs));
@@ -433,47 +450,47 @@ impl<'a, B: Backend> RenderState<'a, B> {
         });
         Ok(())
     }
-    fn op_stroke_color(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_stroke_color(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // stroke color
         let paint = convert_color(self.graphics_state.stroke_color_space, &*ops)?;
         self.graphics_state.stroke_paint = self.scene.push_paint(&paint);
         Ok(())
     }
-    fn op_fill_color(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_fill_color(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // fill color
         let paint = convert_color(self.graphics_state.fill_color_space, &*ops)?;
         self.graphics_state.fill_paint = self.scene.push_paint(&paint);
         Ok(())
     }
-    fn op_G(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_G(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // stroke gray
         ops!(ops, gray: f32 => {
             self.graphics_state.stroke_paint = self.scene.push_paint(&gray2fill(gray));
         });
         Ok(())
     }
-    fn op_g(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_g(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // stroke gray
         ops!(ops, gray: f32 => {
             self.graphics_state.stroke_paint = self.scene.push_paint(&gray2fill(gray));
         });
         Ok(())
     }
-    fn op_K(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_K(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // stroke color
         ops!(ops, c: f32, m: f32, y: f32, k: f32 => {
             self.graphics_state.stroke_paint = self.scene.push_paint(&cmyk2fill(c, m, y, k));
         });
         Ok(())
     }
-    fn op_k(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_k(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // fill color
         ops!(ops, c: f32, m: f32, y: f32, k: f32 => {
             self.graphics_state.fill_paint = self.scene.push_paint(&cmyk2fill(c, m, y, k));
         });
         Ok(())
     }
-    fn op_cs(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_cs(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // fill color space
         ops!(ops, name: &Primitive => {
             let name = name.as_name()?;
@@ -481,7 +498,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
         });
         Ok(())
     }
-    fn op_CS(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_CS(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // stroke color space
         ops!(ops, name: &Primitive => {
             let name = name.as_name()?;
@@ -489,42 +506,42 @@ impl<'a, B: Backend> RenderState<'a, B> {
         });
         Ok(())
     }
-    fn op_BT(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_BT(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         self.text_state.reset_matrix();
         Ok(())
     }
-    fn op_ET(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_ET(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         Ok(())
     }
-    fn op_Tc(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_Tc(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // character spacing
         ops!(ops, char_space: f32 => {
             self.text_state.char_space = char_space;
         });
         Ok(())
     }
-    fn op_Tw(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_Tw(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // word spacing
         ops!(ops, word_space: f32 => {
             self.text_state.word_space = word_space;
         });
         Ok(())
     }
-    fn op_Tz(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_Tz(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // Horizontal scaling (in percent)
         ops!(ops, scale: f32 => {
             self.text_state.horiz_scale = 0.01 * scale;
         });
         Ok(())
     }
-    fn op_TL(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_TL(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // leading
         ops!(ops, leading: f32 => {
             self.text_state.leading = leading;
         });
         Ok(())
     }
-    fn op_Tf(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_Tf(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // text font
         ops!(ops, font_name: &Primitive, size: f32 => {
             let font_name = font_name.as_name()?;
@@ -540,7 +557,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
         });
         Ok(())
     }
-    fn op_Tr(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_Tr(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // render mode
         ops!(ops, mode: i32 => {
             use TextMode::*;
@@ -558,14 +575,14 @@ impl<'a, B: Backend> RenderState<'a, B> {
         });
         Ok(())
     }
-    fn op_Ts(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_Ts(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // text rise
         ops!(ops, rise: f32 => {
             self.text_state.rise = rise;
         });
         Ok(())
     }
-    fn op_Td(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_Td(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // positioning operators
         // Move to the start of the next line
         ops_p!(ops, t => {
@@ -573,54 +590,54 @@ impl<'a, B: Backend> RenderState<'a, B> {
         });
         Ok(())
     }
-    fn op_TD(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_TD(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         ops_p!(ops, t => {
             self.text_state.leading = -t.y();
             self.text_state.translate(t);
         });
         Ok(())
     }
-    fn op_Tm(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_Tm(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // Set the text matrix and the text line matrix
         ops!(ops, a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 => {
             self.text_state.set_matrix(Transform2F::row_major(a, c, e, b, d, f));
         });
         Ok(())
     }
-    fn op_T_star(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_T_star(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // Move to the start of the next line
         self.text_state.next_line();
         Ok(())
     }
-    fn op_Tj(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_Tj(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // draw text
         ops!(ops, text: &[u8] => {
             let bb = self.text_state.draw_text(self.scene, &self.graphics_state, text);
-            self.trace_bbox(bb);
+            tracer.single(bb);
         });
         Ok(())
     }
-    fn op_tick(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_tick(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // move to the next line and draw text
         ops!(ops, text: &[u8] => {
             self.text_state.next_line();
             let bb = self.text_state.draw_text(self.scene, &self.graphics_state, text);
-            self.trace_bbox(bb);
+            tracer.single(bb);
         });
         Ok(())
     }
-    fn op_doubletick(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_doubletick(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // set word and charactr spacing, move to the next line and draw text
         ops!(ops, word_space: f32, char_space: f32, text: &[u8] => {
             self.text_state.word_space = word_space;
             self.text_state.char_space = char_space;
             self.text_state.next_line();
             let bb = self.text_state.draw_text(self.scene, &self.graphics_state, text);
-            self.trace_bbox(bb);
+            tracer.single(bb);
         });
         Ok(())
     }
-    fn op_TJ(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_TJ(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         ops!(ops, array: &[Primitive] => {
             let mut bb = BBox::empty();
             for arg in array {
@@ -635,11 +652,11 @@ impl<'a, B: Backend> RenderState<'a, B> {
                     }
                 }
             }
-            self.trace_bbox(bb);
+            tracer.single(bb);
         });
         Ok(())
     }
-    fn draw_image(&mut self, name: &Primitive) -> Result<()> {
+    fn draw_image(&mut self, name: &Primitive, tracer: &mut Tracer) -> Result<()> {
         let name = name.as_name()?;
         let &xobject_ref = self.resources.xobjects.get(name).unwrap();
         let xobject = self.file.get(xobject_ref)?;
@@ -671,15 +688,15 @@ impl<'a, B: Backend> RenderState<'a, B> {
                 draw_path.set_clip_path(self.graphics_state.clip_path);
                 self.scene.push_draw_path(draw_path);
 
-                self.trace_rect(self.graphics_state.transform * RectF::new(Vector2F::default(), size_f));
+                tracer.single(self.graphics_state.transform * RectF::new(Vector2F::default(), size_f));
             },
             _ => {}
         }
         Ok(())
     }
-    fn op_Do(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_Do(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         ops!(ops, name: &Primitive => {
-            match self.draw_image(name) {
+            match self.draw_image(name, tracer) {
                 Ok(()) => {},
                 Err(e) => warn!("failed to decode image: {}", e)
             }
@@ -687,7 +704,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
         Ok(())
     }
 
-    fn op_MP(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_MP(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // Designate a marked-content point. tag shall be a name object indicating the role or significance of the point.
         ops!(ops, tag: Name => {
             debug!("MP {}", tag);
@@ -708,7 +725,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
             })
         }
     }
-    fn op_DP(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_DP(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // Designate a marked-content point with an associated property list.
         ops!(ops, tag: Name, properties: &Primitive => {
             let properties = self.get_properties(properties)?;
@@ -716,7 +733,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
         });
         Ok(())
     }
-    fn op_BMC(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_BMC(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // Begin a marked-content sequence terminated by a balancing EMC
         // operator. tag shall be a name object indicating the role or significance of
         // the sequence.
@@ -725,17 +742,17 @@ impl<'a, B: Backend> RenderState<'a, B> {
         });
         Ok(())
     }
-    fn op_BDC(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_BDC(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         ops!(ops, tag: Name, properties: &Primitive => {
             let properties = self.get_properties(properties)?;
             debug!("BDC {} {:?}", tag, properties);
         });
         Ok(())
     }
-    fn op_EMC(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_EMC(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         Ok(())
     }
-    fn op_nop(&mut self, ops: &OpArgs) -> Result<()> {
+    fn op_nop(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         Ok(())
     }
 }
