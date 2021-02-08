@@ -26,6 +26,7 @@ font = { git = "https://github.com/pdf-rs/font" }
 pdf_encoding = "0.1"
 itertools = "*"
 image = "0.23"
+instant = "*"
 
 [dev-dependencies]
 criterion = "0.3"

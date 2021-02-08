@@ -23,13 +23,23 @@ function dragover_handler(e) {
 
 function display(msg) {
     delete document.getElementById("drop").style.display;
-    document.getElementById("msg").innerText = msg;
+    document.getElementById("msg").innerText = msg || "";
 }
 
 let view;
-function init_view(data) {
+function init_view(data, attempt) {
     let canvas = document.getElementById("canvas");
-    view = wasm_bindgen.show(canvas, data);
+    let context = canvas.getContext("webgl2");
+    if (context == null) {
+        if (attempt < 10) {
+            setTimeout(function() { init_view(data, attempt+1) }, 1000);
+            display(`retrying ${attempt}`);
+        }
+        return;
+    }
+
+    view = wasm_bindgen.show(canvas, context, data);
+    display();
 
     let requested = false;
     function animation_frame(time) {
@@ -54,7 +64,7 @@ function init_view(data) {
 
 function show_data(data) {
     try {
-        init_view(data);
+        init_view(data, 0);
     } catch (e) {
         display("oops. try another one.");
     }

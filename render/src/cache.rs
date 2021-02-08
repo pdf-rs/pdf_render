@@ -24,7 +24,7 @@ use font::{self};
 
 use super::{BBox, STANDARD_FONTS, fontentry::FontEntry, renderstate::RenderState};
 
-use std::time::{Duration, Instant};
+use instant::{Duration, Instant};
 
 const SCALE: f32 = 25.4 / 72.;
 
