@@ -297,21 +297,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
         Ok(())
     }
     fn op_re(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
-        // rect x y width height
-        fn fix(x: f32, dx: f32) -> (f32, f32) {
-            if dx >= 0. {
-                (x, dx)
-            } else {
-                (x + dx, -dx)
-            }
-        }
         ops_p!(ops, origin, size => {
-            /*
-            let (x, w) = fix(origin.x(), size.x());
-            let (y, h) = fix(origin.y(), size.y());
-            let origin = Vector2F::new(x, y);
-            let size = Vector2F::new(w, h);
-            */
             self.flush();
             self.current_outline.push_contour(Contour::from_rect(RectF::new(origin, size)));
         });
@@ -465,7 +451,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
     }
     fn op_stroke_color(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // stroke color
-        let paint = dbg!(convert_color(self.graphics_state.stroke_color_space, &*ops)?);
+        let paint = convert_color(self.graphics_state.stroke_color_space, &*ops)?;
         self.graphics_state.stroke_paint = self.scene.push_paint(&paint);
         Ok(())
     }
@@ -720,7 +706,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
     fn op_MP(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // Designate a marked-content point. tag shall be a name object indicating the role or significance of the point.
         ops!(ops, tag: Name => {
-            debug!("MP {}", tag);
+            // debug!("MP {}", tag);
         });
         Ok(())
     }
@@ -751,7 +737,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
         // operator. tag shall be a name object indicating the role or significance of
         // the sequence.
         ops!(ops, tag: Name => {
-            debug!("BMC {}", tag);
+            // debug!("BMC {}", tag);
         });
         Ok(())
     }
