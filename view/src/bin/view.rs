@@ -55,9 +55,9 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
         if let Some(ref map) = self.map {
             for item in map.matches(pos) {
                 match item {
-                    TraceItem::Single(_, op) => info!("{}", op),
-                    TraceItem::Multi(ref ops) => for &(_, ref op) in ops {
-                        info!("{}", op);
+                    TraceItem::Single(i, op) => info!("{:3} {}", i, op),
+                    TraceItem::Multi(ref ops) => for &(i, ref op) in ops {
+                        info!("{:3} {}", i, op);
                     }
                 }
             }
@@ -67,13 +67,20 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
         if event.state == ElementState::Released {
             return;
         }
+        if event.modifiers.shift {
+            let page = ctx.page_nr();
+            match event.keycode {
+                KeyCode::Right => ctx.goto_page(page + 10),
+                KeyCode::Left =>  ctx.goto_page(page.saturating_sub(10)),
+                _ => return
+            }
+        }
         match event.keycode {
             KeyCode::Right | KeyCode::PageDown => ctx.next_page(),
             KeyCode::Left | KeyCode::PageUp => ctx.prev_page(),
             KeyCode::S => self.cache.report(),
             _ => return
         }
-        ctx.request_redraw();
     }
 }
 

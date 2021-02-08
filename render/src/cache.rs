@@ -137,6 +137,7 @@ impl Cache {
         for (nr, op) in contents.operations.iter().enumerate() {
             tracer.nr = nr;
             let t0 = Instant::now();
+            debug!("{:3} {}", nr, op);
             renderstate.draw_op(op, &mut tracer)?;
             let dt = t0.elapsed();
 
@@ -177,6 +178,9 @@ impl<'a> Tracer<'a> {
     }
     pub fn clear(&mut self) {
         self.stash.clear();
+    }
+    pub fn nr(&self) -> usize {
+        self.nr
     }
 }
 

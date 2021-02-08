@@ -102,7 +102,6 @@ impl<'a, B: Backend> RenderState<'a, B> {
         }
     }
     pub fn draw_op(&mut self, op: &Operation, tracer: &mut Tracer) -> Result<()> {
-        debug!("{}", op);
         let s = op.operator.as_str();
         let ops = &op.operands;
 
@@ -299,7 +298,20 @@ impl<'a, B: Backend> RenderState<'a, B> {
     }
     fn op_re(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // rect x y width height
+        fn fix(x: f32, dx: f32) -> (f32, f32) {
+            if dx >= 0. {
+                (x, dx)
+            } else {
+                (x + dx, -dx)
+            }
+        }
         ops_p!(ops, origin, size => {
+            /*
+            let (x, w) = fix(origin.x(), size.x());
+            let (y, h) = fix(origin.y(), size.y());
+            let origin = Vector2F::new(x, y);
+            let size = Vector2F::new(w, h);
+            */
             self.flush();
             self.current_outline.push_contour(Contour::from_rect(RectF::new(origin, size)));
         });
@@ -438,6 +450,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
             if let Some(lw) = gs.line_width {
                 self.graphics_state.stroke_style.line_width = lw;
             }
+            
             if let Some((ref font, size)) = gs.font {
                 if let Some(e) = self.fonts.get(&font.name) {
                     self.text_state.font_entry = Some(e);
@@ -452,7 +465,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
     }
     fn op_stroke_color(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
         // stroke color
-        let paint = convert_color(self.graphics_state.stroke_color_space, &*ops)?;
+        let paint = dbg!(convert_color(self.graphics_state.stroke_color_space, &*ops)?);
         self.graphics_state.stroke_paint = self.scene.push_paint(&paint);
         Ok(())
     }
@@ -470,9 +483,9 @@ impl<'a, B: Backend> RenderState<'a, B> {
         Ok(())
     }
     fn op_g(&mut self, ops: &OpArgs, tracer: &mut Tracer) -> Result<()> {
-        // stroke gray
+        // fill gray
         ops!(ops, gray: f32 => {
-            self.graphics_state.stroke_paint = self.scene.push_paint(&gray2fill(gray));
+            self.graphics_state.fill_paint = self.scene.push_paint(&gray2fill(gray));
         });
         Ok(())
     }
