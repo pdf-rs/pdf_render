@@ -437,7 +437,8 @@ impl<'a, B: Backend> RenderState<'a, B> {
                 self.graphics_state.stroke_style.line_width = lw;
             }
             
-            if let Some((ref font, size)) = gs.font {
+            if let Some((font, size)) = gs.font {
+                let font = self.file.get(font)?;
                 if let Some(e) = self.fonts.get(&font.name) {
                     self.text_state.font_entry = Some(e);
                     self.text_state.font_size = size;
@@ -544,7 +545,8 @@ impl<'a, B: Backend> RenderState<'a, B> {
         // text font
         ops!(ops, font_name: &Primitive, size: f32 => {
             let font_name = font_name.as_name()?;
-            let font = try_opt!(self.resources.fonts.get(font_name));
+            let font = *try_opt!(self.resources.fonts.get(font_name));
+            let font = self.file.get(font)?;
             if let Some(e) = self.fonts.get(&font.name) {
                 self.text_state.font_entry = Some(e);
                 debug!("new font: {} (is_cid={:?})", font.name, e.is_cid);
@@ -667,10 +669,19 @@ impl<'a, B: Backend> RenderState<'a, B> {
                     warn!("invalid data length {} bytes for {} pixels", raw_data.len(), pixel_count);
                     return Err(PdfError::EOF);
                 }
+                info!("smask: {:?}", image.smask);
+
+                let mask = image.smask.map(|r| self.file.get(r)).transpose()?;
+                let alpha = match mask {
+                    Some(ref mask) => mask.data()?,
+                    None => &[]
+                };
+                let alpha = alpha.iter().cloned().chain(std::iter::repeat(255));
+
                 let data = match raw_data.len() / pixel_count {
-                    1 => raw_data.iter().map(|&l| ColorU { r: l, g: l, b: l, a: 255 }).collect(),
-                    3 => raw_data.chunks_exact(3).map(|c| ColorU { r: c[0], g: c[1], b: c[2], a: 255 }).collect(),
-                    4 => cmyk2color(raw_data),
+                    1 => raw_data.iter().zip(alpha).map(|(&l, a)| ColorU { r: l, g: l, b: l, a }).collect(),
+                    3 => raw_data.chunks_exact(3).zip(alpha).map(|(c, a)| ColorU { r: c[0], g: c[1], b: c[2], a }).collect(),
+                    4 => cmyk2color(raw_data, alpha),
                     n => panic!("unimplemented {} bytes/pixel", n)
                 };
                 let size = Vector2I::new(image.width as _, image.height as _);
@@ -774,8 +785,8 @@ fn cmyk2fill(c: f32, m: f32, y: f32, k: f32) -> Paint {
     )
 }
 
-fn cmyk2color(data: &[u8]) -> Vec<ColorU> {
-    data.chunks_exact(4).map(|c| {
+fn cmyk2color(data: &[u8], alpha: impl Iterator<Item=u8>) -> Vec<ColorU> {
+    data.chunks_exact(4).zip(alpha).map(|(c, a)| {
         let mut buf = [0; 4];
         buf.copy_from_slice(c);
 
@@ -784,7 +795,7 @@ fn cmyk2color(data: &[u8]) -> Vec<ColorU> {
         let r = 255 - c.saturating_add(k);
         let g = 255 - m.saturating_add(k);
         let b = 255 - y.saturating_add(k);
-        ColorU::new(r, g, b, 255)
+        ColorU::new(r, g, b, a)
         
         /*
         let clamp = |f| if f > 1.0 { 1.0 } else { f };

@@ -101,7 +101,7 @@ impl Cache {
     }
 
     pub fn page_bounds<B: Backend>(&self, file: &PdfFile<B>, page: &Page) -> RectF {
-        let Rect { left, right, top, bottom } = page.media_box(file).expect("no media box");
+        let Rect { left, right, top, bottom } = page.media_box().expect("no media box");
         RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top)) * SCALE
     }
     pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, transform: Transform2F) -> Result<(Scene, ItemMap)> {
@@ -115,14 +115,16 @@ impl Cache {
 
         let root_transformation = transform * Transform2F::row_major(SCALE, 0.0, -bounds.min_x(), 0.0, -SCALE, bounds.max_y());
         
-        let resources = page.resources(file)?;
+        let resources = page.resources()?;
         // make sure all fonts are in the cache, so we can reference them
-        for font in resources.fonts.values() {
-            self.load_font(font);
+        for &font in resources.fonts.values() {
+            let font = file.get(font)?;
+            self.load_font(&*font);
         }
         for gs in resources.graphics_states.values() {
-            if let Some((ref font, _)) = gs.font {
-                self.load_font(font);
+            if let Some((font, _)) = gs.font {
+                let font = file.get(font)?;
+                self.load_font(&*font);
             }
         }
 
