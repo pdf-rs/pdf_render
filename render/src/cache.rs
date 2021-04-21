@@ -108,6 +108,10 @@ impl Cache {
     }
 
     fn load_image(&mut self, resolve: &impl Resolve, xobject_ref: Ref<XObject>) -> Result<()> {
+        if let Some(_) = self.images.get(&xobject_ref) {
+            return Ok(());
+        }
+        
         let xobject = resolve.get(xobject_ref)?;
         match *xobject {
             XObject::Image(ref image) => {
