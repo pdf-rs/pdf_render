@@ -27,7 +27,7 @@ use pathfinder_renderer::{
 use super::{
     graphicsstate::{GraphicsState, DrawMode},
     textstate::{TextState, TextMode},
-    cache::{FontMap, ItemMap, Tracer},
+    cache::{FontMap, ItemMap, Tracer, ImageMap},
     BBox,
 };
 
@@ -42,6 +42,7 @@ pub struct RenderState<'a, B: Backend> {
     resources: &'a Resources,
     fonts: &'a FontMap,
     items: ItemMap,
+    images: &'a ImageMap,
 }
 
 /*
@@ -65,7 +66,7 @@ macro_rules! op_match {
 }
 
 impl<'a, B: Backend> RenderState<'a, B> {
-    pub fn new(scene: &'a mut Scene, fonts: &'a FontMap, file: &'a PdfFile<B>, resources: &'a Resources, root_transformation: Transform2F) -> Self {
+    pub fn new(scene: &'a mut Scene, fonts: &'a FontMap, images: &'a ImageMap, file: &'a PdfFile<B>, resources: &'a Resources, root_transformation: Transform2F) -> Self {
         let black = scene.push_paint(&Paint::from_color(ColorU::black()));
 
         let graphics_state = GraphicsState {
@@ -99,6 +100,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
             resources,
             file,
             items,
+            images,
         }
     }
     pub fn draw_op(&mut self, op: &Operation, tracer: &mut Tracer) -> Result<()> {
@@ -659,48 +661,23 @@ impl<'a, B: Backend> RenderState<'a, B> {
     }
     fn draw_image(&mut self, name: &Primitive, tracer: &mut Tracer) -> Result<()> {
         let name = name.as_name()?;
-        let &xobject_ref = self.resources.xobjects.get(name).unwrap();
-        let xobject = self.file.get(xobject_ref)?;
-        match *xobject {
-            XObject::Image(ref image) => {
-                let raw_data = image.data()?;
-                let pixel_count = image.width as usize * image.height as usize;
-                if raw_data.len() % pixel_count != 0 {
-                    warn!("invalid data length {} bytes for {} pixels", raw_data.len(), pixel_count);
-                    return Err(PdfError::EOF);
-                }
-                info!("smask: {:?}", image.smask);
+        let xobject_ref = self.resources.xobjects.get(name).unwrap();
+        if let Some(image) = self.images.get(xobject_ref) {
+            let size = image.size();
+            let size_f = size.to_f32();
+            let outline = Outline::from_rect(self.graphics_state.transform * RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));
+            let im_tr = self.graphics_state.transform
+                * Transform2F::from_scale(Vector2F::new(1.0 / size_f.x(), -1.0 / size_f.y()))
+                * Transform2F::from_translation(Vector2F::new(0.0, -size_f.y()));
+            let mut pattern = Pattern::from_image(image.clone());
+            pattern.apply_transform(im_tr);
+            let paint = Paint::from_pattern(pattern);
+            let paint_id = self.scene.push_paint(&paint);
+            let mut draw_path = DrawPath::new(outline, paint_id);
+            draw_path.set_clip_path(self.graphics_state.clip_path);
+            self.scene.push_draw_path(draw_path);
 
-                let mask = image.smask.map(|r| self.file.get(r)).transpose()?;
-                let alpha = match mask {
-                    Some(ref mask) => mask.data()?,
-                    None => &[]
-                };
-                let alpha = alpha.iter().cloned().chain(std::iter::repeat(255));
-
-                let data = match raw_data.len() / pixel_count {
-                    1 => raw_data.iter().zip(alpha).map(|(&l, a)| ColorU { r: l, g: l, b: l, a }).collect(),
-                    3 => raw_data.chunks_exact(3).zip(alpha).map(|(c, a)| ColorU { r: c[0], g: c[1], b: c[2], a }).collect(),
-                    4 => cmyk2color(raw_data, alpha),
-                    n => panic!("unimplemented {} bytes/pixel", n)
-                };
-                let size = Vector2I::new(image.width as _, image.height as _);
-                let size_f = size.to_f32();
-                let outline = Outline::from_rect(self.graphics_state.transform * RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));
-                let im_tr = self.graphics_state.transform
-                    * Transform2F::from_scale(Vector2F::new(1.0 / size_f.x(), -1.0 / size_f.y()))
-                    * Transform2F::from_translation(Vector2F::new(0.0, -size_f.y()));
-                let mut pattern = Pattern::from_image(Image::new(size, Arc::new(data)));
-                pattern.apply_transform(im_tr);
-                let paint = Paint::from_pattern(pattern);
-                let paint_id = self.scene.push_paint(&paint);
-                let mut draw_path = DrawPath::new(outline, paint_id);
-                draw_path.set_clip_path(self.graphics_state.clip_path);
-                self.scene.push_draw_path(draw_path);
-
-                tracer.single(self.graphics_state.transform * RectF::new(Vector2F::default(), size_f));
-            },
-            _ => {}
+            tracer.single(self.graphics_state.transform * RectF::new(Vector2F::default(), size_f));
         }
         Ok(())
     }
@@ -783,32 +760,4 @@ fn cmyk2fill(c: f32, m: f32, y: f32, k: f32) -> Paint {
         1.0 - clamp(m + k),
         1.0 - clamp(y + k),
     )
-}
-
-fn cmyk2color(data: &[u8], alpha: impl Iterator<Item=u8>) -> Vec<ColorU> {
-    data.chunks_exact(4).zip(alpha).map(|(c, a)| {
-        let mut buf = [0; 4];
-        buf.copy_from_slice(c);
-
-        let [c, m, y, k] = buf;
-        let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
-        let r = 255 - c.saturating_add(k);
-        let g = 255 - m.saturating_add(k);
-        let b = 255 - y.saturating_add(k);
-        ColorU::new(r, g, b, a)
-        
-        /*
-        let clamp = |f| if f > 1.0 { 1.0 } else { f };
-        let i = |b| 1.0 - (b as f32 / 255.);
-        let o = |f| (f * 255.) as u8;
-        let (c, m, y, k) = (i(c), i(m), i(y), i(k));
-        let (r, g, b) = (
-            1.0 - clamp(c + k),
-            1.0 - clamp(m + k),
-            1.0 - clamp(y + k),
-        );
-        let (r, g, b) = (o(r), o(g), o(b));
-        ColorU::new(r, g, b, 255)
-        */
-    }).collect()
 }
