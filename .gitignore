@@ -1,6 +1,5 @@
 target/
 **/*.rs.bk
-Cargo.lock
 **/*.orig
 **/\.*
 **/perf.data
