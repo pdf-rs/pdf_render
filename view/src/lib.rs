@@ -40,6 +40,7 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
         ctx.set_icon(image::load_from_memory_with_format(include_bytes!("../../logo.png"), image::ImageFormat::Png).unwrap().to_rgba8().into());
     }
     fn scene(&mut self, ctx: &mut Context) -> Scene {
+        info!("drawing page {}", ctx.page_nr());
         let page = self.file.get_page(ctx.page_nr as u32).unwrap();
 
         ctx.set_bounds(self.cache.page_bounds(&self.file, &page));
@@ -55,9 +56,9 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
         if let Some(ref map) = self.map {
             for item in map.matches(pos) {
                 match item {
-                    TraceItem::Single(i, op) => info!("{:3} {}", i, op),
+                    TraceItem::Single(i, op) => info!("{:3} {:?}", i, op),
                     TraceItem::Multi(ref ops) => for &(i, ref op) in ops {
-                        info!("{:3} {}", i, op);
+                        info!("{:3} {:?}", i, op);
                     }
                 }
             }

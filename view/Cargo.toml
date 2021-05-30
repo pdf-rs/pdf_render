@@ -10,6 +10,7 @@ unstable = []
 [dependencies.pdf]
 git = "https://github.com/pdf-rs/pdf"
 default-features=false 
+features = ["dump"]
 
 [dependencies.pdf_render]
 path = "../render"
@@ -41,6 +42,7 @@ js-sys = "0.3"
 web-sys = { version = "*", features = ["HtmlCanvasElement", "WebGl2RenderingContext"] }
 console_log = "0.2"
 console_error_panic_hook = "0.1.6"
+getrandom = { version = "0.2.3", features = ["js"]}
 
 [target.'cfg(unix)'.dependencies]
 env_logger = "0.8"

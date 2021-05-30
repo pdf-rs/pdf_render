@@ -1,12 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fs;
 use std::borrow::Cow;
 use std::sync::Arc;
 
 use pdf::file::File as PdfFile;
 use pdf::object::*;
-use pdf::content::Operation;
+use pdf::content::Op;
 use pdf::backend::Backend;
 use pdf::font::{Font as PdfFont};
 use pdf::error::{Result, PdfError};
@@ -25,6 +26,7 @@ use pathfinder_content::{
     pattern::{Pattern, Image},
 };
 use font::{self};
+use std::rc::Rc;
 
 use super::{BBox, STANDARD_FONTS, fontentry::FontEntry, renderstate::RenderState};
 
@@ -32,7 +34,7 @@ use instant::{Duration, Instant};
 
 const SCALE: f32 = 25.4 / 72.;
 
-pub type FontMap = HashMap<String, FontEntry>;
+pub type FontMap = HashMap<Ref<PdfFont>, Option<Rc<FontEntry>>>;
 pub type ImageMap = HashMap<Ref<XObject>, Image>;
 pub struct Cache {
     // shared mapping of fontname -> font
@@ -41,7 +43,6 @@ pub struct Cache {
     standard_fonts: PathBuf,
     images: ImageMap,
 }
-
 #[derive(Debug)]
 pub struct ItemMap(Vec<(RectF, TraceItem)>);
 impl ItemMap {
@@ -68,11 +69,17 @@ impl Cache {
             standard_fonts: std::env::var_os("STANDARD_FONTS").map(PathBuf::from).unwrap_or(PathBuf::from("fonts"))
         }
     }
-    fn load_font(&mut self, pdf_font: &PdfFont) {
-        if self.fonts.get(&pdf_font.name).is_some() {
-            return;
+    pub fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Rc<FontEntry>>> {
+        match self.fonts.entry(font_ref) {
+            Entry::Occupied(e) => Ok(e.get().clone()),
+            Entry::Vacant(e) => {
+                let font = Self::load_font(font_ref, resolve, &self.standard_fonts)?;
+                Ok(e.insert(font).clone())
+            }
         }
-        
+    }
+    fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts: &Path) -> Result<Option<Rc<FontEntry>>> {
+        let pdf_font = resolve.get(font_ref)?;
         debug!("loading {:?}", pdf_font);
         
         let data: Cow<[u8]> = match pdf_font.embedded_data() {
@@ -83,50 +90,56 @@ impl Cache {
                 }
                 data.into()
             }
-            Some(Err(e)) => panic!("can't decode font data: {:?}", e),
+            Some(Err(e)) => return Err(e),
             None => {
                 match STANDARD_FONTS.iter().find(|&&(name, _)| pdf_font.name == name) {
                     Some(&(_, file_name)) => {
-                        if let Ok(data) = std::fs::read(self.standard_fonts.join(file_name)) {
+                        if let Ok(data) = std::fs::read(standard_fonts.join(file_name)) {
                             data.into()
                         } else {
                             warn!("can't open {} for {}", file_name, pdf_font.name);
-                            return;
+                            return Ok(None);
                         }
                     }
                     None => {
                         warn!("no font for {}", pdf_font.name);
-                        return;
+                        return Ok(None);
                     }
                 }
             }
         };
-        let entry = FontEntry::build(font::parse(&data), pdf_font);
+        let entry = Rc::new(FontEntry::build(font::parse(&data), &pdf_font));
         debug!("is_cid={}", entry.is_cid);
         
-        self.fonts.insert(pdf_font.name.clone(), entry);
+        Ok(Some(entry))
     }
 
-    fn load_image(&mut self, resolve: &impl Resolve, xobject_ref: Ref<XObject>) -> Result<()> {
-        if let Some(_) = self.images.get(&xobject_ref) {
-            return Ok(());
+    pub fn get_image(&mut self, xobject_ref: Ref<XObject>, resolve: &impl Resolve) -> Result<&Image> {
+        match self.images.entry(xobject_ref) {
+            Entry::Occupied(e) => Ok(e.into_mut()),
+            Entry::Vacant(e) => {
+                let im = Self::load_image(xobject_ref, resolve)?;
+                Ok(e.insert(im))
+            }
         }
-        
-        let xobject = resolve.get(xobject_ref)?;
+    }
+
+    fn load_image(xobject_ref: Ref<XObject>, resolve: &impl Resolve) -> Result<Image> {
+        let xobject = t!(resolve.get(xobject_ref));
         match *xobject {
             XObject::Image(ref image) => {
                 dbg!(&image.info);
-                let raw_data = image.data()?;
+                let raw_data = t!(image.data());
                 let pixel_count = image.width as usize * image.height as usize;
                 if raw_data.len() % pixel_count != 0 {
                     warn!("invalid data length {} bytes for {} pixels", raw_data.len(), pixel_count);
-                    return Err(PdfError::EOF);
+                    return Err(PdfError::Other { msg: format!("image data is {} (not a multiple of {}).", raw_data.len(), pixel_count)});
                 }
                 info!("smask: {:?}", image.smask);
 
-                let mask = image.smask.map(|r| resolve.get(r)).transpose()?;
+                let mask = t!(image.smask.map(|r| resolve.get(r)).transpose());
                 let alpha = match mask {
-                    Some(ref mask) => mask.data()?,
+                    Some(ref mask) => t!(mask.data()),
                     None => &[]
                 };
                 let alpha = alpha.iter().cloned().chain(std::iter::repeat(255));
@@ -138,17 +151,19 @@ impl Cache {
                     n => panic!("unimplemented {} bytes/pixel", n)
                 };
                 let size = Vector2I::new(image.width as _, image.height as _);
-                self.images.insert(xobject_ref, Image::new(size, Arc::new(data)));
+                Ok(Image::new(size, Arc::new(data)))
             }
-            _ => {}
+            _ => Err(PdfError::Other { msg: "not an image".into() })
         }
-        Ok(())
     }
     pub fn page_bounds<B: Backend>(&self, file: &PdfFile<B>, page: &Page) -> RectF {
         let Rect { left, right, top, bottom } = page.media_box().expect("no media box");
         RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top)) * SCALE
     }
     pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, transform: Transform2F) -> Result<(Scene, ItemMap)> {
+        self.render_page_limited(file, page, transform, None)
+    }
+    pub fn render_page_limited<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, transform: Transform2F, limit: Option<usize>) -> Result<(Scene, ItemMap)> {
         let mut scene = Scene::new();
         let bounds = self.page_bounds(file, page);
         let view_box = transform * bounds;
@@ -159,41 +174,20 @@ impl Cache {
 
         let root_transformation = transform * Transform2F::row_major(SCALE, 0.0, -bounds.min_x(), 0.0, -SCALE, bounds.max_y());
         
-        let resources = page.resources()?;
-        // make sure all fonts are in the cache, so we can reference them
-        for &font in resources.fonts.values() {
-            let font = file.get(font)?;
-            self.load_font(&*font);
-        }
-        for gs in resources.graphics_states.values() {
-            if let Some((font, _)) = gs.font {
-                let font = file.get(font)?;
-                self.load_font(&*font);
-            }
-        }
-        for &r in resources.xobjects.values() {
-            self.load_image(file, r)?;
-        }
+        let resources = t!(page.resources());
 
         let contents = try_opt!(page.contents.as_ref());
-        let mut renderstate = RenderState::new(&mut scene, &self.fonts, &self.images, file, &resources, root_transformation);
+        let mut renderstate = RenderState::new(&mut scene, self, file, &resources, root_transformation);
         let mut tracer = Tracer {
             nr: 0,
             ops: &contents.operations,
             stash: vec![],
             map: ItemMap::new()
         };
-        for (nr, op) in contents.operations.iter().enumerate() {
-            tracer.nr = nr;
-            let t0 = Instant::now();
-            debug!("{:3} {}", nr, op);
+        for (i, op) in contents.operations.iter().enumerate().take(limit.unwrap_or(usize::MAX)) {
+            debug!("op {}: {:?}", i, op);
+            tracer.nr = i;
             renderstate.draw_op(op, &mut tracer)?;
-            let dt = t0.elapsed();
-
-            let s = op.operator.as_str();
-            let slot = self.op_stats.entry(s.into()).or_default(); 
-            slot.0 += 1;
-            slot.1 += dt;
         }
 
         Ok((scene, tracer.map))
@@ -210,7 +204,7 @@ impl Cache {
 
 pub struct Tracer<'a> {
     nr: usize,
-    ops: &'a [Operation],
+    ops: &'a [Op],
     stash: Vec<usize>,
     map: ItemMap,
 }
@@ -235,8 +229,8 @@ impl<'a> Tracer<'a> {
 
 #[derive(Debug)]
 pub enum TraceItem {
-    Single(usize, Operation),
-    Multi(Vec<(usize, Operation)>)
+    Single(usize, Op),
+    Multi(Vec<(usize, Op)>)
 }
 
 fn cmyk2color(data: &[u8], alpha: impl Iterator<Item=u8>) -> Vec<ColorU> {

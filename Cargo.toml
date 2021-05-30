@@ -2,6 +2,7 @@
 members = [
     "render",
     "view",
+    "examples/pdf2image",
 ]
 
 [patch."https://github.com/servo/pathfinder"]
@@ -27,3 +28,13 @@ pathfinder_renderer = { git = "https://github.com/s3bk/pathfinder" }
 pathfinder_resources = { git = "https://github.com/s3bk/pathfinder" }
 pathfinder_export = { git = "https://github.com/s3bk/pathfinder" }
 pathfinder_simd = { git = "https://github.com/s3bk/pathfinder" }
+
+
+#[patch."https://github.com/s3bk/pathfinder_view"]
+#pathfinder_view = { path = "../pathfinder_view", features = ["icon"] }
+
+#[patch."https://github.com/pdf-rs/pdf"]
+#pdf = { path = "../pdf/pdf", default-features=false }
+
+#[patch."https://github.com/pdf-rs/font"]
+#font = { path = "../font" }
