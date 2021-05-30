@@ -366,9 +366,6 @@ impl<'a, B: Backend> RenderState<'a, B> {
     }
 
     fn draw_form(&mut self, form: &FormXObject, tracer: &mut Tracer) -> Result<()> {
-        let stroke_alpha = self.graphics_state.stroke_alpha;
-        let fill_alpha = self.graphics_state.fill_alpha;
-        
         let graphics_state = GraphicsState {
             stroke_alpha: self.graphics_state.stroke_color.a(),
             fill_alpha: self.graphics_state.fill_color.a(),
@@ -381,7 +378,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
         };
 
         let mut inner = RenderState {
-            graphics_state: self.graphics_state.clone(),
+            graphics_state: graphics_state,
             text_state: self.text_state.clone(),
             resources,
             stack: vec![],
