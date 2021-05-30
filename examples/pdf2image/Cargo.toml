@@ -1,0 +1,15 @@
+[package]
+name = "pdf2image"
+version = "0.1.0"
+authors = ["Sebastian K <s3bk@protonmail.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+pdf = { git = "https://github.com/pdf-rs/pdf" }
+pdf_render = { path = "../../render" }
+argh = "*"
+pathfinder_rasterize = { path = "../../../pathfinder_rasterize" } #{ git = "https://github.com/s3bk/pathfinder_rasterizer" }
+pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder" }
+env_logger = "*"

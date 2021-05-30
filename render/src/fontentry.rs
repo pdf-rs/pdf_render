@@ -16,6 +16,7 @@ pub struct FontEntry {
     pub encoding: TextEncoding,
     pub widths: Option<Widths>,
     pub is_cid: bool,
+    pub name: String,
 }
 impl FontEntry {
     pub fn build(font: Box<dyn Font>, pdf_font: &PdfFont) -> FontEntry {
@@ -91,6 +92,7 @@ impl FontEntry {
             encoding,
             is_cid,
             widths,
+            name: pdf_font.name.clone()
         }
     }
 }

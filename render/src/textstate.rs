@@ -13,34 +13,27 @@ use super::{
     graphicsstate::{GraphicsState, DrawMode},
 };
 use std::convert::TryInto;
-
-#[derive(Copy, Clone)]
-pub enum TextMode {
-    Fill,
-    Stroke,
-    FillThenStroke,
-    Invisible,
-    FillAndClip,
-    StrokeAndClip
-}
+use pdf::content::TextMode;
+use std::rc::Rc;
+use itertools::Either;
 
 
-#[derive(Copy, Clone)]
-pub struct TextState<'a> {
+#[derive(Clone)]
+pub struct TextState {
     pub text_matrix: Transform2F, // tracks current glyph
     pub line_matrix: Transform2F, // tracks current line
     pub char_space: f32, // Character spacing
     pub word_space: f32, // Word spacing
     pub horiz_scale: f32, // Horizontal scaling
     pub leading: f32, // Leading
-    pub font_entry: Option<&'a FontEntry>, // Text font
+    pub font_entry: Option<Rc<FontEntry>>, // Text font
     pub font_size: f32, // Text font size
     pub mode: TextMode, // Text rendering mode
     pub rise: f32, // Text rise
     pub knockout: f32, //Text knockout
 }
-impl<'a> TextState<'a> {
-    pub fn new() -> TextState<'a> {
+impl TextState {
+    pub fn new() -> TextState {
         TextState {
             text_matrix: Transform2F::default(),
             line_matrix: Transform2F::default(),
@@ -72,7 +65,29 @@ impl<'a> TextState<'a> {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    pub fn add_glyphs(&mut self, scene: &mut Scene, gs: &GraphicsState, glyphs: impl Iterator<Item=(u16, Option<GlyphId>, bool)>) -> BBox {
+    pub fn draw_text(&mut self, scene: &mut Scene, gs: &mut GraphicsState, data: &[u8]) -> BBox {
+        let e = match self.font_entry {
+            Some(ref e) => e,
+            None => {
+                warn!("no font set");
+                return BBox::empty();
+            }
+        };
+
+        let codepoints = if e.is_cid {
+            Either::Left(data.chunks_exact(2).map(|s| u16::from_be_bytes(s.try_into().unwrap())))
+        } else {
+            Either::Right(data.iter().map(|&b| b as u16))
+        };
+
+        let glyphs = codepoints.map(|cid| {
+            let (gid, is_space) = match e.encoding {
+                TextEncoding::CID => (Some(GlyphId(cid as u32)), false),
+                TextEncoding::Cmap(ref cmap) => (cmap.get(&cid).cloned(), cid == 0x20),
+            };
+            (cid, gid, is_space)
+        });
+
         let draw_mode = match self.mode {
             TextMode::Fill => DrawMode::Fill,
             TextMode::FillAndClip => DrawMode::Fill,
@@ -127,29 +142,6 @@ impl<'a> TextState<'a> {
             self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
         }
         bbox
-    }
-    pub fn draw_text(&mut self, scene: &mut Scene, gs: &GraphicsState, data: &[u8]) -> BBox {
-        if let Some(e) = self.font_entry {
-            let get_glyph = |cid: u16| {
-                let (gid, is_space) = match e.encoding {
-                    TextEncoding::CID => (Some(GlyphId(cid as u32)), false),
-                    TextEncoding::Cmap(ref cmap) => (cmap.get(&cid).cloned(), cid == 0x20),
-                };
-                (cid, gid, is_space)
-            };
-            if e.is_cid {
-                self.add_glyphs(scene, gs,
-                    data.chunks_exact(2).map(|s| get_glyph(u16::from_be_bytes(s.try_into().unwrap()))),
-                )
-            } else {
-                self.add_glyphs(scene, gs,
-                    data.iter().map(|&b| get_glyph(b as u16)),
-                )
-            }
-        } else {
-            warn!("no font set");
-            BBox::empty()
-        }
     }
     pub fn advance(&mut self, delta: f32) {
         //debug!("advance by {}", delta);
