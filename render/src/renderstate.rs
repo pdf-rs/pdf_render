@@ -7,6 +7,7 @@ use pdf::primitive::{Primitive, Name, Dictionary};
 use pdf::backend::Backend;
 use pdf::content::{Content, Op, Matrix, Point, Rect, Color, Rgb, Cmyk, Winding, FormXObject};
 use pdf::error::{PdfError, Result};
+use pdf::content::TextDrawAdjusted;
 
 use pathfinder_geometry::{
     vector::{Vector2F, Vector2I},
@@ -27,7 +28,7 @@ use pathfinder_renderer::{
 use super::{
     graphicsstate::{GraphicsState, DrawMode},
     textstate::{TextState},
-    cache::{Cache, Tracer, ItemMap},
+    cache::{Cache, Tracer, ItemMap, TextSpan},
     fontentry::FontEntry,
     BBox,
 };
@@ -271,22 +272,40 @@ impl<'a, B: Backend> RenderState<'a, B> {
             Op::SetTextMatrix { matrix } => self.text_state.set_matrix(matrix.cvt()),
             Op::TextNewline => self.text_state.next_line(),
             Op::TextDraw { ref text } => {
-                let bb = self.text_state.draw_text(self.scene, &mut self.graphics_state, &text.data);
+                let mut text_out = String::with_capacity(text.data.len());
+                let bb = self.text_state.draw_text(self.scene, &mut self.graphics_state, &text.data, &mut text_out);
+
+                if let (Some(bbox), Some(font_entry)) = (bb.0, self.text_state.font_entry.clone()) {
+                    tracer.add_text(TextSpan {
+                        bbox,
+                        text: text_out,
+                        font: font_entry,
+                        font_size: self.text_state.font_size * self.text_state.text_matrix.m11() * self.graphics_state.transform.m11()
+                    });
+                }
                 tracer.single(bb);
             },
             Op::TextDrawAdjusted { ref array } => {
                 let mut bb = BBox::empty();
+                let mut text_out = String::with_capacity(array.len());
                 for arg in array {
                     match arg {
-                        Primitive::String(ref data) => {
-                            let r2 = self.text_state.draw_text(self.scene, &mut self.graphics_state, data.as_bytes());
+                        TextDrawAdjusted::Text(ref data) => {
+                            let r2 = self.text_state.draw_text(self.scene, &mut self.graphics_state, data.as_bytes(), &mut text_out);
                             bb.add_bbox(r2);
                         },
-                        p => {
-                            let offset = p.as_number().expect("wrong argument to TJ");
+                        TextDrawAdjusted::Spacing(offset) => {
                             self.text_state.advance(-0.001 * offset); // because why not PDF…
                         }
                     }
+                }
+                if let (Some(bbox), Some(font_entry)) = (bb.0, self.text_state.font_entry.clone()) {
+                    tracer.add_text(TextSpan {
+                        bbox,
+                        text: text_out,
+                        font: font_entry,
+                        font_size: self.text_state.font_size * self.text_state.text_matrix.m11() * self.graphics_state.transform.m11()
+                    });
                 }
                 tracer.single(bb);
             },
@@ -462,13 +481,13 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color) -> Result<(f32, f32
                 match &**alt {
                     &ColorSpace::DeviceCMYK => {
                         let mut cmyk = [0.0; 4];
-                        f.apply(x, &mut cmyk)?;
+                        f.apply(&[x], &mut cmyk)?;
                         let [c, m, y, k] = cmyk;
                         Ok(cmyk2rgb((c, m, y, k)))
                     },
                     &ColorSpace::DeviceRGB => {
                         let mut rgb = [0.0, 0.0, 0.0];
-                        f.apply(x, &mut rgb)?;
+                        f.apply(&[x], &mut rgb)?;
                         let [r, g, b] = rgb;
                         Ok((r, g, b))
                     },

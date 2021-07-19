@@ -108,7 +108,7 @@ impl Cache {
                 }
             }
         };
-        let entry = Rc::new(FontEntry::build(font::parse(&data), &pdf_font));
+        let entry = Rc::new(FontEntry::build(font::parse(&data), &pdf_font, resolve));
         debug!("is_cid={}", entry.is_cid);
         
         Ok(Some(entry))
@@ -160,10 +160,10 @@ impl Cache {
         let Rect { left, right, top, bottom } = page.media_box().expect("no media box");
         RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top)) * SCALE
     }
-    pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, transform: Transform2F) -> Result<(Scene, ItemMap)> {
+    pub fn render_page<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, transform: Transform2F) -> Result<(Scene, TraceResults)> {
         self.render_page_limited(file, page, transform, None)
     }
-    pub fn render_page_limited<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, transform: Transform2F, limit: Option<usize>) -> Result<(Scene, ItemMap)> {
+    pub fn render_page_limited<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, transform: Transform2F, limit: Option<usize>) -> Result<(Scene, TraceResults)> {
         let mut scene = Scene::new();
         let bounds = self.page_bounds(file, page);
         let view_box = transform * bounds;
@@ -182,7 +182,8 @@ impl Cache {
             nr: 0,
             ops: &contents.operations,
             stash: vec![],
-            map: ItemMap::new()
+            map: ItemMap::new(),
+            text: Vec::new(),
         };
         for (i, op) in contents.operations.iter().enumerate().take(limit.unwrap_or(usize::MAX)) {
             debug!("op {}: {:?}", i, op);
@@ -190,7 +191,11 @@ impl Cache {
             renderstate.draw_op(op, &mut tracer)?;
         }
 
-        Ok((scene, tracer.map))
+        let results = TraceResults {
+            items: tracer.map,
+            text: tracer.text,
+        };
+        Ok((scene, results))
     }
     pub fn report(&self) {
         let mut ops: Vec<_> = self.op_stats.iter().map(|(name, &(count, duration))| (count, name.as_str(), duration)).collect();
@@ -202,11 +207,24 @@ impl Cache {
     }
 }
 
+pub struct TextSpan {
+    pub bbox: RectF,
+    pub font_size: f32,
+    pub font: Rc<FontEntry>,
+    pub text: String,
+}
+
+pub struct TraceResults {
+    pub items: ItemMap,
+    pub text: Vec<TextSpan>,
+}
+
 pub struct Tracer<'a> {
     nr: usize,
     ops: &'a [Op],
     stash: Vec<usize>,
     map: ItemMap,
+    text: Vec<TextSpan>,
 }
 impl<'a> Tracer<'a> {
     pub fn single(&mut self, bb: impl Into<BBox>) {
@@ -224,6 +242,9 @@ impl<'a> Tracer<'a> {
     }
     pub fn nr(&self) -> usize {
         self.nr
+    }
+    pub fn add_text(&mut self, span: TextSpan) {
+        self.text.push(span);
     }
 }
 

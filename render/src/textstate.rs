@@ -65,7 +65,7 @@ impl TextState {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    pub fn draw_text(&mut self, scene: &mut Scene, gs: &mut GraphicsState, data: &[u8]) -> BBox {
+    pub fn draw_text(&mut self, scene: &mut Scene, gs: &mut GraphicsState, data: &[u8], text: &mut String) -> BBox {
         let e = match self.font_entry {
             Some(ref e) => e,
             None => {
@@ -104,10 +104,9 @@ impl TextState {
             0., self.font_size, self.rise
         ) * e.font.font_matrix();
         
-        let mut text = String::with_capacity(32);
         for (cid, gid, is_space) in glyphs {
-            if let Some(c) = std::char::from_u32(cid as u32) {
-                text.push(c);
+            if let Some(part) = e.to_unicode.as_ref().and_then(|m| m.get(cid)) {
+                text.push_str(part);
             }
 
             //debug!("cid {} -> gid {:?}", cid, gid);
@@ -124,7 +123,7 @@ impl TextState {
                 .unwrap_or(0.0);
             
             if is_space {
-                let advance = self.word_space * self.horiz_scale * self.font_size + width;
+                let advance = self.word_space * self.horiz_scale + width;
                 self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
                 continue;
             }
@@ -138,9 +137,10 @@ impl TextState {
             } else {
                 debug!("no glyph for gid {:?}", gid);
             }
-            let advance = self.char_space * self.horiz_scale * self.font_size + width;
+            let advance = self.char_space * self.horiz_scale + width;
             self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
         }
+
         bbox
     }
     pub fn advance(&mut self, delta: f32) {

@@ -46,7 +46,7 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
         ctx.set_bounds(self.cache.page_bounds(&self.file, &page));
 
         let (scene, map) = self.cache.render_page(&self.file, &page, ctx.view_transform()).unwrap();
-        self.map = Some(map);
+        self.map = Some(map.items);
         scene
     }
     fn mouse_input(&mut self, ctx: &mut Context, page: usize, pos: Vector2F, state: ElementState) {
