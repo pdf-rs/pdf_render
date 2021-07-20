@@ -128,7 +128,6 @@ impl Cache {
         let xobject = t!(resolve.get(xobject_ref));
         match *xobject {
             XObject::Image(ref image) => {
-                dbg!(&image.info);
                 let raw_data = t!(image.data());
                 let pixel_count = image.width as usize * image.height as usize;
                 if raw_data.len() % pixel_count != 0 {

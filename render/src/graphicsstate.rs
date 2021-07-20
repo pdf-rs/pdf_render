@@ -80,14 +80,14 @@ impl<'a> GraphicsState<'a> {
         if let Some(ref outer) = self.clip_path {
             let mut clipped_outline = Outline::new();
             for outer_contour in outer.outline().contours() {
-                let clip_polygon = dbg!(outer_contour.points());
-                let mut clipped = dbg!(outline.clone());
+                let clip_polygon = outer_contour.points();
+                let mut clipped = outline.clone();
                 clipped.clip_against_polygon(clip_polygon);
-                clipped_outline.push_outline(dbg!(clipped));
+                clipped_outline.push_outline(clipped);
             }
             outline = clipped_outline;
         }
-        dbg!(&outline);
+        
         let mut clip_path = ClipPath::new(outline);
         clip_path.set_fill_rule(fill_rule);
         self.clip_path = Some(clip_path);
