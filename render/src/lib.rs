@@ -2,7 +2,6 @@
 #[macro_use] extern crate pdf;
 
 use pathfinder_geometry::rect::RectF;
-use pathfinder_content::fill::FillRule;
 mod cache;
 mod fontentry;
 mod graphicsstate;

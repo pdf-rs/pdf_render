@@ -26,6 +26,8 @@ impl FontEntry {
         let encoding = pdf_font.encoding().clone();
         let base_encoding = encoding.as_ref().map(|e| &e.base);
 
+        let mut to_unicode = pdf_font.to_unicode().transpose().unwrap();
+
         let encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
             let cmap = map.iter().enumerate().map(|(cid, &gid)| (cid as u16, GlyphId(gid as u32))).collect();
@@ -44,6 +46,11 @@ impl FontEntry {
                     None
                 }
             };
+            if let (Some(e), false) = (source_encoding, to_unicode.is_some()) {
+                let decoder = e.forward_map().unwrap();
+                to_unicode = Some(ToUnicodeMap::create((0..=255).filter_map(|b| decoder.get(b).map(|c| (b as u16, c.to_string())))));
+            }
+
             let font_encoding = font.encoding();
             debug!("{:?} -> {:?}", source_encoding, font_encoding);
             match (source_encoding, font_encoding) {
@@ -88,7 +95,6 @@ impl FontEntry {
         };
         
         let widths = pdf_font.widths(resolve).unwrap();
-        let to_unicode = pdf_font.to_unicode().transpose().unwrap();
 
         FontEntry {
             font: font,

@@ -1,16 +1,13 @@
-use std::convert::TryInto;
-use std::sync::Arc;
-
 use pdf::file::File as PdfFile;
 use pdf::object::*;
-use pdf::primitive::{Primitive, Name, Dictionary};
+use pdf::primitive::{Primitive, Dictionary};
 use pdf::backend::Backend;
-use pdf::content::{Content, Op, Matrix, Point, Rect, Color, Rgb, Cmyk, Winding, FormXObject};
+use pdf::content::{Op, Matrix, Point, Rect, Color, Rgb, Cmyk, Winding, FormXObject};
 use pdf::error::{PdfError, Result};
 use pdf::content::TextDrawAdjusted;
 
 use pathfinder_geometry::{
-    vector::{Vector2F, Vector2I},
+    vector::{Vector2F},
     rect::RectF, transform2d::Transform2F,
 };
 use pathfinder_content::{
@@ -21,7 +18,7 @@ use pathfinder_content::{
 };
 use pathfinder_color::{ColorU, ColorF};
 use pathfinder_renderer::{
-    scene::{DrawPath, ClipPath, Scene},
+    scene::{DrawPath, Scene},
     paint::{Paint},
 };
 
@@ -29,10 +26,8 @@ use super::{
     graphicsstate::{GraphicsState, DrawMode},
     textstate::{TextState},
     cache::{Cache, Tracer, ItemMap, TextSpan},
-    fontentry::FontEntry,
     BBox,
 };
-use std::rc::Rc;
 
 trait Cvt {
     type Out;
@@ -254,7 +249,9 @@ impl<'a, B: Backend> RenderState<'a, B> {
             Op::Leading { leading } => self.text_state.leading = leading,
             Op::TextFont { ref name, size } => {
                 let font = match self.resources.fonts.get(name) {
-                    Some(&font_ref) => self.cache.get_font(font_ref, self.file)?,
+                    Some(&font_ref) => {
+                        self.cache.get_font(font_ref, self.file)?
+                    },
                     None => None
                 };
                 if let Some(e) = font {

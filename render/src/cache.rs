@@ -23,14 +23,14 @@ use pathfinder_renderer::{
 };
 use pathfinder_content::{
     outline::Outline,
-    pattern::{Pattern, Image},
+    pattern::{Image},
 };
 use font::{self};
 use std::rc::Rc;
 
 use super::{BBox, STANDARD_FONTS, fontentry::FontEntry, renderstate::RenderState};
 
-use instant::{Duration, Instant};
+use instant::{Duration};
 
 const SCALE: f32 = 25.4 / 72.;
 
