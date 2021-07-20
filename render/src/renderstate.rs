@@ -454,7 +454,7 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color) -> Result<(f32, f32
                 let g = args[0].as_number()?;
                 Ok(gray2rgb(g))
             }
-            ColorSpace::DeviceRGB | ColorSpace::Icc(_) => {
+            ColorSpace::DeviceRGB => {
                 if args.len() != 3 {
                     return Err(PdfError::Other { msg: format!("expected 3 color arguments, got {:?}", args) });
                 }
@@ -472,6 +472,13 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color) -> Result<(f32, f32
                 let y = args[2].as_number()?;
                 let k = args[3].as_number()?;
                 Ok(cmyk2rgb((c, m, y, k)))
+            }
+            ColorSpace::Icc(ref icc) => {
+                match icc.info.alternate {
+                    Some(ref alt) => *cs = &**alt,
+                    None => return Err(PdfError::Other { msg: format!("ICC profile without alternate color space") }),
+                }
+                convert_color(cs, color)
             }
             ColorSpace::Separation(ref _name, ref alt, ref f) => {
                 if args.len() != 1 {
