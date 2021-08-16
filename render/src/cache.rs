@@ -183,6 +183,7 @@ impl Cache {
             stash: vec![],
             map: ItemMap::new(),
             text: Vec::new(),
+            images: Vec::new(),
         };
         for (i, op) in contents.operations.iter().enumerate().take(limit.unwrap_or(usize::MAX)) {
             debug!("op {}: {:?}", i, op);
@@ -193,6 +194,7 @@ impl Cache {
         let results = TraceResults {
             items: tracer.map,
             text: tracer.text,
+            images: tracer.images,
         };
         Ok((scene, results))
     }
@@ -213,9 +215,16 @@ pub struct TextSpan {
     pub text: String,
 }
 
+pub struct ImageObject {
+    pub data: Arc<Vec<ColorU>>,
+    pub size: (u32, u32),
+    pub rect: RectF,
+}
+
 pub struct TraceResults {
     pub items: ItemMap,
     pub text: Vec<TextSpan>,
+    pub images: Vec<ImageObject>
 }
 
 pub struct Tracer<'a> {
@@ -224,6 +233,7 @@ pub struct Tracer<'a> {
     stash: Vec<usize>,
     map: ItemMap,
     text: Vec<TextSpan>,
+    images: Vec<ImageObject>,
 }
 impl<'a> Tracer<'a> {
     pub fn single(&mut self, bb: impl Into<BBox>) {
@@ -244,6 +254,13 @@ impl<'a> Tracer<'a> {
     }
     pub fn add_text(&mut self, span: TextSpan) {
         self.text.push(span);
+    }
+    pub fn add_image(&mut self, image: &Image, rect: RectF) {
+        self.images.push(ImageObject {
+            data: image.pixels().clone(),
+            size: (image.size().x() as u32, image.size().y() as u32),
+            rect
+        })
     }
 }
 

@@ -310,8 +310,13 @@ impl<'a, B: Backend> RenderState<'a, B> {
                 let &xobject_ref = self.resources.xobjects.get(name).unwrap();
                 let xobject = self.file.get(xobject_ref)?;
                 match *xobject {
-                    XObject::Image(ref image) => {
+                    XObject::Image(_) => {
                         let image = self.cache.get_image(xobject_ref, self.file)?.clone();
+                        tracer.add_image(&image,
+                            self.graphics_state.transform * RectF::new(
+                                Vector2F::new(0.0, 0.0), Vector2F::new(1.0, 1.0)
+                            )
+                        );
                         self.draw_image(image, tracer)?;
                     }
                     XObject::Form(ref content) => {
