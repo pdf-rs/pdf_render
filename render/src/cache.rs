@@ -176,16 +176,17 @@ impl Cache {
         let resources = t!(page.resources());
 
         let contents = try_opt!(page.contents.as_ref());
+        let ops = contents.operations(file)?;
         let mut renderstate = RenderState::new(&mut scene, self, file, &resources, root_transformation);
         let mut tracer = Tracer {
             nr: 0,
-            ops: &contents.operations,
+            ops,
             stash: vec![],
             map: ItemMap::new(),
             text: Vec::new(),
             images: Vec::new(),
         };
-        for (i, op) in contents.operations.iter().enumerate().take(limit.unwrap_or(usize::MAX)) {
+        for (i, op) in ops.iter().enumerate().take(limit.unwrap_or(usize::MAX)) {
             debug!("op {}: {:?}", i, op);
             tracer.nr = i;
             renderstate.draw_op(op, &mut tracer)?;
