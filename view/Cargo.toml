@@ -10,7 +10,8 @@ unstable = []
 [dependencies.pdf]
 git = "https://github.com/pdf-rs/pdf"
 default-features=false 
-features = ["dump"]
+jpeg2k = ["pdf_render/jpeg2k"]
+features = ["dump", "jpeg2k"]
 
 [dependencies.pdf_render]
 path = "../render"
@@ -46,6 +47,7 @@ getrandom = { version = "0.2.3", features = ["js"]}
 
 [target.'cfg(unix)'.dependencies]
 env_logger = "0.8"
+pdf_render = { path = "../render", features = ["jpeg2k" ]}
 
 [lib]
 crate-type = ["cdylib", "rlib"]
