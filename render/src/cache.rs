@@ -35,7 +35,7 @@ use instant::{Duration};
 const SCALE: f32 = 25.4 / 72.;
 
 pub type FontMap = HashMap<Ref<PdfFont>, Option<Rc<FontEntry>>>;
-pub type ImageMap = HashMap<Ref<XObject>, Image>;
+pub type ImageMap = HashMap<Ref<XObject>, Result<Image>>;
 pub struct Cache {
     // shared mapping of fontname -> font
     fonts: FontMap,
@@ -114,12 +114,12 @@ impl Cache {
         Ok(Some(entry))
     }
 
-    pub fn get_image(&mut self, xobject_ref: Ref<XObject>, resolve: &impl Resolve) -> Result<&Image> {
+    pub fn get_image(&mut self, xobject_ref: Ref<XObject>, resolve: &impl Resolve) -> &Result<Image> {
         match self.images.entry(xobject_ref) {
-            Entry::Occupied(e) => Ok(e.into_mut()),
+            Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(e) => {
-                let im = Self::load_image(xobject_ref, resolve)?;
-                Ok(e.insert(im))
+                let im = Self::load_image(xobject_ref, resolve);
+                e.insert(im)
             }
         }
     }
@@ -143,12 +143,28 @@ impl Cache {
                 };
                 let alpha = alpha.iter().cloned().chain(std::iter::repeat(255));
 
-                let data = match raw_data.len() / pixel_count {
-                    1 => raw_data.iter().zip(alpha).map(|(&l, a)| ColorU { r: l, g: l, b: l, a }).collect(),
-                    3 => raw_data.chunks_exact(3).zip(alpha).map(|(c, a)| ColorU { r: c[0], g: c[1], b: c[2], a }).collect(),
-                    4 => cmyk2color(raw_data, alpha),
-                    n => panic!("unimplemented {} bytes/pixel", n)
+
+                let data = match image.color_space {
+                    Some(ColorSpace::DeviceRGB) => {
+                        assert_eq!(raw_data.len(), pixel_count * 3);
+                        raw_data.chunks_exact(3).zip(alpha).map(|(c, a)| ColorU { r: c[0], g: c[1], b: c[2], a }).collect()
+                    }
+                    Some(ColorSpace::DeviceCMYK) => {
+                        assert_eq!(raw_data.len(), pixel_count * 4);
+                        cmyk2color(raw_data, alpha)
+                    }
+                    Some(ColorSpace::DeviceN { ref tint, .. }) => {
+                        let components = raw_data.len() / pixel_count;
+                        assert_eq!(components, tint.input_dim());
+                        dbg!(tint.output_dim());
+
+                        for c in raw_data.chunks_exact(components) {}
+                        panic!()
+                    }
+                    //Some(ColorSpace::Indexed(ref base, ref lookup)) => panic!(),
+                    ref cs => panic!("cs={:?}", cs),
                 };
+
                 let size = Vector2I::new(image.width as _, image.height as _);
                 Ok(Image::new(size, Arc::new(data)))
             }

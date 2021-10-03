@@ -311,13 +311,29 @@ impl<'a, B: Backend> RenderState<'a, B> {
                 let xobject = self.file.get(xobject_ref)?;
                 match *xobject {
                     XObject::Image(_) => {
-                        let image = self.cache.get_image(xobject_ref, self.file)?.clone();
-                        tracer.add_image(&image,
-                            self.graphics_state.transform * RectF::new(
-                                Vector2F::new(0.0, 0.0), Vector2F::new(1.0, 1.0)
-                            )
-                        );
-                        self.draw_image(image, tracer)?;
+                        if let &Ok(ref image) = self.cache.get_image(xobject_ref, self.file) {
+                            tracer.add_image(&image,
+                                self.graphics_state.transform * RectF::new(
+                                    Vector2F::new(0.0, 0.0), Vector2F::new(1.0, 1.0)
+                                )
+                            );
+                            let size = image.size();
+                            let size_f = size.to_f32();
+                            let outline = Outline::from_rect(self.graphics_state.transform * RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));
+                            let im_tr = self.graphics_state.transform
+                                * Transform2F::from_scale(Vector2F::new(1.0 / size_f.x(), -1.0 / size_f.y()))
+                                * Transform2F::from_translation(Vector2F::new(0.0, -size_f.y()));
+                            let mut pattern = Pattern::from_image(image.clone());
+                            pattern.apply_transform(im_tr);
+                            let paint = Paint::from_pattern(pattern);
+                            let paint_id = self.scene.push_paint(&paint);
+                            let mut draw_path = DrawPath::new(outline, paint_id);
+                            draw_path.set_clip_path(self.graphics_state.clip_path_id(self.scene));
+                            self.scene.push_draw_path(draw_path);
+                    
+                            tracer.single(self.graphics_state.transform * RectF::new(Vector2F::default(), size_f));
+                            
+                        }
                     }
                     XObject::Form(ref content) => {
                         self.draw_form(content, tracer)?;
@@ -366,26 +382,6 @@ impl<'a, B: Backend> RenderState<'a, B> {
         self.current_outline.clear();
         tracer.clear();
     }
-    fn draw_image(&mut self, image: Image, tracer: &mut Tracer) -> Result<()> {
-        let size = image.size();
-        let size_f = size.to_f32();
-        let outline = Outline::from_rect(self.graphics_state.transform * RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));
-        let im_tr = self.graphics_state.transform
-            * Transform2F::from_scale(Vector2F::new(1.0 / size_f.x(), -1.0 / size_f.y()))
-            * Transform2F::from_translation(Vector2F::new(0.0, -size_f.y()));
-        let mut pattern = Pattern::from_image(image);
-        pattern.apply_transform(im_tr);
-        let paint = Paint::from_pattern(pattern);
-        let paint_id = self.scene.push_paint(&paint);
-        let mut draw_path = DrawPath::new(outline, paint_id);
-        draw_path.set_clip_path(self.graphics_state.clip_path_id(self.scene));
-        self.scene.push_draw_path(draw_path);
-
-        tracer.single(self.graphics_state.transform * RectF::new(Vector2F::default(), size_f));
-        
-        Ok(())
-    }
-
     fn draw_form(&mut self, form: &FormXObject, tracer: &mut Tracer) -> Result<()> {
         let graphics_state = GraphicsState {
             stroke_alpha: self.graphics_state.stroke_color.a(),
@@ -474,6 +470,14 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color) -> Result<(f32, f32
                 let y = args[2].as_number()?;
                 let k = args[3].as_number()?;
                 Ok(cmyk2rgb((c, m, y, k)))
+            }
+            ColorSpace::DeviceN { ref names, ref alt, ref tint, ref attr } => {
+                //dbg!(args);
+                //assert_eq!(args.len(), tint.input_dim());
+                //dbg!(tint.output_dim());
+                //panic!();
+                //tint.apply(args)
+                unimplemented!("DeviceN colorspace")
             }
             ColorSpace::Icc(ref icc) => {
                 match icc.info.alternate {
