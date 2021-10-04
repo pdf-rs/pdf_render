@@ -153,16 +153,17 @@ impl Cache {
                         assert_eq!(raw_data.len(), pixel_count * 4);
                         cmyk2color(raw_data, alpha)
                     }
-                    Some(ColorSpace::DeviceN { ref tint, .. }) => {
+                    Some(ColorSpace::DeviceN { ref tint, .. }) => unimplemented!("DeviceN colorspace"),
+                    /*{
                         let components = raw_data.len() / pixel_count;
                         assert_eq!(components, tint.input_dim());
                         dbg!(tint.output_dim());
 
                         for c in raw_data.chunks_exact(components) {}
                         panic!()
-                    }
+                    }*/
                     //Some(ColorSpace::Indexed(ref base, ref lookup)) => panic!(),
-                    ref cs => panic!("cs={:?}", cs),
+                    ref cs => unimplemented!("cs={:?}", cs),
                 };
 
                 let size = Vector2I::new(image.width as _, image.height as _);
