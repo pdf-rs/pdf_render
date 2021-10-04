@@ -153,6 +153,10 @@ impl Cache {
                         assert_eq!(raw_data.len(), pixel_count * 4);
                         cmyk2color(raw_data, alpha)
                     }
+                    Some(ColorSpace::DeviceGray) => {
+                        assert_eq!(raw_data.len(), pixel_count);
+                        raw_data.iter().zip(alpha).map(|(&g, a)| ColorU { r: g, g: g, b: g, a }).collect()
+                    }
                     Some(ColorSpace::DeviceN { ref tint, .. }) => unimplemented!("DeviceN colorspace"),
                     /*{
                         let components = raw_data.len() / pixel_count;
