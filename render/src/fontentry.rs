@@ -3,6 +3,7 @@ use font::{self, Font, GlyphId};
 use pdf::encoding::BaseEncoding;
 use pdf::font::{Font as PdfFont, Widths, ToUnicodeMap};
 use pdf::object::Resolve;
+use pdf::error::PdfError;
 use pdf_encoding::{Encoding};
 
 
@@ -21,12 +22,12 @@ pub struct FontEntry {
     pub to_unicode: Option<ToUnicodeMap>,
 }
 impl FontEntry {
-    pub fn build(font: Box<dyn Font>, pdf_font: &PdfFont, resolve: &impl Resolve) -> FontEntry {
+    pub fn build(font: Box<dyn Font>, pdf_font: &PdfFont, resolve: &impl Resolve) -> Result<FontEntry, PdfError> {
         let mut is_cid = pdf_font.is_cid();
         let encoding = pdf_font.encoding().clone();
         let base_encoding = encoding.as_ref().map(|e| &e.base);
 
-        let mut to_unicode = pdf_font.to_unicode().transpose().unwrap();
+        let mut to_unicode = pdf_font.to_unicode().transpose()?;
 
         let encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
@@ -47,7 +48,7 @@ impl FontEntry {
                 }
             };
             if let (Some(e), false) = (source_encoding, to_unicode.is_some()) {
-                let decoder = e.forward_map().unwrap();
+                let decoder = e.forward_map().ok_or(PdfError::Other { msg: format!("no forward map on encoding {:?}", e)})?;
                 to_unicode = Some(ToUnicodeMap::create((0..=255).filter_map(|b| decoder.get(b).map(|c| (b as u16, c.to_string())))));
             }
 
@@ -94,15 +95,15 @@ impl FontEntry {
             }
         };
         
-        let widths = pdf_font.widths(resolve).unwrap();
+        let widths = pdf_font.widths(resolve)?;
 
-        FontEntry {
+        Ok(FontEntry {
             font: font,
             encoding,
             is_cid,
             widths,
             name: pdf_font.name.clone(),
             to_unicode,
-        }
+        })
     }
 }

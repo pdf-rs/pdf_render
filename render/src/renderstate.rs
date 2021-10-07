@@ -307,7 +307,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
                 tracer.single(bb);
             },
             Op::XObject { ref name } => {
-                let &xobject_ref = self.resources.xobjects.get(name).unwrap();
+                let &xobject_ref = self.resources.xobjects.get(name).ok_or(PdfError::NotFound { word: name.into()})?;
                 let xobject = self.file.get(xobject_ref)?;
                 match *xobject {
                     XObject::Image(_) => {
