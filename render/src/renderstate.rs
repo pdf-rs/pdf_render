@@ -523,10 +523,10 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color) -> Result<(f32, f32
                         let cvt = |b: u8| b as f32;
                         Ok(cmyk2rgb((cvt(c[0]), cvt(c[1]), cvt(c[2]), cvt(c[3]))))
                     }
-                    _ => unimplemented!()
+                    ref base => unimplemented!("Indexed colorspace with base {:?}", base)
                 }
             }
-            ColorSpace::Other(_) => unimplemented!()
+            ColorSpace::Other(ref p) => unimplemented!("Other Color space {:?}", p)
         }
     }
 }

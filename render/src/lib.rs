@@ -1,6 +1,21 @@
 #[macro_use] extern crate log;
 #[macro_use] extern crate pdf;
 
+macro_rules! assert_eq {
+    ($a:expr, $b:expr) => {
+        if $a != $b {
+            return Err(PdfError::Other { msg: format!("{} ({}) != {} ({})", stringify!($a), $a, stringify!($b), $b)});
+        }
+        
+    };
+}
+
+macro_rules! unimplemented {
+    ($msg:tt $(, $arg:expr)*) => {
+        return Err(PdfError::Other { msg: format!(concat!("Unimplemented: ", $msg) $(, $arg)*) })
+    };
+}
+
 use pathfinder_geometry::rect::RectF;
 mod cache;
 mod fontentry;

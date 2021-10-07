@@ -34,14 +34,6 @@ use instant::{Duration};
 
 const SCALE: f32 = 25.4 / 72.;
 
-macro_rules! assert_eq {
-    ($a:expr, $b:expr) => {
-        if $a != $b {
-            return Err(PdfError::Other { msg: format!("{} ({}) != {} ({})", stringify!($a), $a, stringify!($b), $b)});
-        }
-        
-    };
-}
 
 pub type FontMap = HashMap<Ref<PdfFont>, Option<Rc<FontEntry>>>;
 pub type ImageMap = HashMap<Ref<XObject>, Result<Image>>;
