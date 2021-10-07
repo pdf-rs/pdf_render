@@ -109,7 +109,7 @@ impl Cache {
                 }
             }
         };
-        let entry = Rc::new(FontEntry::build(font::parse(&data), &pdf_font, resolve));
+        let entry = Rc::new(FontEntry::build(font::parse(&data), &pdf_font, resolve)?);
         debug!("is_cid={}", entry.is_cid);
         
         Ok(Some(entry))
