@@ -109,7 +109,9 @@ impl Cache {
                 }
             }
         };
-        let entry = Rc::new(FontEntry::build(font::parse(&data), &pdf_font, resolve)?);
+
+        let font = font::parse(&data).map_err(|e| PdfError::Other { msg: format!("Font Error: {:?}", e) })?;
+        let entry = Rc::new(FontEntry::build(font, &pdf_font, resolve)?);
         debug!("is_cid={}", entry.is_cid);
         
         Ok(Some(entry))
