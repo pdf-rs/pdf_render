@@ -269,11 +269,15 @@ impl<'a, B: Backend> RenderState<'a, B> {
             Op::SetTextMatrix { matrix } => self.text_state.set_matrix(matrix.cvt()),
             Op::TextNewline => self.text_state.next_line(),
             Op::TextDraw { ref text } => {
+                let origin = self.text_state.text_matrix.translation();
                 let mut text_out = String::with_capacity(text.data.len());
                 let bb = self.text_state.draw_text(self.scene, &mut self.graphics_state, &text.data, &mut text_out);
 
+                let width = self.text_state.text_matrix.m13() - origin.x();
+                let height = self.text_state.font_size * self.text_state.text_matrix.m22();
                 if let (Some(bbox), Some(font_entry)) = (bb.0, self.text_state.font_entry.clone()) {
                     tracer.add_text(TextSpan {
+                        rect: self.graphics_state.transform * RectF::new(origin, Vector2F::new(width, height)),
                         bbox,
                         text: text_out,
                         font: font_entry,
@@ -283,6 +287,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
                 tracer.single(bb);
             },
             Op::TextDrawAdjusted { ref array } => {
+                let origin = self.text_state.text_matrix.translation();
                 let mut bb = BBox::empty();
                 let mut text_out = String::with_capacity(array.len());
                 for arg in array {
@@ -296,8 +301,12 @@ impl<'a, B: Backend> RenderState<'a, B> {
                         }
                     }
                 }
+                let width = self.text_state.text_matrix.m13() - origin.x();
+                let height = self.text_state.font_size * self.text_state.text_matrix.m22();
+
                 if let (Some(bbox), Some(font_entry)) = (bb.0, self.text_state.font_entry.clone()) {
                     tracer.add_text(TextSpan {
+                        rect: self.graphics_state.transform * RectF::new(origin, Vector2F::new(width, height)),
                         bbox,
                         text: text_out,
                         font: font_entry,

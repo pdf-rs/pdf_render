@@ -234,6 +234,9 @@ impl Cache {
 }
 
 pub struct TextSpan {
+    // A rect with the origin at the baseline, a height of 1em and width that corresponds to the advance width.
+    pub rect: RectF,
+    // Bounding box of the rendered outline
     pub bbox: RectF,
     pub font_size: f32,
     pub font: Rc<FontEntry>,
