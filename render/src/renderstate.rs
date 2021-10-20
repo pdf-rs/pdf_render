@@ -269,51 +269,29 @@ impl<'a, B: Backend> RenderState<'a, B> {
             Op::SetTextMatrix { matrix } => self.text_state.set_matrix(matrix.cvt()),
             Op::TextNewline => self.text_state.next_line(),
             Op::TextDraw { ref text } => {
-                let origin = self.text_state.text_matrix.translation();
-                let mut text_out = String::with_capacity(text.data.len());
-                let bb = self.text_state.draw_text(self.scene, &mut self.graphics_state, &text.data, &mut text_out);
-
-                let width = self.text_state.text_matrix.m13() - origin.x();
-                let height = self.text_state.font_size * self.text_state.text_matrix.m22();
-                if let (Some(bbox), Some(font_entry)) = (bb.0, self.text_state.font_entry.clone()) {
-                    tracer.add_text(TextSpan {
-                        rect: self.graphics_state.transform * RectF::new(origin, Vector2F::new(width, height)),
-                        bbox,
-                        text: text_out,
-                        font: font_entry,
-                        font_size: self.text_state.font_size * self.text_state.text_matrix.m11() * self.graphics_state.transform.m11()
-                    });
-                }
-                tracer.single(bb);
+                self.trace_text(tracer, |scene, text_state, graphics_state| {
+                    let mut text_out = String::with_capacity(text.data.len());
+                    let bb = text_state.draw_text(scene, graphics_state, &text.data, &mut text_out);
+                    (bb, text_out)
+                });
             },
             Op::TextDrawAdjusted { ref array } => {
-                let origin = self.text_state.text_matrix.translation();
-                let mut bb = BBox::empty();
-                let mut text_out = String::with_capacity(array.len());
-                for arg in array {
-                    match arg {
-                        TextDrawAdjusted::Text(ref data) => {
-                            let r2 = self.text_state.draw_text(self.scene, &mut self.graphics_state, data.as_bytes(), &mut text_out);
-                            bb.add_bbox(r2);
-                        },
-                        TextDrawAdjusted::Spacing(offset) => {
-                            self.text_state.advance(-0.001 * offset); // because why not PDF…
+                self.trace_text(tracer, |scene, text_state, graphics_state| {
+                    let mut bb = BBox::empty();
+                    let mut text_out = String::with_capacity(array.len());
+                    for arg in array {
+                        match arg {
+                            TextDrawAdjusted::Text(ref data) => {
+                                let r2 = text_state.draw_text(scene, graphics_state, data.as_bytes(), &mut text_out);
+                                bb.add_bbox(r2);
+                            },
+                            TextDrawAdjusted::Spacing(offset) => {
+                                text_state.advance(-0.001 * offset); // because why not PDF…
+                            }
                         }
                     }
-                }
-                let width = self.text_state.text_matrix.m13() - origin.x();
-                let height = self.text_state.font_size * self.text_state.text_matrix.m22();
-
-                if let (Some(bbox), Some(font_entry)) = (bb.0, self.text_state.font_entry.clone()) {
-                    tracer.add_text(TextSpan {
-                        rect: self.graphics_state.transform * RectF::new(origin, Vector2F::new(width, height)),
-                        bbox,
-                        text: text_out,
-                        font: font_entry,
-                        font_size: self.text_state.font_size * self.text_state.text_matrix.m11() * self.graphics_state.transform.m11()
-                    });
-                }
-                tracer.single(bb);
+                    (bb, text_out)
+                });
             },
             Op::XObject { ref name } => {
                 let &xobject_ref = self.resources.xobjects.get(name).ok_or(PdfError::NotFound { word: name.into()})?;
@@ -380,6 +358,25 @@ impl<'a, B: Backend> RenderState<'a, B> {
             self.current_outline.push_contour(self.current_contour.clone());
             self.current_contour.clear();
         }
+    }
+    fn trace_text(&mut self, tracer: &mut Tracer, inner: impl Fn(&mut Scene, &mut TextState, &mut GraphicsState) -> (BBox, String) ) {
+        let origin = self.text_state.text_matrix.translation();
+
+        let (bb, text) = inner(self.scene, &mut self.text_state, &mut self.graphics_state);
+
+        let width = self.text_state.text_matrix.m13() - origin.x();
+        let height = self.text_state.font_size * self.text_state.text_matrix.m22();
+        let font_size = (self.text_state.font_size * self.text_state.text_matrix.m22() * self.graphics_state.transform.m22()).abs();
+        if let (Some(bbox), Some(font_entry)) = (bb.0, self.text_state.font_entry.clone()) {
+            tracer.add_text(TextSpan {
+                rect: self.graphics_state.transform * RectF::new(origin, Vector2F::new(width, height)),
+                bbox,
+                text,
+                font: font_entry,
+                font_size
+            });
+        }
+        tracer.single(bb);
     }
     fn trace_outline(&self, tracer: &mut Tracer) {
         tracer.multi(self.graphics_state.transform * self.current_outline.bounds());
