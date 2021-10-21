@@ -451,14 +451,14 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color) -> Result<(f32, f32
             Ok(cmyk2rgb(cmyk.cvt()))
         }
         Color::Other(ref args) => match **cs {
-            ColorSpace::DeviceGray => {
+            ColorSpace::DeviceGray | ColorSpace::CalGray(_) => {
                 if args.len() != 1 {
                     return Err(PdfError::Other { msg: format!("expected 1 color arguments, got {:?}", args) });
                 }
                 let g = args[0].as_number()?;
                 Ok(gray2rgb(g))
             }
-            ColorSpace::DeviceRGB => {
+            ColorSpace::DeviceRGB | ColorSpace::CalRGB(_) => {
                 if args.len() != 3 {
                     return Err(PdfError::Other { msg: format!("expected 3 color arguments, got {:?}", args) });
                 }
@@ -467,7 +467,7 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color) -> Result<(f32, f32
                 let b = args[2].as_number()?;
                 Ok((r, g, b))
             }
-            ColorSpace::DeviceCMYK => {
+            ColorSpace::DeviceCMYK | ColorSpace::CalCMYK(_) => {
                 if args.len() != 4 {
                     return Err(PdfError::Other { msg: format!("expected 4 color arguments, got {:?}", args) });
                 }
