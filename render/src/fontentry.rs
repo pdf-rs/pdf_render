@@ -96,13 +96,13 @@ impl FontEntry {
         };
         
         let widths = pdf_font.widths(resolve)?;
-
+        let name = pdf_font.name.as_ref().ok_or_else(|| PdfError::Other { msg: "font has no name".into() })?.clone();
         Ok(FontEntry {
             font: font,
             encoding,
             is_cid,
             widths,
-            name: pdf_font.name.clone(),
+            name,
             to_unicode,
         })
     }

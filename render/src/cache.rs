@@ -86,24 +86,26 @@ impl Cache {
         let data: Cow<[u8]> = match pdf_font.embedded_data() {
             Some(Ok(data)) => {
                 if let Some(path) = std::env::var_os("PDF_FONTS") {
-                    let file = PathBuf::from(path).join(&pdf_font.name);
-                    fs::write(file, data).expect("can't write font");
+                    if let Some(ref name) = pdf_font.name {
+                        let file = PathBuf::from(path).join(name);
+                        fs::write(file, data).expect("can't write font");
+                    }
                 }
                 data.into()
             }
             Some(Err(e)) => return Err(e),
             None => {
-                match STANDARD_FONTS.iter().find(|&&(name, _)| pdf_font.name == name) {
+                match STANDARD_FONTS.iter().find(|&&(name, _)| pdf_font.name.as_ref().map(|s| s == name).unwrap_or(false)) {
                     Some(&(_, file_name)) => {
                         if let Ok(data) = std::fs::read(standard_fonts.join(file_name)) {
                             data.into()
                         } else {
-                            warn!("can't open {} for {}", file_name, pdf_font.name);
+                            warn!("can't open {} for {:?}", file_name, pdf_font.name);
                             return Ok(None);
                         }
                     }
                     None => {
-                        warn!("no font for {}", pdf_font.name);
+                        warn!("no font for {:?}", pdf_font.name);
                         return Ok(None);
                     }
                 }
