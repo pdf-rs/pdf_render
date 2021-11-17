@@ -382,15 +382,14 @@ impl<'a, B: Backend> RenderState<'a, B> {
         self.graphics_state.draw(self.scene, &self.current_outline, mode, fill_rule);
         self.trace_outline(tracer);
         let fill = || Some(self.graphics_state.fill_color.to_u8());
-        let stroke = || Some((self.graphics_state.stroke_color.to_u8(), self.graphics_state.stroke_style.line_width));
+        let stroke = || Some((self.graphics_state.stroke_color.to_u8(), self.graphics_state.stroke_style.line_width * self.graphics_state.transform.m11()));
         let (fill, stroke) = match mode {
             DrawMode::Fill => (fill(), None),
             DrawMode::FillStroke => (fill(), stroke()),
             DrawMode::Stroke => (None, stroke())
         };
         tracer.add_path(VectorPath {
-            outline: self.current_outline.clone(),
-            transform: self.graphics_state.transform,
+            outline: self.current_outline.clone().transformed(&self.graphics_state.transform),
             fill, stroke
         });
         self.current_outline.clear();

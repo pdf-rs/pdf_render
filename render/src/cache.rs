@@ -260,9 +260,9 @@ pub struct TraceResults {
     pub paths: Vec<VectorPath>
 }
 
+#[derive(Debug)]
 pub struct VectorPath {
     pub outline: Outline,
-    pub transform: Transform2F,
     pub fill: Option<ColorU>,
     pub stroke: Option<(ColorU, f32)>,
 }
