@@ -25,7 +25,7 @@ use pathfinder_renderer::{
 use super::{
     graphicsstate::{GraphicsState, DrawMode},
     textstate::{TextState},
-    cache::{Cache, Tracer, ItemMap, TextSpan},
+    cache::{Cache, Tracer, ItemMap, TextSpan, VectorPath},
     BBox,
 };
 
@@ -164,11 +164,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
                 self.current_outline.clear();
             }
             Op::Stroke => {
-                self.flush();
-                self.graphics_state.draw(self.scene, &self.current_outline, DrawMode::Stroke, FillRule::Winding);
-                self.trace_outline(tracer);
-                self.current_outline.clear();
-                tracer.clear();
+                self.draw(DrawMode::FillStroke, FillRule::Winding, tracer);
             },
             Op::FillAndStroke { winding } => {
                 self.draw(DrawMode::FillStroke, winding.cvt(), tracer);
@@ -385,6 +381,18 @@ impl<'a, B: Backend> RenderState<'a, B> {
         self.flush();
         self.graphics_state.draw(self.scene, &self.current_outline, mode, fill_rule);
         self.trace_outline(tracer);
+        let fill = || Some(self.graphics_state.fill_color.to_u8());
+        let stroke = || Some((self.graphics_state.stroke_color.to_u8(), self.graphics_state.stroke_style.line_width));
+        let (fill, stroke) = match mode {
+            DrawMode::Fill => (fill(), None),
+            DrawMode::FillStroke => (fill(), stroke()),
+            DrawMode::Stroke => (None, stroke())
+        };
+        tracer.add_path(VectorPath {
+            outline: self.current_outline.clone(),
+            transform: self.graphics_state.transform,
+            fill, stroke
+        });
         self.current_outline.clear();
         tracer.clear();
     }

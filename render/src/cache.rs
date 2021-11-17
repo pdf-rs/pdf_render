@@ -211,6 +211,7 @@ impl Cache {
             map: ItemMap::new(),
             text: Vec::new(),
             images: Vec::new(),
+            vectors: Vec::new(),
         };
         for (i, op) in ops.iter().enumerate().take(limit.unwrap_or(usize::MAX)) {
             debug!("op {}: {:?}", i, op);
@@ -222,6 +223,7 @@ impl Cache {
             items: tracer.map,
             text: tracer.text,
             images: tracer.images,
+            paths: tracer.vectors,
         };
         Ok((scene, results))
     }
@@ -254,7 +256,15 @@ pub struct ImageObject {
 pub struct TraceResults {
     pub items: ItemMap,
     pub text: Vec<TextSpan>,
-    pub images: Vec<ImageObject>
+    pub images: Vec<ImageObject>,
+    pub paths: Vec<VectorPath>
+}
+
+pub struct VectorPath {
+    pub outline: Outline,
+    pub transform: Transform2F,
+    pub fill: Option<ColorU>,
+    pub stroke: Option<(ColorU, f32)>,
 }
 
 pub struct Tracer<'a> {
@@ -264,6 +274,7 @@ pub struct Tracer<'a> {
     map: ItemMap,
     text: Vec<TextSpan>,
     images: Vec<ImageObject>,
+    vectors: Vec<VectorPath>,
 }
 impl<'a> Tracer<'a> {
     pub fn single(&mut self, bb: impl Into<BBox>) {
@@ -291,6 +302,9 @@ impl<'a> Tracer<'a> {
             size: (image.size().x() as u32, image.size().y() as u32),
             rect
         })
+    }
+    pub fn add_path(&mut self, path: VectorPath) {
+        self.vectors.push(path);
     }
 }
 
