@@ -209,9 +209,7 @@ impl Cache {
             ops,
             stash: vec![],
             map: ItemMap::new(),
-            text: Vec::new(),
-            images: Vec::new(),
-            vectors: Vec::new(),
+            draw: Vec::new(),
         };
         for (i, op) in ops.iter().enumerate().take(limit.unwrap_or(usize::MAX)) {
             debug!("op {}: {:?}", i, op);
@@ -221,9 +219,7 @@ impl Cache {
 
         let results = TraceResults {
             items: tracer.map,
-            text: tracer.text,
-            images: tracer.images,
-            paths: tracer.vectors,
+            draw: tracer.draw,
         };
         Ok((scene, results))
     }
@@ -252,12 +248,44 @@ pub struct ImageObject {
     pub size: (u32, u32),
     pub rect: RectF,
 }
+impl ImageObject {
+    pub fn rgba_data(&self) -> &[u8] {
+        let ptr: *const ColorU = self.data.as_ptr();
+        let len = self.data.len();
+        unsafe {
+            std::slice::from_raw_parts(ptr.cast(), 4 * len)
+        }
+    }
+}
 
 pub struct TraceResults {
     pub items: ItemMap,
-    pub text: Vec<TextSpan>,
-    pub images: Vec<ImageObject>,
-    pub paths: Vec<VectorPath>
+    pub draw: Vec<DrawItem>,
+}
+impl TraceResults {
+    pub fn texts(&self) -> impl Iterator<Item=&TextSpan> {
+        self.draw.iter().filter_map(|i| match i {
+            DrawItem::Text(t) => Some(t),
+            _ => None
+        })
+    }
+    pub fn images(&self) -> impl Iterator<Item=&ImageObject> {
+        self.draw.iter().filter_map(|i| match i {
+            DrawItem::Image(i) => Some(i),
+            _ => None
+        })
+    }
+    pub fn paths(&self) -> impl Iterator<Item=&VectorPath> {
+        self.draw.iter().filter_map(|i| match i {
+            DrawItem::Vector(p) => Some(p),
+            _ => None
+        })
+    }
+}
+pub enum DrawItem {
+    Vector(VectorPath),
+    Image(ImageObject),
+    Text(TextSpan),
 }
 
 #[derive(Debug)]
@@ -272,9 +300,7 @@ pub struct Tracer<'a> {
     ops: &'a [Op],
     stash: Vec<usize>,
     map: ItemMap,
-    text: Vec<TextSpan>,
-    images: Vec<ImageObject>,
-    vectors: Vec<VectorPath>,
+    draw: Vec<DrawItem>,
 }
 impl<'a> Tracer<'a> {
     pub fn single(&mut self, bb: impl Into<BBox>) {
@@ -294,17 +320,17 @@ impl<'a> Tracer<'a> {
         self.nr
     }
     pub fn add_text(&mut self, span: TextSpan) {
-        self.text.push(span);
+        self.draw.push(DrawItem::Text(span));
     }
     pub fn add_image(&mut self, image: &Image, rect: RectF) {
-        self.images.push(ImageObject {
+        self.draw.push(DrawItem::Image(ImageObject {
             data: image.pixels().clone(),
             size: (image.size().x() as u32, image.size().y() as u32),
             rect
-        })
+        }));
     }
     pub fn add_path(&mut self, path: VectorPath) {
-        self.vectors.push(path);
+        self.draw.push(DrawItem::Vector(path));
     }
 }
 

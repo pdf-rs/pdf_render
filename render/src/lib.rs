@@ -23,7 +23,7 @@ mod graphicsstate;
 mod renderstate;
 mod textstate;
 
-pub use cache::{Cache, ItemMap, TraceItem, TextSpan, ImageObject, VectorPath};
+pub use cache::{Cache, ItemMap, TraceItem, TextSpan, ImageObject, VectorPath, TraceResults, DrawItem};
 
 pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
     ("Courier", "CourierStd.otf"),
