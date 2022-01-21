@@ -32,7 +32,7 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
     fn title(&self) -> String {
         self.file.trailer.info_dict.as_ref()
             .and_then(|info| info.get("Title"))
-            .and_then(|p| p.as_str().map(|s| s.into_owned()))
+            .and_then(|p| p.to_string().ok())
             .unwrap_or_else(|| "PDF View".into())
     }
     fn init(&mut self, ctx: &mut Context, sender: Emitter<Self::Event>) {
