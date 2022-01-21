@@ -221,11 +221,11 @@ impl<'a, B: Backend> RenderState<'a, B> {
                 }
             },
             Op::StrokeColor { ref color } => {
-                let color = convert_color(&mut self.graphics_state.stroke_color_space, color)?;
+                let color = convert_color(&mut self.graphics_state.stroke_color_space, color).unwrap_or_default();
                 self.graphics_state.set_stroke_color(color);
             },
             Op::FillColor { ref color } => {
-                let color = convert_color(&mut self.graphics_state.fill_color_space, color)?;
+                let color = convert_color(&mut self.graphics_state.fill_color_space, color).unwrap_or_default();
                 self.graphics_state.set_fill_color(color);
             },
             Op::FillColorSpace { ref name } => {
@@ -337,6 +337,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
             "DeviceGray" => return Ok(&ColorSpace::DeviceGray),
             "DeviceRGB" => return Ok(&ColorSpace::DeviceRGB),
             "DeviceCMYK" => return Ok(&ColorSpace::DeviceCMYK),
+            "Pattern" => return Ok(&ColorSpace::Pattern),
             _ => {}
         }
         match self.resources.color_spaces.get(name) {
@@ -504,7 +505,13 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color) -> Result<(f32, f32
                     return Err(PdfError::Other { msg: format!("expected 1 color arguments, got {:?}", args) });
                 }
                 let x = args[0].as_number()?;
-                match &**alt {
+                let cs = match **alt {
+                    ColorSpace::Icc(ref info) => &**info.alternate.as_ref().ok_or(
+                        PdfError::Other { msg: format!("no alternate color space in ICC profile {:?}", info) }
+                    )?,
+                    _ => cs,
+                };
+                match cs {
                     &ColorSpace::DeviceCMYK => {
                         let mut cmyk = [0.0; 4];
                         f.apply(&[x], &mut cmyk)?;
@@ -517,7 +524,7 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color) -> Result<(f32, f32
                         let [r, g, b] = rgb;
                         Ok((r, g, b))
                     },
-                    c => unimplemented!("{:?}", c)
+                    c => unimplemented!("Separation(alt={:?})", c)
                 }
             }
             ColorSpace::Indexed(ref cs, ref lut) => {
@@ -538,6 +545,10 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color) -> Result<(f32, f32
                     }
                     ref base => unimplemented!("Indexed colorspace with base {:?}", base)
                 }
+            }
+            ColorSpace::Pattern => {
+                let name = args[0].as_name()?;
+                unimplemented!("Pattern {}", name)
             }
             ColorSpace::Other(ref p) => unimplemented!("Other Color space {:?}", p)
         }
