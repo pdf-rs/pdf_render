@@ -21,12 +21,12 @@ git = "https://github.com/s3bk/pathfinder_view"
 features = ["icon"]
 
 [dependencies]
-pathfinder_renderer = { git = "https://github.com/s3bk/pathfinder" }
-pathfinder_color = { git = "https://github.com/s3bk/pathfinder" }
-pathfinder_geometry = { git = "https://github.com/s3bk/pathfinder" }
-pathfinder_resources = { git = "https://github.com/s3bk/pathfinder" }
-pathfinder_content = { git = "https://github.com/s3bk/pathfinder" }
-pathfinder_export = { git = "https://github.com/s3bk/pathfinder" }
+pathfinder_renderer = { git = "https://github.com/servo/pathfinder" }
+pathfinder_color = { git = "https://github.com/servo/pathfinder" }
+pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
+pathfinder_resources = { git = "https://github.com/servo/pathfinder" }
+pathfinder_content = { git = "https://github.com/servo/pathfinder" }
+pathfinder_export = { git = "https://github.com/servo/pathfinder" }
 log = "0.4"
 structopt = "0.3"
 font = { git = "https://github.com/pdf-rs/font" }
