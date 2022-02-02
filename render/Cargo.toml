@@ -2,7 +2,7 @@
 name = "pdf_render"
 version = "0.1.0"
 authors = ["Sebastian Köln <s3bk@protonmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [features]
 unstable = []
@@ -25,7 +25,7 @@ pathfinder_resources = { git = "https://github.com/servo/pathfinder" }
 pathfinder_content = { git = "https://github.com/servo/pathfinder" }
 log = "0.4"
 font = { git = "https://github.com/pdf-rs/font" }
-pdf_encoding = "0.1"
+pdf_encoding = "0.3"
 itertools = "*"
 image = "0.23"
 instant = "*"

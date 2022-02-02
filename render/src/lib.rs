@@ -24,6 +24,7 @@ mod renderstate;
 mod textstate;
 
 pub use cache::{Cache, ItemMap, TraceItem, TextSpan, ImageObject, VectorPath, TraceResults, DrawItem};
+pub use fontentry::FontEntry;
 
 pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
     ("Courier", "CourierStd.otf"),

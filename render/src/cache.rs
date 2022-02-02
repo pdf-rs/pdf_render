@@ -80,6 +80,9 @@ impl Cache {
             standard_fonts,
         }
     }
+    pub fn clear_image_cache(&mut self) {
+        self.images.clear();
+    }
     pub fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Rc<FontEntry>>> {
         match self.fonts.entry(font_ref) {
             Entry::Occupied(e) => Ok(e.get().clone()),
@@ -122,8 +125,19 @@ impl Cache {
             }
         };
 
-        let font = font::parse(&data).map_err(|e| PdfError::Other { msg: format!("Font Error: {:?}", e) })?;
-        let entry = Rc::new(FontEntry::build(font, &pdf_font, resolve)?);
+        let font = font::parse(&data).map_err(|e| {
+            let name = format!("font_{}", pdf_font.name.as_ref().map(|s| s.as_str()).unwrap_or("unnamed"));
+            std::fs::write(&name, &data).unwrap();
+            println!("font dumped in {}", name);
+            PdfError::Other { msg: format!("Font Error: {:?}", e) }
+        })?;
+        let entry = match FontEntry::build(font, pdf_font, resolve) {
+            Ok(e) => Rc::new(e),
+            Err(e) => {
+                info!("Failed to build FontEntry: {:?}", e);
+                return Ok(None);
+            }
+        };
         debug!("is_cid={}", entry.is_cid);
         
         Ok(Some(entry))
@@ -134,6 +148,9 @@ impl Cache {
             Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(e) => {
                 let im = Self::load_image(xobject_ref, resolve);
+                if let Err(ref e) = im {
+                    dbg!(e);
+                }
                 e.insert(im)
             }
         }
@@ -143,7 +160,7 @@ impl Cache {
         let xobject = t!(resolve.get(xobject_ref));
         match *xobject {
             XObject::Image(ref image) => {
-                let raw_data = t!(image.data());
+                let raw_data = t!(image.decode());
                 let pixel_count = image.width as usize * image.height as usize;
                 if raw_data.len() % pixel_count != 0 {
                     warn!("invalid data length {} bytes for {} pixels", raw_data.len(), pixel_count);
@@ -158,31 +175,82 @@ impl Cache {
                 };
                 let alpha = alpha.iter().cloned().chain(std::iter::repeat(255));
 
+                fn resolve_cs(cs: &ColorSpace) -> Option<&ColorSpace> {
+                    match cs {
+                        ColorSpace::Icc(icc) => icc.info.info.alternate.as_ref().map(|b| &**b),
+                        _ => Some(cs),
+                    }
+                }
+                let cs = image.color_space.as_ref().and_then(resolve_cs);
+                
+                let data_ratio = raw_data.len() / pixel_count;
+                let data = match data_ratio {
+                    1 => match cs {
+                        Some(ColorSpace::DeviceGray) => {
+                            assert_eq!(raw_data.len(), pixel_count);
+                            raw_data.iter().zip(alpha).map(|(&g, a)| ColorU { r: g, g: g, b: g, a }).collect()
+                        }
+                        Some(ColorSpace::Indexed(ref base, ref lookup)) => {
+                            match resolve_cs(&**base) {
+                                Some(ColorSpace::DeviceRGB) => {
+                                    raw_data.iter().zip(alpha).map(|(&b, a)| {
+                                        let off = b as usize * 3;
+                                        let c = lookup.get(off .. off + 3).unwrap_or(&[0; 3]);
+                                        ColorU { r: c[0], g: c[1], b: c[2], a }
+                                    }).collect()
+                                }
+                                Some(ColorSpace::DeviceCMYK) => {
+                                    raw_data.iter().zip(alpha).map(|(&b, a)| {
+                                        let off = b as usize * 4;
+                                        let c = lookup.get(off .. off + 4).unwrap_or(&[0; 4]);
+                                        cmyk2color(c.try_into().unwrap(), a)
+                                    }).collect()
+                                }
+                                _ => unimplemented!("base cs={:?}", base),
+                            }
+                        }
+                        Some(ColorSpace::Separation(_, ref alt, ref func)) => {
+                            let mut lut = [[0u8; 3]; 256];
 
-                let data = match image.color_space {
-                    Some(ColorSpace::DeviceRGB) => {
-                        assert_eq!(raw_data.len(), pixel_count * 3);
+                            match resolve_cs(alt) {
+                                Some(ColorSpace::DeviceRGB) => {
+                                    for (i, rgb) in lut.iter_mut().enumerate() {
+                                        let mut c = [0.; 3];
+                                        func.apply(&[i as f32 / 255.], &mut c)?;
+                                        let [r, g, b] = c;
+                                        *rgb = [(r * 255.) as u8, (g * 255.) as u8, (b * 255.) as u8];
+                                    }
+                                }
+                                Some(ColorSpace::DeviceCMYK) => {
+                                    for (i, rgb) in lut.iter_mut().enumerate() {
+                                        let mut c = [0.; 4];
+                                        func.apply(&[i as f32 / 255.], &mut c)?;
+                                        let [c, m, y, k] = c;
+                                        *rgb = cmyk2rgb([(c * 255.) as u8, (m * 255.) as u8, (y * 255.) as u8, (k * 255.) as u8]);
+                                    }
+                                }
+                                _ => unimplemented!("alt cs={:?}", alt),
+                            }
+                            raw_data.iter().zip(alpha).map(|(&b, a)| {
+                                let [r, g, b] = lut[b as usize];
+                                ColorU { r, g, b, a }
+                            }).collect()
+                        }
+                        _ => unimplemented!("cs={:?}", cs),
+                    }
+                    3 => {
+                        if !matches!(cs, Some(ColorSpace::DeviceRGB)) {
+                            info!("image has data/pixel ratio of 3, but colorspace is {:?}", cs);
+                        }
                         raw_data.chunks_exact(3).zip(alpha).map(|(c, a)| ColorU { r: c[0], g: c[1], b: c[2], a }).collect()
                     }
-                    Some(ColorSpace::DeviceCMYK) => {
-                        assert_eq!(raw_data.len(), pixel_count * 4);
-                        cmyk2color(raw_data, alpha)
+                    4 => {
+                        if !matches!(cs, Some(ColorSpace::DeviceCMYK)) {
+                            info!("image has data/pixel ratio of 4, but colorspace is {:?}", cs);
+                        }
+                        cmyk2color_arr(&raw_data, alpha)
                     }
-                    Some(ColorSpace::DeviceGray) => {
-                        assert_eq!(raw_data.len(), pixel_count);
-                        raw_data.iter().zip(alpha).map(|(&g, a)| ColorU { r: g, g: g, b: g, a }).collect()
-                    }
-                    Some(ColorSpace::DeviceN { ref tint, .. }) => unimplemented!("DeviceN colorspace"),
-                    /*{
-                        let components = raw_data.len() / pixel_count;
-                        assert_eq!(components, tint.input_dim());
-                        dbg!(tint.output_dim());
-
-                        for c in raw_data.chunks_exact(components) {}
-                        panic!()
-                    }*/
-                    //Some(ColorSpace::Indexed(ref base, ref lookup)) => panic!(),
-                    ref cs => unimplemented!("cs={:?}", cs),
+                    _ => unimplemented!("data/pixel ratio {}", data_ratio),
                 };
 
                 let size = Vector2I::new(image.width as _, image.height as _);
@@ -201,13 +269,22 @@ impl Cache {
     pub fn render_page_limited<B: Backend>(&mut self, file: &PdfFile<B>, page: &Page, transform: Transform2F, limit: Option<usize>) -> Result<(Scene, TraceResults)> {
         let mut scene = Scene::new();
         let bounds = self.page_bounds(file, page);
-        let view_box = transform * bounds;
+        let rotate = Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
+        let br = rotate * bounds;
+        let translate = Transform2F::from_translation(Vector2F::new(
+            -br.min_x().min(br.max_x()),
+            -br.min_y().min(br.max_y()),
+        ));
+        let view_box = transform * translate * rotate * bounds;
         scene.set_view_box(view_box);
         
         let white = scene.push_paint(&Paint::from_color(ColorU::white()));
         scene.push_draw_path(DrawPath::new(Outline::from_rect(view_box), white));
 
-        let root_transformation = transform * Transform2F::row_major(SCALE, 0.0, -bounds.min_x(), 0.0, -SCALE, bounds.max_y());
+        let root_transformation = transform
+            * translate
+            * rotate
+            * Transform2F::row_major(SCALE, 0.0, -bounds.min_x(), 0.0, -SCALE, bounds.max_y());
         
         let resources = t!(page.resources());
 
@@ -251,12 +328,14 @@ pub struct TextSpan {
     pub font_size: f32,
     pub font: Rc<FontEntry>,
     pub text: String,
+    pub color: ColorU,
 }
 
 pub struct ImageObject {
     pub data: Arc<Vec<ColorU>>,
     pub size: (u32, u32),
     pub rect: RectF,
+    pub id: PlainRef,
 }
 impl ImageObject {
     pub fn rgba_data(&self) -> &[u8] {
@@ -332,11 +411,12 @@ impl<'a> Tracer<'a> {
     pub fn add_text(&mut self, span: TextSpan) {
         self.draw.push(DrawItem::Text(span));
     }
-    pub fn add_image(&mut self, image: &Image, rect: RectF) {
+    pub fn add_image(&mut self, image: &Image, rect: RectF, id: PlainRef) {
         self.draw.push(DrawItem::Image(ImageObject {
             data: image.pixels().clone(),
             size: (image.size().x() as u32, image.size().y() as u32),
-            rect
+            rect,
+            id
         }));
     }
     pub fn add_path(&mut self, path: VectorPath) {
@@ -350,16 +430,25 @@ pub enum TraceItem {
     Multi(Vec<(usize, Op)>)
 }
 
-fn cmyk2color(data: &[u8], alpha: impl Iterator<Item=u8>) -> Vec<ColorU> {
+fn cmyk2rgb([c, m, y, k]: [u8; 4]) -> [u8; 3] {
+    let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
+    let r = 255 - c.saturating_add(k);
+    let g = 255 - m.saturating_add(k);
+    let b = 255 - y.saturating_add(k);
+    [r, g, b]
+}
+fn cmyk2color([c, m, y, k]: [u8; 4], a: u8) -> ColorU {
+    let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
+    let r = 255 - c.saturating_add(k);
+    let g = 255 - m.saturating_add(k);
+    let b = 255 - y.saturating_add(k);
+    ColorU::new(r, g, b, a)
+}
+
+fn cmyk2color_arr(data: &[u8], alpha: impl Iterator<Item=u8>) -> Vec<ColorU> {
     data.chunks_exact(4).zip(alpha).map(|(c, a)| {
         let mut buf = [0; 4];
         buf.copy_from_slice(c);
-
-        let [c, m, y, k] = buf;
-        let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
-        let r = 255 - c.saturating_add(k);
-        let g = 255 - m.saturating_add(k);
-        let b = 255 - y.saturating_add(k);
-        ColorU::new(r, g, b, a)
+        cmyk2color(buf, a)
     }).collect()
 }

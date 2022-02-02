@@ -221,11 +221,11 @@ impl<'a, B: Backend> RenderState<'a, B> {
                 }
             },
             Op::StrokeColor { ref color } => {
-                let color = convert_color(&mut self.graphics_state.stroke_color_space, color).unwrap_or_default();
+                let color = t!(convert_color(&mut self.graphics_state.stroke_color_space, color, &self.resources));
                 self.graphics_state.set_stroke_color(color);
             },
             Op::FillColor { ref color } => {
-                let color = convert_color(&mut self.graphics_state.fill_color_space, color).unwrap_or_default();
+                let color = t!(convert_color(&mut self.graphics_state.fill_color_space, color, &self.resources));
                 self.graphics_state.set_fill_color(color);
             },
             Op::FillColorSpace { ref name } => {
@@ -265,29 +265,32 @@ impl<'a, B: Backend> RenderState<'a, B> {
             Op::SetTextMatrix { matrix } => self.text_state.set_matrix(matrix.cvt()),
             Op::TextNewline => self.text_state.next_line(),
             Op::TextDraw { ref text } => {
+                let mut bb = BBox::empty();
                 self.trace_text(tracer, |scene, text_state, graphics_state| {
                     let mut text_out = String::with_capacity(text.data.len());
-                    let bb = text_state.draw_text(scene, graphics_state, &text.data, &mut text_out);
+                    bb = text_state.draw_text(scene, graphics_state, &text.data, &mut text_out);
                     (bb, text_out)
                 });
+                tracer.single(bb);
             },
             Op::TextDrawAdjusted { ref array } => {
-                self.trace_text(tracer, |scene, text_state, graphics_state| {
-                    let mut bb = BBox::empty();
-                    let mut text_out = String::with_capacity(array.len());
-                    for arg in array {
-                        match arg {
-                            TextDrawAdjusted::Text(ref data) => {
+                let mut bb = BBox::empty();
+                for arg in array {
+                    match *arg {
+                        TextDrawAdjusted::Text(ref data) => {
+                            let mut text_out = String::with_capacity(array.len());
+                            self.trace_text(tracer, |scene, text_state, graphics_state| {
                                 let r2 = text_state.draw_text(scene, graphics_state, data.as_bytes(), &mut text_out);
                                 bb.add_bbox(r2);
-                            },
-                            TextDrawAdjusted::Spacing(offset) => {
-                                text_state.advance(-0.001 * offset); // because why not PDF…
-                            }
+                                (r2, text_out)
+                            });
+                        },
+                        TextDrawAdjusted::Spacing(offset) => {
+                            self.text_state.advance(-0.001 * offset); // because why not PDF…
                         }
                     }
-                    (bb, text_out)
-                });
+                }
+                tracer.single(bb);
             },
             Op::XObject { ref name } => {
                 let &xobject_ref = self.resources.xobjects.get(name).ok_or(PdfError::NotFound { word: name.into()})?;
@@ -298,7 +301,8 @@ impl<'a, B: Backend> RenderState<'a, B> {
                             tracer.add_image(&image,
                                 self.graphics_state.transform * RectF::new(
                                     Vector2F::new(0.0, 0.0), Vector2F::new(1.0, 1.0)
-                                )
+                                ),
+                                xobject_ref.get_inner()
                             );
                             let size = image.size();
                             let size_f = size.to_f32();
@@ -356,24 +360,27 @@ impl<'a, B: Backend> RenderState<'a, B> {
             self.current_contour.clear();
         }
     }
-    fn trace_text(&mut self, tracer: &mut Tracer, inner: impl Fn(&mut Scene, &mut TextState, &mut GraphicsState) -> (BBox, String) ) {
+    fn trace_text(&mut self, tracer: &mut Tracer, inner: impl FnOnce(&mut Scene, &mut TextState, &mut GraphicsState) -> (BBox, String) ) {
         let origin = self.text_state.text_matrix.translation();
 
         let (bb, text) = inner(self.scene, &mut self.text_state, &mut self.graphics_state);
 
-        let width = self.text_state.text_matrix.m13() - origin.x();
-        let height = self.text_state.font_size * self.text_state.text_matrix.m22();
-        let font_size = (self.text_state.font_size * self.text_state.text_matrix.m22() * self.graphics_state.transform.m22()).abs();
+        let tr = self.graphics_state.transform * self.text_state.text_matrix;
+        let width = (self.graphics_state.transform.matrix * (self.text_state.text_matrix.translation() - origin)).x();
+        let height = self.text_state.font_size * tr.m22();
+        let font_size = (self.text_state.font_size * tr.m22()).abs();
         if let (Some(bbox), Some(font_entry)) = (bb.0, self.text_state.font_entry.clone()) {
+            let p1 = self.graphics_state.transform * origin;
+            let p2 = p1 + Vector2F::new(width, height);
             tracer.add_text(TextSpan {
-                rect: self.graphics_state.transform * RectF::new(origin, Vector2F::new(width, height)),
+                rect: RectF::from_points(p1.min(p2), p1.max(p2)),
                 bbox,
                 text,
                 font: font_entry,
-                font_size
+                font_size,
+                color: self.graphics_state.fill_color.to_u8(),
             });
         }
-        tracer.single(bb);
     }
     fn trace_outline(&self, tracer: &mut Tracer) {
         tracer.multi(self.graphics_state.transform * self.current_outline.bounds());
@@ -444,7 +451,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
     }
 }
 
-fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color) -> Result<(f32, f32, f32)> {
+fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resources) -> Result<(f32, f32, f32)> {
     match *color {
         Color::Gray(g) => {
             *cs = &ColorSpace::DeviceGray;
@@ -458,99 +465,124 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color) -> Result<(f32, f32
             *cs = &ColorSpace::DeviceCMYK;
             Ok(cmyk2rgb(cmyk.cvt()))
         }
-        Color::Other(ref args) => match **cs {
-            ColorSpace::DeviceGray | ColorSpace::CalGray(_) => {
-                if args.len() != 1 {
-                    return Err(PdfError::Other { msg: format!("expected 1 color arguments, got {:?}", args) });
-                }
-                let g = args[0].as_number()?;
-                Ok(gray2rgb(g))
-            }
-            ColorSpace::DeviceRGB | ColorSpace::CalRGB(_) => {
-                if args.len() != 3 {
-                    return Err(PdfError::Other { msg: format!("expected 3 color arguments, got {:?}", args) });
-                }
-                let r = args[0].as_number()?;
-                let g = args[1].as_number()?;
-                let b = args[2].as_number()?;
-                Ok((r, g, b))
-            }
-            ColorSpace::DeviceCMYK | ColorSpace::CalCMYK(_) => {
-                if args.len() != 4 {
-                    return Err(PdfError::Other { msg: format!("expected 4 color arguments, got {:?}", args) });
-                }
-                let c = args[0].as_number()?;
-                let m = args[1].as_number()?;
-                let y = args[2].as_number()?;
-                let k = args[3].as_number()?;
-                Ok(cmyk2rgb((c, m, y, k)))
-            }
-            ColorSpace::DeviceN { ref names, ref alt, ref tint, ref attr } => {
-                //dbg!(args);
-                //assert_eq!(args.len(), tint.input_dim());
-                //dbg!(tint.output_dim());
-                //panic!();
-                //tint.apply(args)
-                unimplemented!("DeviceN colorspace")
-            }
-            ColorSpace::Icc(ref icc) => {
-                match icc.info.alternate {
-                    Some(ref alt) => *cs = &**alt,
-                    None => return Err(PdfError::Other { msg: format!("ICC profile without alternate color space") }),
-                }
-                convert_color(cs, color)
-            }
-            ColorSpace::Separation(ref _name, ref alt, ref f) => {
-                if args.len() != 1 {
-                    return Err(PdfError::Other { msg: format!("expected 1 color arguments, got {:?}", args) });
-                }
-                let x = args[0].as_number()?;
-                let cs = match **alt {
-                    ColorSpace::Icc(ref info) => &**info.alternate.as_ref().ok_or(
-                        PdfError::Other { msg: format!("no alternate color space in ICC profile {:?}", info) }
-                    )?,
-                    _ => cs,
-                };
-                match cs {
-                    &ColorSpace::DeviceCMYK => {
-                        let mut cmyk = [0.0; 4];
-                        f.apply(&[x], &mut cmyk)?;
-                        let [c, m, y, k] = cmyk;
-                        Ok(cmyk2rgb((c, m, y, k)))
-                    },
-                    &ColorSpace::DeviceRGB => {
-                        let mut rgb = [0.0, 0.0, 0.0];
-                        f.apply(&[x], &mut rgb)?;
-                        let [r, g, b] = rgb;
-                        Ok((r, g, b))
-                    },
-                    c => unimplemented!("Separation(alt={:?})", c)
-                }
-            }
-            ColorSpace::Indexed(ref cs, ref lut) => {
-                if args.len() != 1 {
-                    return Err(PdfError::Other { msg: format!("expected 1 color arguments, got {:?}", args) });
-                }
-                let i = args[0].as_integer()?;
-                match **cs {
-                    ColorSpace::DeviceRGB => {
-                        let c = &lut[3 * i as usize ..];
-                        let cvt = |b: u8| b as f32;
-                        Ok((cvt(c[0]), cvt(c[1]), cvt(c[2])))
+        Color::Other(ref args) => {
+            let cs = match **cs {
+                ColorSpace::Icc(ref icc) => {
+                    match icc.info.alternate {
+                        Some(ref alt) => alt,
+                        None => return Err(PdfError::Other { msg: format!("ICC profile without alternate color space") }),
                     }
-                    ColorSpace::DeviceCMYK => {
-                        let c = &lut[4 * i as usize ..];
-                        let cvt = |b: u8| b as f32;
-                        Ok(cmyk2rgb((cvt(c[0]), cvt(c[1]), cvt(c[2]), cvt(c[3]))))
-                    }
-                    ref base => unimplemented!("Indexed colorspace with base {:?}", base)
                 }
+                _ => &**cs
+            };
+            
+            match *cs {
+                ColorSpace::Icc(_) => return Err(PdfError::Other { msg: format!("nested ICC color space") }),
+                ColorSpace::DeviceGray | ColorSpace::CalGray(_) => {
+                    if args.len() != 1 {
+                        return Err(PdfError::Other { msg: format!("expected 1 color arguments, got {:?}", args) });
+                    }
+                    let g = args[0].as_number()?;
+                    Ok(gray2rgb(g))
+                }
+                ColorSpace::DeviceRGB | ColorSpace::CalRGB(_) => {
+                    if args.len() != 3 {
+                        return Err(PdfError::Other { msg: format!("expected 3 color arguments, got {:?}", args) });
+                    }
+                    let r = args[0].as_number()?;
+                    let g = args[1].as_number()?;
+                    let b = args[2].as_number()?;
+                    Ok((r, g, b))
+                }
+                ColorSpace::DeviceCMYK | ColorSpace::CalCMYK(_) => {
+                    if args.len() != 4 {
+                        return Err(PdfError::Other { msg: format!("expected 4 color arguments, got {:?}", args) });
+                    }
+                    let c = args[0].as_number()?;
+                    let m = args[1].as_number()?;
+                    let y = args[2].as_number()?;
+                    let k = args[3].as_number()?;
+                    Ok(cmyk2rgb((c, m, y, k)))
+                }
+                ColorSpace::DeviceN { ref names, ref alt, ref tint, ref attr } => {
+                    println!("args={:?}", args);
+                    assert_eq!(args.len(), tint.input_dim());
+                    //panic!();
+                    let mut input = vec![0.; args.len()];
+                    for (i, a) in input.iter_mut().zip(args.iter()) {
+                        *i = a.as_number()?;
+                    }
+                    let mut out = vec![0.0; tint.output_dim()];
+                    tint.apply(&input, &mut out)?;
+
+                    let alt = match **alt {
+                        ColorSpace::Icc(ref icc) => icc.info.alternate.as_ref().map(|b| &**b),
+                        ref a => Some(a),
+                    };
+                    match alt {
+                        Some(ColorSpace::DeviceGray) => Ok((out[0], out[0], out[0])),
+                        Some(ColorSpace::DeviceRGB) => {
+                            Ok((out[0], out[1], out[2]))
+                        }
+                        Some(ColorSpace::DeviceCMYK) => {
+                            Ok(cmyk2rgb((out[0], out[1], out[2], out[3])))
+                        }
+                        _ => unimplemented!("DeviceN colorspace")
+                    }
+                }
+                ColorSpace::Separation(ref _name, ref alt, ref f) => {
+                    if args.len() != 1 {
+                        return Err(PdfError::Other { msg: format!("expected 1 color arguments, got {:?}", args) });
+                    }
+                    let x = args[0].as_number()?;
+                    let cs = match **alt {
+                        ColorSpace::Icc(ref info) => &**info.alternate.as_ref().ok_or(
+                            PdfError::Other { msg: format!("no alternate color space in ICC profile {:?}", info) }
+                        )?,
+                        _ => alt,
+                    };
+                    match cs {
+                        &ColorSpace::DeviceCMYK => {
+                            let mut cmyk = [0.0; 4];
+                            f.apply(&[x], &mut cmyk)?;
+                            let [c, m, y, k] = cmyk;
+                            Ok(cmyk2rgb((c, m, y, k)))
+                        },
+                        &ColorSpace::DeviceRGB => {
+                            let mut rgb = [0.0, 0.0, 0.0];
+                            f.apply(&[x], &mut rgb)?;
+                            let [r, g, b] = rgb;
+                            Ok((r, g, b))
+                        },
+                        c => unimplemented!("Separation(alt={:?})", c)
+                    }
+                }
+                ColorSpace::Indexed(ref cs, ref lut) => {
+                    if args.len() != 1 {
+                        return Err(PdfError::Other { msg: format!("expected 1 color arguments, got {:?}", args) });
+                    }
+                    let i = args[0].as_integer()?;
+                    match **cs {
+                        ColorSpace::DeviceRGB => {
+                            let c = &lut[3 * i as usize ..];
+                            let cvt = |b: u8| b as f32;
+                            Ok((cvt(c[0]), cvt(c[1]), cvt(c[2])))
+                        }
+                        ColorSpace::DeviceCMYK => {
+                            let c = &lut[4 * i as usize ..];
+                            let cvt = |b: u8| b as f32;
+                            Ok(cmyk2rgb((cvt(c[0]), cvt(c[1]), cvt(c[2]), cvt(c[3]))))
+                        }
+                        ref base => unimplemented!("Indexed colorspace with base {:?}", base)
+                    }
+                }
+                ColorSpace::Pattern => {
+                    let name = args[0].as_name()?;
+                    dbg!(&resources.pattern);
+                    unimplemented!("Pattern {}", name)
+                }
+                ColorSpace::Other(ref p) => unimplemented!("Other Color space {:?}", p)
             }
-            ColorSpace::Pattern => {
-                let name = args[0].as_name()?;
-                unimplemented!("Pattern {}", name)
-            }
-            ColorSpace::Other(ref p) => unimplemented!("Other Color space {:?}", p)
         }
     }
 }
