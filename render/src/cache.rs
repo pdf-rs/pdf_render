@@ -43,6 +43,7 @@ pub struct Cache {
     op_stats: HashMap<String, (usize, Duration)>,
     standard_fonts: PathBuf,
     images: ImageMap,
+    data_dir: Option<PathBuf>,
 }
 #[derive(Debug)]
 pub struct ItemMap(Vec<(RectF, TraceItem)>);
@@ -78,10 +79,14 @@ impl Cache {
             op_stats: HashMap::new(),
             images: HashMap::new(),
             standard_fonts,
+            data_dir: None,
         }
     }
     pub fn clear_image_cache(&mut self) {
         self.images.clear();
+    }
+    pub fn set_data_dir(&mut self, dir: &Path) {
+        self.data_dir = Some(dir.into());
     }
     pub fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Rc<FontEntry>>> {
         match self.fonts.entry(font_ref) {
@@ -147,7 +152,7 @@ impl Cache {
         match self.images.entry(xobject_ref) {
             Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(e) => {
-                let im = Self::load_image(xobject_ref, resolve);
+                let im = Self::load_image(xobject_ref, resolve, &self.data_dir);
                 if let Err(ref e) = im {
                     dbg!(e);
                 }
@@ -156,11 +161,24 @@ impl Cache {
         }
     }
 
-    fn load_image(xobject_ref: Ref<XObject>, resolve: &impl Resolve) -> Result<Image> {
+    fn load_image(xobject_ref: Ref<XObject>, resolve: &impl Resolve, data: &Option<PathBuf>) -> Result<Image> {
         let xobject = t!(resolve.get(xobject_ref));
         match *xobject {
             XObject::Image(ref image) => {
-                let raw_data = t!(image.decode());
+                let raw_data = match image.decode() {
+                    Ok(i) => i,
+                    Err(e) => {
+                        if let Some(ref dir) = data {
+                            std::fs::create_dir_all(dir).unwrap();
+                            let data_name = format!("img_{}.data", xobject_ref.get_inner().id);
+                            std::fs::write(dir.join(data_name), image.raw_data()).unwrap();
+                            let info = format!("{:?}", image.info);
+                            let info_name = format!("img_{}.txt", xobject_ref.get_inner().id);
+                            std::fs::write(dir.join(info_name), &info).unwrap();
+                        }
+                        return Err(e);
+                    }
+                };
                 let pixel_count = image.width as usize * image.height as usize;
                 if raw_data.len() % pixel_count != 0 {
                     warn!("invalid data length {} bytes for {} pixels", raw_data.len(), pixel_count);
@@ -323,12 +341,18 @@ impl Cache {
 pub struct TextSpan {
     // A rect with the origin at the baseline, a height of 1em and width that corresponds to the advance width.
     pub rect: RectF,
+
+    // width in textspace units (before applying transform)
+    pub width: f32,
     // Bounding box of the rendered outline
     pub bbox: RectF,
     pub font_size: f32,
     pub font: Rc<FontEntry>,
     pub text: String,
     pub color: ColorU,
+
+    // apply this transform to a text draw in at the origin with the given width and font-size
+    pub transform: Transform2F,
 }
 
 pub struct ImageObject {

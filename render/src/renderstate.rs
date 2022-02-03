@@ -8,7 +8,7 @@ use pdf::content::TextDrawAdjusted;
 
 use pathfinder_geometry::{
     vector::{Vector2F},
-    rect::RectF, transform2d::Transform2F,
+    rect::RectF, transform2d::{Transform2F, Matrix2x2F},
 };
 use pathfinder_content::{
     fill::FillRule,
@@ -268,8 +268,9 @@ impl<'a, B: Backend> RenderState<'a, B> {
                 let mut bb = BBox::empty();
                 self.trace_text(tracer, |scene, text_state, graphics_state| {
                     let mut text_out = String::with_capacity(text.data.len());
-                    bb = text_state.draw_text(scene, graphics_state, &text.data, &mut text_out);
-                    (bb, text_out)
+                    let (b, w) = text_state.draw_text(scene, graphics_state, &text.data, &mut text_out);
+                    bb = b;
+                    (bb, text_out, w)
                 });
                 tracer.single(bb);
             },
@@ -280,9 +281,9 @@ impl<'a, B: Backend> RenderState<'a, B> {
                         TextDrawAdjusted::Text(ref data) => {
                             let mut text_out = String::with_capacity(array.len());
                             self.trace_text(tracer, |scene, text_state, graphics_state| {
-                                let r2 = text_state.draw_text(scene, graphics_state, data.as_bytes(), &mut text_out);
+                                let (r2, w) = text_state.draw_text(scene, graphics_state, data.as_bytes(), &mut text_out);
                                 bb.add_bbox(r2);
-                                (r2, text_out)
+                                (r2, text_out, w)
                             });
                         },
                         TextDrawAdjusted::Spacing(offset) => {
@@ -360,25 +361,27 @@ impl<'a, B: Backend> RenderState<'a, B> {
             self.current_contour.clear();
         }
     }
-    fn trace_text(&mut self, tracer: &mut Tracer, inner: impl FnOnce(&mut Scene, &mut TextState, &mut GraphicsState) -> (BBox, String) ) {
-        let origin = self.text_state.text_matrix.translation();
+    fn trace_text(&mut self, tracer: &mut Tracer, inner: impl FnOnce(&mut Scene, &mut TextState, &mut GraphicsState) -> (BBox, String, f32) ) {
+        let tm = self.text_state.text_matrix;
+        let origin = tm.translation();
 
-        let (bb, text) = inner(self.scene, &mut self.text_state, &mut self.graphics_state);
+        let (bb, text, width) = inner(self.scene, &mut self.text_state, &mut self.graphics_state);
 
-        let tr = self.graphics_state.transform * self.text_state.text_matrix;
-        let width = (self.graphics_state.transform.matrix * (self.text_state.text_matrix.translation() - origin)).x();
-        let height = self.text_state.font_size * tr.m22();
-        let font_size = (self.text_state.font_size * tr.m22()).abs();
+        let font_size = self.text_state.font_size;
         if let (Some(bbox), Some(font_entry)) = (bb.0, self.text_state.font_entry.clone()) {
+            let transform = self.graphics_state.transform * tm * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
             let p1 = self.graphics_state.transform * origin;
-            let p2 = p1 + Vector2F::new(width, height);
+            let p2 = p1 + Vector2F::new(width, self.text_state.font_size);
+
             tracer.add_text(TextSpan {
                 rect: RectF::from_points(p1.min(p2), p1.max(p2)),
+                width,
                 bbox,
                 text,
                 font: font_entry,
                 font_size,
                 color: self.graphics_state.fill_color.to_u8(),
+                transform,
             });
         }
     }
@@ -530,7 +533,8 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resourc
                         _ => unimplemented!("DeviceN colorspace")
                     }
                 }
-                ColorSpace::Separation(ref _name, ref alt, ref f) => {
+                ColorSpace::Separation(ref name, ref alt, ref f) => {
+                    debug!("Separation(name={}, alt={:?}, f={:?}", name, alt, f);
                     if args.len() != 1 {
                         return Err(PdfError::Other { msg: format!("expected 1 color arguments, got {:?}", args) });
                     }
@@ -546,12 +550,14 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resourc
                             let mut cmyk = [0.0; 4];
                             f.apply(&[x], &mut cmyk)?;
                             let [c, m, y, k] = cmyk;
+                            debug!("c={c}, m={m}, y={y}, k={k}");
                             Ok(cmyk2rgb((c, m, y, k)))
                         },
                         &ColorSpace::DeviceRGB => {
                             let mut rgb = [0.0, 0.0, 0.0];
                             f.apply(&[x], &mut rgb)?;
                             let [r, g, b] = rgb;
+                            debug!("r={r}, g={g}, b={b}");
                             Ok((r, g, b))
                         },
                         c => unimplemented!("Separation(alt={:?})", c)

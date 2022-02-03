@@ -65,12 +65,12 @@ impl TextState {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    pub fn draw_text(&mut self, scene: &mut Scene, gs: &mut GraphicsState, data: &[u8], text: &mut String) -> BBox {
+    pub fn draw_text(&mut self, scene: &mut Scene, gs: &mut GraphicsState, data: &[u8], text: &mut String) -> (BBox, f32) {
         let e = match self.font_entry {
             Some(ref e) => e,
             None => {
                 warn!("no font set");
-                return BBox::empty();
+                return (BBox::empty(), 0.0);
             }
         };
 
@@ -92,7 +92,7 @@ impl TextState {
             TextMode::Fill => DrawMode::Fill,
             TextMode::FillAndClip => DrawMode::Fill,
             TextMode::FillThenStroke => DrawMode::FillStroke,
-            TextMode::Invisible => return BBox::empty(),
+            TextMode::Invisible => return (BBox::empty(), 0.0),
             TextMode::Stroke => DrawMode::Stroke,
             TextMode::StrokeAndClip => DrawMode::Stroke
         };
@@ -104,9 +104,12 @@ impl TextState {
             0., self.font_size, self.rise
         ) * e.font.font_matrix();
         
+        let mut total_width = 0.0;
         for (cid, gid, is_space) in glyphs {
             if let Some(part) = e.to_unicode.as_ref().and_then(|m| m.get(cid)) {
                 text.push_str(part);
+            } else {
+                debug!("no unicode for cid={}", cid);
             }
 
             //debug!("cid {} -> gid {:?}", cid, gid);
@@ -125,6 +128,7 @@ impl TextState {
             if is_space {
                 let advance = self.word_space * self.horiz_scale + width;
                 self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
+                total_width += advance;
                 continue;
             }
             if let Some(glyph) = glyph {
@@ -139,9 +143,10 @@ impl TextState {
             }
             let advance = self.char_space * self.horiz_scale + width;
             self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
+            total_width += advance;
         }
 
-        bbox
+        (bbox, total_width)
     }
     pub fn advance(&mut self, delta: f32) {
         //debug!("advance by {}", delta);
