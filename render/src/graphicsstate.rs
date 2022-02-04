@@ -77,9 +77,12 @@ impl<'a> GraphicsState<'a> {
         *self.stroke_paint.get_or_insert_with(|| scene.push_paint(&Paint::from_color(color.to_u8())))
     }
     pub fn merge_clip_path(&mut self, mut outline: Outline, fill_rule: FillRule) {
+        /*
         if let Some(ref outer) = self.clip_path {
+            println!("path a: {:?}", outline);
             let mut clipped_outline = Outline::new();
             for outer_contour in outer.outline().contours() {
+                println!("path b: {:?}", outer_contour);
                 let clip_polygon = outer_contour.points();
                 let mut clipped = outline.clone();
                 clipped.clip_against_polygon(clip_polygon);
@@ -87,7 +90,7 @@ impl<'a> GraphicsState<'a> {
             }
             outline = clipped_outline;
         }
-        
+        */
         let mut clip_path = ClipPath::new(outline);
         clip_path.set_fill_rule(fill_rule);
         self.clip_path = Some(clip_path);
