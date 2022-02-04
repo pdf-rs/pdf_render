@@ -508,9 +508,7 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resourc
                     Ok(cmyk2rgb((c, m, y, k)))
                 }
                 ColorSpace::DeviceN { ref names, ref alt, ref tint, ref attr } => {
-                    println!("args={:?}", args);
                     assert_eq!(args.len(), tint.input_dim());
-                    //panic!();
                     let mut input = vec![0.; args.len()];
                     for (i, a) in input.iter_mut().zip(args.iter()) {
                         *i = a.as_number()?;
@@ -584,7 +582,7 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resourc
                 }
                 ColorSpace::Pattern => {
                     let name = args[0].as_name()?;
-                    dbg!(&resources.pattern);
+                    //dbg!(&resources.pattern);
                     unimplemented!("Pattern {}", name)
                 }
                 ColorSpace::Other(ref p) => unimplemented!("Other Color space {:?}", p)
