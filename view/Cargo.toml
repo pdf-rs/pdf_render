@@ -6,12 +6,12 @@ edition = "2018"
 
 [features]
 unstable = []
+jpeg2k = ["pdf_render/jpeg2k"]
 
 [dependencies.pdf]
 git = "https://github.com/pdf-rs/pdf"
 default-features=false 
-jpeg2k = ["pdf_render/jpeg2k"]
-features = ["dump", "jpeg2k"]
+features = ["dump", "jpeg2k", "jbig2"]
 
 [dependencies.pdf_render]
 path = "../render"
@@ -27,7 +27,7 @@ pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
 pathfinder_resources = { git = "https://github.com/servo/pathfinder" }
 pathfinder_content = { git = "https://github.com/servo/pathfinder" }
 pathfinder_export = { git = "https://github.com/servo/pathfinder" }
-log = "0.4"
+log = { version = "0.4" }
 structopt = "0.3"
 font = { git = "https://github.com/pdf-rs/font" }
 pdf_encoding = "0.1"

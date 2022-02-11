@@ -1,8 +1,8 @@
 use pathfinder_geometry::{
     vector::Vector2F,
     transform2d::Transform2F,
+    rect::RectF,
 };
-use pathfinder_renderer::scene::Scene;
 use pathfinder_content::{
     fill::FillRule,
 };
@@ -10,7 +10,10 @@ use font::GlyphId;
 use super::{
     BBox,
     fontentry::{FontEntry, TextEncoding},
-    graphicsstate::{GraphicsState, DrawMode},
+    graphicsstate::{GraphicsState},
+    DrawMode,
+    Backend,
+    TextSpan,
 };
 use std::convert::TryInto;
 use pdf::content::TextMode;
@@ -65,12 +68,12 @@ impl TextState {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    pub fn draw_text(&mut self, scene: &mut Scene, gs: &mut GraphicsState, data: &[u8], text: &mut String) -> (BBox, f32) {
+    pub fn draw_text(&mut self, backend: &mut impl Backend, gs: &GraphicsState, data: &[u8]) {
         let e = match self.font_entry {
             Some(ref e) => e,
             None => {
                 warn!("no font set");
-                return (BBox::empty(), 0.0);
+                return;
             }
         };
 
@@ -89,16 +92,18 @@ impl TextState {
         });
 
         let draw_mode = match self.mode {
-            TextMode::Fill => DrawMode::Fill,
-            TextMode::FillAndClip => DrawMode::Fill,
-            TextMode::FillThenStroke => DrawMode::FillStroke,
-            TextMode::Invisible => return (BBox::empty(), 0.0),
-            TextMode::Stroke => DrawMode::Stroke,
-            TextMode::StrokeAndClip => DrawMode::Stroke
+            TextMode::Fill => DrawMode::Fill(gs.fill_color),
+            TextMode::FillAndClip => DrawMode::Fill(gs.fill_color),
+            TextMode::FillThenStroke => DrawMode::FillStroke(gs.fill_color, gs.stroke_color, gs.stroke_style),
+            TextMode::Invisible => return,
+            TextMode::Stroke => DrawMode::Stroke(gs.stroke_color, gs.stroke_style),
+            TextMode::StrokeAndClip => DrawMode::Stroke(gs.stroke_color, gs.stroke_style),
         };
         let e = self.font_entry.as_ref().expect("no font");
         let mut bbox = BBox::empty();
 
+        let mut text = String::new();
+        let tm = self.text_matrix;
         let tr = Transform2F::row_major(
             self.horiz_scale * self.font_size, 0., 0.,
             0., self.font_size, self.rise
@@ -132,11 +137,10 @@ impl TextState {
                 continue;
             }
             if let Some(glyph) = glyph {
-                let transform = self.text_matrix * tr;
-                let path = glyph.path;
-                if path.len() != 0 {
-                    bbox.add(gs.transform * transform * path.bounds());
-                    gs.draw_transform(scene, &path, draw_mode, FillRule::Winding, transform);
+                let transform = gs.transform * self.text_matrix * tr;
+                if glyph.path.len() != 0 {
+                    bbox.add(gs.transform * transform * glyph.path.bounds());
+                    backend.draw_glyph(&glyph, draw_mode, transform);
                 }
             } else {
                 debug!("no glyph for gid {:?}", gid);
@@ -146,7 +150,23 @@ impl TextState {
             total_width += advance;
         }
 
-        (bbox, total_width)
+        if let Some(bbox) = bbox.rect() {
+            let origin = tm.translation();
+            let transform = gs.transform * tm * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
+            let p1 = gs.transform * origin;
+            let p2 = p1 + Vector2F::new(total_width, self.font_size);
+
+            backend.add_text(TextSpan {
+                rect: RectF::from_points(p1.min(p2), p1.max(p2)),
+                width: total_width,
+                bbox,
+                text,
+                font: e.clone(),
+                font_size: self.font_size,
+                color: gs.fill_color.to_u8(),
+                transform,
+            });
+        }
     }
     pub fn advance(&mut self, delta: f32) {
         //debug!("advance by {}", delta);

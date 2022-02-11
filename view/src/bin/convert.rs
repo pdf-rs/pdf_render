@@ -4,7 +4,7 @@ use pdf::error::PdfError;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::PathBuf;
-use pdf_render::Cache;
+use pdf_render::{Cache, SceneBackend, render_page};
 use pathfinder_export::{FileFormat, Export};
 use pathfinder_geometry::transform2d::Transform2F;
 use structopt::StructOpt;
@@ -68,7 +68,8 @@ fn main() -> Result<(), PdfError> {
     for (i, page) in file.pages().enumerate().skip(opt.page as usize).take(opt.pages as usize) {
         println!("page {}", i);
         let p: &Page = &*page.unwrap();
-        let (scene, _) = cache.render_page(&file, p, transform)?;
+        let mut backend = SceneBackend::new(&mut cache);
+        render_page(&mut backend, &file, p, transform)?;
         let output = if opt.pages > 1 {
             let replacement = format!("{page:0digits$}", page=i, digits=opt.digits);
             opt.output.replace(opt.placeholder.as_str(), &replacement)
@@ -76,7 +77,7 @@ fn main() -> Result<(), PdfError> {
             opt.output.clone()
         };
         let mut writer = BufWriter::new(File::create(&output)?);
-        scene.export(&mut writer, format)?;
+        backend.finish().export(&mut writer, format)?;
     }
     Ok(())
 }

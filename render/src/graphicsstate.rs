@@ -11,6 +11,7 @@ use pathfinder_renderer::{
     paint::{PaintId, Paint},
 };
 use pathfinder_color::ColorF;
+use crate::DrawMode;
 
 #[derive(Clone)]
 pub struct GraphicsState<'a> {
@@ -30,12 +31,6 @@ pub struct GraphicsState<'a> {
     pub fill_alpha: f32,
 }
 
-#[derive(Copy, Clone)]
-pub enum DrawMode {
-    Fill,
-    Stroke,
-    FillStroke,
-}
 
 impl<'a> GraphicsState<'a> {
     pub fn set_fill_color(&mut self, (r, g, b): (f32, f32, f32)) {
@@ -68,14 +63,6 @@ impl<'a> GraphicsState<'a> {
             self.stroke_paint = None;
         }
     }
-    pub fn fill_paint(&mut self, scene: &mut Scene) -> PaintId {
-        let color = self.fill_color;
-        *self.fill_paint.get_or_insert_with(|| scene.push_paint(&Paint::from_color(color.to_u8())))
-    }
-    pub fn stroke_paint(&mut self, scene: &mut Scene) -> PaintId {
-        let color = self.stroke_color;
-        *self.stroke_paint.get_or_insert_with(|| scene.push_paint(&Paint::from_color(color.to_u8())))
-    }
     pub fn merge_clip_path(&mut self, mut outline: Outline, fill_rule: FillRule) {
         /*
         if let Some(ref outer) = self.clip_path {
@@ -94,41 +81,5 @@ impl<'a> GraphicsState<'a> {
         let mut clip_path = ClipPath::new(outline);
         clip_path.set_fill_rule(fill_rule);
         self.clip_path = Some(clip_path);
-    }
-    pub fn clip_path_id(&mut self, scene: &mut Scene) -> Option<ClipPathId> {
-        match (self.clip_path.as_ref(), self.clip_path_id) {
-            (None, None) => None,
-            (Some(_), Some(id)) => Some(id),
-            (Some(clip_path), None) => {
-                let id = scene.push_clip_path(clip_path.clone());
-                self.clip_path_id = Some(id);
-                Some(id)
-            },
-            _ => unreachable!()
-        }
-    }
-    pub fn draw(&mut self, scene: &mut Scene, outline: &Outline, mode: DrawMode, fill_rule: FillRule) {
-        self.draw_transform(scene, outline, mode, fill_rule, Transform2F::default());
-    }
-    fn fill(&mut self, scene: &mut Scene, outline: &Outline, fill_rule: FillRule, tr: Transform2F) {
-        let mut draw_path = DrawPath::new(outline.clone().transformed(&tr), self.fill_paint(scene));
-        draw_path.set_clip_path(self.clip_path_id(scene));
-        draw_path.set_fill_rule(fill_rule);
-        scene.push_draw_path(draw_path);
-    }
-    pub fn draw_transform(&mut self, scene: &mut Scene, outline: &Outline, mode: DrawMode, fill_rule: FillRule, transform: Transform2F) {
-        let tr = self.transform * transform;
-
-        if matches!(mode, DrawMode::Fill | DrawMode::FillStroke) {
-            self.fill(scene, outline, fill_rule, tr);
-        }
-        if matches!(mode, DrawMode::Stroke | DrawMode::FillStroke) {
-            let mut stroke = OutlineStrokeToFill::new(outline, self.stroke_style);
-            stroke.offset();
-            let mut draw_path = DrawPath::new(stroke.into_outline().transformed(&tr), self.stroke_paint(scene));
-            draw_path.set_clip_path(self.clip_path_id(scene));
-            draw_path.set_fill_rule(fill_rule);
-            scene.push_draw_path(draw_path);
-        }
     }
 }

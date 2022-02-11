@@ -1,10 +1,11 @@
 use pdf::file::File as PdfFile;
 use pdf::object::*;
 use pdf::primitive::{Primitive, Dictionary};
-use pdf::backend::Backend;
+use pdf::backend::Backend as PdfBackend;
 use pdf::content::{Op, Matrix, Point, Rect, Color, Rgb, Cmyk, Winding, FormXObject};
 use pdf::error::{PdfError, Result};
 use pdf::content::TextDrawAdjusted;
+use crate::backend::Backend;
 
 use pathfinder_geometry::{
     vector::{Vector2F},
@@ -17,16 +18,11 @@ use pathfinder_content::{
     pattern::{Pattern, Image},
 };
 use pathfinder_color::{ColorU, ColorF};
-use pathfinder_renderer::{
-    scene::{DrawPath, Scene},
-    paint::{Paint},
-};
-
 use super::{
-    graphicsstate::{GraphicsState, DrawMode},
+    graphicsstate::{GraphicsState},
     textstate::{TextState},
-    cache::{Cache, Tracer, ItemMap, TextSpan, VectorPath},
     BBox,
+    DrawMode,
 };
 
 trait Cvt {
@@ -79,21 +75,19 @@ impl Cvt for Cmyk {
     }
 }
 
-pub struct RenderState<'a, B: Backend> {
+pub struct RenderState<'a, P: PdfBackend, B: Backend> {
     graphics_state: GraphicsState<'a>,
     text_state: TextState,
     stack: Vec<(GraphicsState<'a>, TextState)>,
     current_outline: Outline,
     current_contour: Contour,
-    scene: &'a mut Scene,
-    file: &'a PdfFile<B>,
+    file: &'a PdfFile<P>,
     resources: &'a Resources,
-    cache: &'a mut Cache,
-    items: ItemMap,
+    backend: &'a mut B,
 }
 
-impl<'a, B: Backend> RenderState<'a, B> {
-    pub fn new(scene: &'a mut Scene, cache: &'a mut Cache, file: &'a PdfFile<B>, resources: &'a Resources, root_transformation: Transform2F) -> Self {
+impl<'a, P: PdfBackend, B: Backend> RenderState<'a, P, B> {
+    pub fn new(backend: &'a mut B, file: &'a PdfFile<P>, resources: &'a Resources, root_transformation: Transform2F) -> Self {
         let graphics_state = GraphicsState {
             transform: root_transformation,
             fill_color: ColorF::black(),
@@ -117,60 +111,62 @@ impl<'a, B: Backend> RenderState<'a, B> {
         let current_outline = Outline::new();
         let current_contour = Contour::new();
 
-        let items = ItemMap::new();
-
         RenderState {
             graphics_state,
             text_state,
             stack,
             current_outline,
             current_contour,
-            scene,
             resources,
             file,
-            items,
-            cache,
+            backend,
         }
     }
-    pub fn draw_op(&mut self, op: &Op, tracer: &mut Tracer) -> Result<()> {
+    fn draw(&mut self, mode: DrawMode, fill_rule: FillRule) {
+        self.flush();
+        self.backend.draw(&self.current_outline, mode, fill_rule, self.graphics_state.transform);
+    }
+    pub fn draw_op(&mut self, op: &Op) -> Result<()> {
         match *op {
             Op::BeginMarkedContent { .. } => {}
             Op::EndMarkedContent { .. } => {}
             Op::MarkedContentPoint { .. } => {}
             Op::Close => {
                 self.current_contour.close();
-                tracer.stash_multi();
             }
             Op::MoveTo { p } => {
                 self.flush();
                 self.current_contour.push_endpoint(p.cvt());
-                tracer.stash_multi();
             },
             Op::LineTo { p } => {
                 self.current_contour.push_endpoint(p.cvt());
-                tracer.stash_multi();
             },
             Op::CurveTo { c1, c2, p } => {
                 self.current_contour.push_cubic(c1.cvt(), c2.cvt(), p.cvt());
-                tracer.stash_multi();
             },
             Op::Rect { rect } => {
                 self.flush();
                 self.current_outline.push_contour(Contour::from_rect(rect.cvt()));
-                tracer.stash_multi();
             },
             Op::EndPath => {
                 self.current_contour.clear();
                 self.current_outline.clear();
             }
             Op::Stroke => {
-                self.draw(DrawMode::FillStroke, FillRule::Winding, tracer);
+                self.draw(DrawMode::Stroke(
+                    self.graphics_state.stroke_color,
+                    self.graphics_state.stroke_style
+                ), FillRule::Winding);
             },
             Op::FillAndStroke { winding } => {
-                self.draw(DrawMode::FillStroke, winding.cvt(), tracer);
+                self.draw(DrawMode::FillStroke(
+                    self.graphics_state.fill_color,
+                    self.graphics_state.stroke_color,
+                    self.graphics_state.stroke_style
+                ), winding.cvt());
             }
             Op::Fill { winding } => {
-                self.draw(DrawMode::Fill, winding.cvt(), tracer);
+                self.draw(DrawMode::Fill(self.graphics_state.fill_color), winding.cvt());
             }
             Op::Shade { ref name } => {},
             Op::Clip { winding } => {
@@ -211,7 +207,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
                 self.graphics_state.set_stroke_alpha(gs.stroke_alpha.unwrap_or(1.0));
                 
                 if let Some((font_ref, size)) = gs.font {
-                    if let Some(e) = self.cache.get_font(font_ref, self.file)? {
+                    if let Some(e) = self.backend.get_font(font_ref, self.file)? {
                         debug!("new font: {} at size {}", e.name, size);
                         self.text_state.font_entry = Some(e);
                         self.text_state.font_size = size;
@@ -246,7 +242,7 @@ impl<'a, B: Backend> RenderState<'a, B> {
             Op::TextFont { ref name, size } => {
                 let font = match self.resources.fonts.get(name) {
                     Some(&font_ref) => {
-                        self.cache.get_font(font_ref, self.file)?
+                        self.backend.get_font(font_ref, self.file)?
                     },
                     None => None
                 };
@@ -265,66 +261,30 @@ impl<'a, B: Backend> RenderState<'a, B> {
             Op::SetTextMatrix { matrix } => self.text_state.set_matrix(matrix.cvt()),
             Op::TextNewline => self.text_state.next_line(),
             Op::TextDraw { ref text } => {
-                let mut bb = BBox::empty();
-                self.trace_text(tracer, |scene, text_state, graphics_state| {
-                    let mut text_out = String::with_capacity(text.data.len());
-                    let (b, w) = text_state.draw_text(scene, graphics_state, &text.data, &mut text_out);
-                    bb = b;
-                    (bb, text_out, w)
-                });
-                tracer.single(bb);
+                self.text_state.draw_text(self.backend, &self.graphics_state, &text.data);
             },
             Op::TextDrawAdjusted { ref array } => {
                 let mut bb = BBox::empty();
                 for arg in array {
                     match *arg {
                         TextDrawAdjusted::Text(ref data) => {
-                            let mut text_out = String::with_capacity(array.len());
-                            self.trace_text(tracer, |scene, text_state, graphics_state| {
-                                let (r2, w) = text_state.draw_text(scene, graphics_state, data.as_bytes(), &mut text_out);
-                                bb.add_bbox(r2);
-                                (r2, text_out, w)
-                            });
+                            self.text_state.draw_text(self.backend, &self.graphics_state, data.as_bytes());
                         },
                         TextDrawAdjusted::Spacing(offset) => {
                             self.text_state.advance(-0.001 * offset); // because why not PDF…
                         }
                     }
                 }
-                tracer.single(bb);
             },
             Op::XObject { ref name } => {
                 let &xobject_ref = self.resources.xobjects.get(name).ok_or(PdfError::NotFound { word: name.into()})?;
                 let xobject = self.file.get(xobject_ref)?;
                 match *xobject {
-                    XObject::Image(_) => {
-                        if let &Ok(ref image) = self.cache.get_image(xobject_ref, self.file) {
-                            tracer.add_image(&image,
-                                self.graphics_state.transform * RectF::new(
-                                    Vector2F::new(0.0, 0.0), Vector2F::new(1.0, 1.0)
-                                ),
-                                xobject_ref.get_inner()
-                            );
-                            let size = image.size();
-                            let size_f = size.to_f32();
-                            let outline = Outline::from_rect(self.graphics_state.transform * RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));
-                            let im_tr = self.graphics_state.transform
-                                * Transform2F::from_scale(Vector2F::new(1.0 / size_f.x(), -1.0 / size_f.y()))
-                                * Transform2F::from_translation(Vector2F::new(0.0, -size_f.y()));
-                            let mut pattern = Pattern::from_image(image.clone());
-                            pattern.apply_transform(im_tr);
-                            let paint = Paint::from_pattern(pattern);
-                            let paint_id = self.scene.push_paint(&paint);
-                            let mut draw_path = DrawPath::new(outline, paint_id);
-                            draw_path.set_clip_path(self.graphics_state.clip_path_id(self.scene));
-                            self.scene.push_draw_path(draw_path);
-                    
-                            tracer.single(self.graphics_state.transform * RectF::new(Vector2F::default(), size_f));
-                            
-                        }
+                    XObject::Image(ref im) => {
+                        self.backend.draw_image(xobject_ref, im, self.graphics_state.transform, self.file);
                     }
                     XObject::Form(ref content) => {
-                        self.draw_form(content, tracer)?;
+                        self.draw_form(content)?;
                     }
                     XObject::Postscript(ref ps) => {
                         warn!("Got PostScript?!");
@@ -350,63 +310,13 @@ impl<'a, B: Backend> RenderState<'a, B> {
             None => Err(PdfError::Other { msg: format!("color space {:?} not present", name) })
         }
     }
-    fn debug_outline(&mut self, outline: Outline, color: ColorU) {
-        let paint = self.scene.push_paint(&Paint::from_color(color));
-        let mut draw_path = DrawPath::new(outline, paint);
-        self.scene.push_draw_path(draw_path);
-    }
     fn flush(&mut self) {
         if !self.current_contour.is_empty() {
             self.current_outline.push_contour(self.current_contour.clone());
             self.current_contour.clear();
         }
     }
-    fn trace_text(&mut self, tracer: &mut Tracer, inner: impl FnOnce(&mut Scene, &mut TextState, &mut GraphicsState) -> (BBox, String, f32) ) {
-        let tm = self.text_state.text_matrix;
-        let origin = tm.translation();
-
-        let (bb, text, width) = inner(self.scene, &mut self.text_state, &mut self.graphics_state);
-
-        let font_size = self.text_state.font_size;
-        if let (Some(bbox), Some(font_entry)) = (bb.0, self.text_state.font_entry.clone()) {
-            let transform = self.graphics_state.transform * tm * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
-            let p1 = self.graphics_state.transform * origin;
-            let p2 = p1 + Vector2F::new(width, self.text_state.font_size);
-
-            tracer.add_text(TextSpan {
-                rect: RectF::from_points(p1.min(p2), p1.max(p2)),
-                width,
-                bbox,
-                text,
-                font: font_entry,
-                font_size,
-                color: self.graphics_state.fill_color.to_u8(),
-                transform,
-            });
-        }
-    }
-    fn trace_outline(&self, tracer: &mut Tracer) {
-        tracer.multi(self.graphics_state.transform * self.current_outline.bounds());
-    }
-    fn draw(&mut self, mode: DrawMode, fill_rule: FillRule, tracer: &mut Tracer) {
-        self.flush();
-        self.graphics_state.draw(self.scene, &self.current_outline, mode, fill_rule);
-        self.trace_outline(tracer);
-        let fill = || Some(self.graphics_state.fill_color.to_u8());
-        let stroke = || Some((self.graphics_state.stroke_color.to_u8(), self.graphics_state.stroke_style.line_width * self.graphics_state.transform.m11()));
-        let (fill, stroke) = match mode {
-            DrawMode::Fill => (fill(), None),
-            DrawMode::FillStroke => (fill(), stroke()),
-            DrawMode::Stroke => (None, stroke())
-        };
-        tracer.add_path(VectorPath {
-            outline: self.current_outline.clone().transformed(&self.graphics_state.transform),
-            fill, stroke
-        });
-        self.current_outline.clear();
-        tracer.clear();
-    }
-    fn draw_form(&mut self, form: &FormXObject, tracer: &mut Tracer) -> Result<()> {
+    fn draw_form(&mut self, form: &FormXObject) -> Result<()> {
         let graphics_state = GraphicsState {
             stroke_alpha: self.graphics_state.stroke_color.a(),
             fill_alpha: self.graphics_state.fill_color.a(),
@@ -425,16 +335,13 @@ impl<'a, B: Backend> RenderState<'a, B> {
             stack: vec![],
             current_outline: Outline::new(),
             current_contour: Contour::new(),
-            scene: self.scene,
-            cache: self.cache,
+            backend: self.backend,
             file: self.file,
-            items: std::mem::replace(&mut self.items, ItemMap::new()),
         };
         
         for op in form.operations.iter() {
-            inner.draw_op(op, tracer)?;
+            inner.draw_op(op)?;
         }
-        self.items = inner.items;
 
         Ok(())
     }

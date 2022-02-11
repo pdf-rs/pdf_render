@@ -29,6 +29,7 @@ pdf_encoding = "0.3"
 itertools = "*"
 image = "0.23"
 instant = "*"
+custom_debug_derive = "*"
 
 [dev-dependencies]
 criterion = "0.3"

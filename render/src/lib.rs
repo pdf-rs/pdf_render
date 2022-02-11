@@ -4,7 +4,7 @@
 macro_rules! assert_eq {
     ($a:expr, $b:expr) => {
         if $a != $b {
-            return Err(PdfError::Other { msg: format!("{} ({}) != {} ({})", stringify!($a), $a, stringify!($b), $b)});
+            return Err(pdf::error::PdfError::Other { msg: format!("{} ({}) != {} ({})", stringify!($a), $a, stringify!($b), $b)});
         }
         
     };
@@ -12,43 +12,41 @@ macro_rules! assert_eq {
 
 macro_rules! unimplemented {
     ($msg:tt $(, $arg:expr)*) => {
-        return Err(PdfError::Other { msg: format!(concat!("Unimplemented: ", $msg) $(, $arg)*) })
+        return Err(pdf::error::PdfError::Other { msg: format!(concat!("Unimplemented: ", $msg) $(, $arg)*) })
     };
 }
 
-use pathfinder_geometry::rect::RectF;
 mod cache;
 mod fontentry;
 mod graphicsstate;
 mod renderstate;
 mod textstate;
+mod backend;
+pub mod tracer;
+mod image;
+mod scene;
+mod font;
 
-pub use cache::{Cache, ItemMap, TraceItem, TextSpan, ImageObject, VectorPath, TraceResults, DrawItem};
+pub use cache::{Cache};
 pub use fontentry::FontEntry;
+pub use backend::{DrawMode, Backend};
+pub use scene::SceneBackend;
+pub use crate::image::load_image;
+use custom_debug_derive::Debug;
 
-pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
-    ("Courier", "CourierStd.otf"),
-    ("Courier-Bold", "CourierStd-Bold.otf"),
-    ("Courier-Oblique", "CourierStd-Oblique.otf"),
-    ("Courier-BoldOblique", "CourierStd-BoldOblique.otf"),
-    
-    ("Times-Roman", "MinionPro-Regular.otf"),
-    ("Times-Bold", "MinionPro-Bold.otf"),
-    ("Times-Italic", "MinionPro-It.otf"),
-    ("Times-BoldItalic", "MinionPro-BoldIt.otf"),
-    
-    ("Helvetica", "MyriadPro-Regular.otf"),
-    ("Helvetica-Bold", "MyriadPro-Bold.otf"),
-    ("Helvetica-Oblique", "MyriadPro-It.otf"),
-    ("Helvetica-BoldOblique", "MyriadPro-BoldIt.otf"),
-    
-    ("Symbol", "SY______.PFB"),
-    ("ZapfDingbats", "AdobePiStd.otf"),
-    
-    ("Arial-BoldMT", "Arial-BoldMT.otf"),
-    ("ArialMT", "ArialMT.ttf"),
-    ("Arial-ItalicMT", "Arial-ItalicMT.otf"),
-];
+use pdf::file::File as PdfFile;
+use pdf::backend::Backend as PdfBackend;
+use pdf::object::*;
+use pdf::error::PdfError;
+use pathfinder_geometry::{
+    vector::{Vector2F, Vector2I},
+    rect::RectF, transform2d::Transform2F,
+};
+use pathfinder_color::ColorU;
+use renderstate::RenderState;
+use std::rc::Rc;
+const SCALE: f32 = 25.4 / 72.;
+
 
 #[derive(Copy, Clone)]
 pub struct BBox(Option<RectF>);
@@ -75,4 +73,57 @@ impl From<RectF> for BBox {
     fn from(r: RectF) -> Self {
         BBox(Some(r))
     }
+}
+
+
+pub fn page_bounds<P: PdfBackend>(file: &PdfFile<P>, page: &Page) -> RectF {
+    let Rect { left, right, top, bottom } = page.media_box().expect("no media box");
+    RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top)) * SCALE
+}
+pub fn render_page<P: PdfBackend>(backend: &mut impl Backend, file: &PdfFile<P>, page: &Page, transform: Transform2F) -> Result<(), PdfError> {
+    let bounds = page_bounds(file, page);
+    let rotate = Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
+    let br = rotate * bounds;
+    let translate = Transform2F::from_translation(Vector2F::new(
+        -br.min_x().min(br.max_x()),
+        -br.min_y().min(br.max_y()),
+    ));
+    let view_box = transform * translate * rotate * bounds;
+    backend.set_view_box(view_box);
+    
+    let root_transformation = transform
+        * translate
+        * rotate
+        * Transform2F::row_major(SCALE, 0.0, -bounds.min_x(), 0.0, -SCALE, bounds.max_y());
+    
+    let resources = t!(page.resources());
+
+    let contents = try_opt!(page.contents.as_ref());
+    let ops = contents.operations(file)?;
+    let mut renderstate = RenderState::new(backend, file, &resources, root_transformation);
+    for (i, op) in ops.iter().enumerate() {
+        debug!("op {}: {:?}", i, op);
+        renderstate.draw_op(op)?;
+    }
+
+    Ok(())
+}
+
+#[derive(Debug)]
+pub struct TextSpan {
+    // A rect with the origin at the baseline, a height of 1em and width that corresponds to the advance width.
+    pub rect: RectF,
+
+    // width in textspace units (before applying transform)
+    pub width: f32,
+    // Bounding box of the rendered outline
+    pub bbox: RectF,
+    pub font_size: f32,
+    #[debug(skip)]
+    pub font: Rc<FontEntry>,
+    pub text: String,
+    pub color: ColorU,
+
+    // apply this transform to a text draw in at the origin with the given width and font-size
+    pub transform: Transform2F,
 }

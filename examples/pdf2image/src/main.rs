@@ -1,6 +1,6 @@
 use argh::FromArgs;
 use pdf::file::File;
-use pdf_render::Cache;
+use pdf_render::{Cache, SceneBackend, render_page};
 use pathfinder_rasterize::Rasterizer;
 use pathfinder_geometry::transform2d::Transform2F;
 use std::error::Error;
@@ -25,10 +25,6 @@ struct Options {
     /// output image
     #[argh(positional)]
     image: PathBuf,
-
-    /// max numer of ops to render
-    #[argh(option)]
-    limit: Option<usize>,
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -39,9 +35,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let page = file.get_page(opt.page)?;
 
     let mut cache = Cache::new();
-    let (scene, _) = cache.render_page_limited(&file, &page, Transform2F::from_scale(opt.dpi / 25.4), opt.limit)?;
+    let mut backend = SceneBackend::new(&mut cache);
 
-    let image = Rasterizer::new().rasterize(scene, None);
+    render_page(&mut backend, &file, &page, Transform2F::from_scale(opt.dpi / 25.4))?;
+
+    let image = Rasterizer::new().rasterize(backend.finish(), None);
 
     image.save(opt.image)?;
 
