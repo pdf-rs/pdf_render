@@ -58,12 +58,13 @@ impl<'a> Backend for Tracer<'a> {
             DrawMode::Fill(_) => None,
         };
         self.items.push(DrawItem::Vector(VectorPath {
-            outline: outline.clone().transformed(&transform),
+            outline: outline.clone(),
             fill: match mode {
                 DrawMode::Fill(c) | DrawMode::FillStroke(c, _, _) => Some(c.to_u8()),
                 _ => None
             },
             stroke,
+            transform,
         }));
     }
     fn set_view_box(&mut self, r: RectF) {
@@ -141,4 +142,5 @@ pub struct VectorPath {
     pub outline: Outline,
     pub fill: Option<ColorU>,
     pub stroke: Option<(ColorU, f32)>,
+    pub transform: Transform2F,
 }
