@@ -126,4 +126,8 @@ pub struct TextSpan {
 
     // apply this transform to a text draw in at the origin with the given width and font-size
     pub transform: Transform2F,
+
+    // in text units
+    pub char_space: f32,
+    pub word_space: f32,
 }

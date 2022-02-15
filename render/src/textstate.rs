@@ -165,6 +165,8 @@ impl TextState {
                 font_size: self.font_size,
                 color: gs.fill_color.to_u8(),
                 transform,
+                char_space: self.char_space * self.horiz_scale,
+                word_space: self.word_space * self.horiz_scale,
             });
         }
     }
