@@ -125,6 +125,7 @@ impl<'a, P: PdfBackend, B: Backend> RenderState<'a, P, B> {
     fn draw(&mut self, mode: DrawMode, fill_rule: FillRule) {
         self.flush();
         self.backend.draw(&self.current_outline, mode, fill_rule, self.graphics_state.transform);
+        self.current_outline.clear();
     }
     pub fn draw_op(&mut self, op: &Op) -> Result<()> {
         match *op {
@@ -339,7 +340,9 @@ impl<'a, P: PdfBackend, B: Backend> RenderState<'a, P, B> {
             file: self.file,
         };
         
-        for op in form.operations.iter() {
+        let ops = form.operations(self.file)?;
+        for (i, op) in ops.iter().enumerate() {
+            debug!(" form op {}: {:?}", i, op);
             inner.draw_op(op)?;
         }
 

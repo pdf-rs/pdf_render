@@ -33,3 +33,4 @@ custom_debug_derive = "*"
 
 [dev-dependencies]
 criterion = "0.3"
+env_logger = "*"
