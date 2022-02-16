@@ -76,12 +76,12 @@ impl From<RectF> for BBox {
 }
 
 
-pub fn page_bounds<P: PdfBackend>(file: &PdfFile<P>, page: &Page) -> RectF {
+pub fn page_bounds(page: &Page) -> RectF {
     let Rect { left, right, top, bottom } = page.media_box().expect("no media box");
     RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top)) * SCALE
 }
-pub fn render_page<P: PdfBackend>(backend: &mut impl Backend, file: &PdfFile<P>, page: &Page, transform: Transform2F) -> Result<(), PdfError> {
-    let bounds = page_bounds(file, page);
+pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Page, transform: Transform2F) -> Result<(), PdfError> {
+    let bounds = page_bounds(page);
     let rotate = Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
     let br = rotate * bounds;
     let translate = Transform2F::from_translation(Vector2F::new(
@@ -99,8 +99,8 @@ pub fn render_page<P: PdfBackend>(backend: &mut impl Backend, file: &PdfFile<P>,
     let resources = t!(page.resources());
 
     let contents = try_opt!(page.contents.as_ref());
-    let ops = contents.operations(file)?;
-    let mut renderstate = RenderState::new(backend, file, &resources, root_transformation);
+    let ops = contents.operations(resolve)?;
+    let mut renderstate = RenderState::new(backend, resolve, &resources, root_transformation);
     for (i, op) in ops.iter().enumerate() {
         debug!("op {}: {:?}", i, op);
         renderstate.draw_op(op)?;

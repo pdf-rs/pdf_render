@@ -75,19 +75,19 @@ impl Cvt for Cmyk {
     }
 }
 
-pub struct RenderState<'a, P: PdfBackend, B: Backend> {
+pub struct RenderState<'a, R: Resolve, B: Backend> {
     graphics_state: GraphicsState<'a>,
     text_state: TextState,
     stack: Vec<(GraphicsState<'a>, TextState)>,
     current_outline: Outline,
     current_contour: Contour,
-    file: &'a PdfFile<P>,
+    resolve: &'a R,
     resources: &'a Resources,
     backend: &'a mut B,
 }
 
-impl<'a, P: PdfBackend, B: Backend> RenderState<'a, P, B> {
-    pub fn new(backend: &'a mut B, file: &'a PdfFile<P>, resources: &'a Resources, root_transformation: Transform2F) -> Self {
+impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
+    pub fn new(backend: &'a mut B, resolve: &'a R, resources: &'a Resources, root_transformation: Transform2F) -> Self {
         let graphics_state = GraphicsState {
             transform: root_transformation,
             fill_color: ColorF::black(),
@@ -118,7 +118,7 @@ impl<'a, P: PdfBackend, B: Backend> RenderState<'a, P, B> {
             current_outline,
             current_contour,
             resources,
-            file,
+            resolve,
             backend,
         }
     }
@@ -208,7 +208,7 @@ impl<'a, P: PdfBackend, B: Backend> RenderState<'a, P, B> {
                 self.graphics_state.set_stroke_alpha(gs.stroke_alpha.unwrap_or(1.0));
                 
                 if let Some((font_ref, size)) = gs.font {
-                    if let Some(e) = self.backend.get_font(font_ref, self.file)? {
+                    if let Some(e) = self.backend.get_font(font_ref, self.resolve)? {
                         debug!("new font: {} at size {}", e.name, size);
                         self.text_state.font_entry = Some(e);
                         self.text_state.font_size = size;
@@ -243,7 +243,7 @@ impl<'a, P: PdfBackend, B: Backend> RenderState<'a, P, B> {
             Op::TextFont { ref name, size } => {
                 let font = match self.resources.fonts.get(name) {
                     Some(&font_ref) => {
-                        self.backend.get_font(font_ref, self.file)?
+                        self.backend.get_font(font_ref, self.resolve)?
                     },
                     None => None
                 };
@@ -279,10 +279,10 @@ impl<'a, P: PdfBackend, B: Backend> RenderState<'a, P, B> {
             },
             Op::XObject { ref name } => {
                 let &xobject_ref = self.resources.xobjects.get(name).ok_or(PdfError::NotFound { word: name.into()})?;
-                let xobject = self.file.get(xobject_ref)?;
+                let xobject = self.resolve.get(xobject_ref)?;
                 match *xobject {
                     XObject::Image(ref im) => {
-                        self.backend.draw_image(xobject_ref, im, self.graphics_state.transform, self.file);
+                        self.backend.draw_image(xobject_ref, im, self.graphics_state.transform, self.resolve);
                     }
                     XObject::Form(ref content) => {
                         self.draw_form(content)?;
@@ -337,10 +337,10 @@ impl<'a, P: PdfBackend, B: Backend> RenderState<'a, P, B> {
             current_outline: Outline::new(),
             current_contour: Contour::new(),
             backend: self.backend,
-            file: self.file,
+            resolve: self.resolve,
         };
         
-        let ops = form.operations(self.file)?;
+        let ops = form.operations(self.resolve)?;
         for (i, op) in ops.iter().enumerate() {
             debug!(" form op {}: {:?}", i, op);
             inner.draw_op(op)?;
