@@ -18,6 +18,16 @@ impl ImageData {
     }
 }
 
+use std::borrow::Cow;
+fn resize_alpha(data: &[u8], src_width: i32, src_height: i32, dest_width: i32, dest_height: i32) -> Option<Vec<u8>> {
+    use image::{ImageBuffer, imageops::{resize, FilterType}, Luma};
+
+    let src: ImageBuffer<Luma<u8>, &[u8]> = ImageBuffer::from_raw(src_width as u32, src_height as u32, data)?;
+    let dest = resize(&src, dest_width as u32, dest_height as u32, FilterType::CatmullRom);
+
+    Some(dest.into_raw())
+}
+
 pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageData, PdfError> {
     let raw_data = image.decode()?;
 
@@ -30,11 +40,31 @@ pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageD
 
     let mask = t!(image.smask.map(|r| resolve.get(r)).transpose());
     let alpha = match mask {
-        Some(ref mask) => t!(mask.data()),
-        None => &[]
-    };
-    let alpha = alpha.iter().cloned().chain(std::iter::repeat(255));
+        Some(ref mask) => {
+            let data = t!(mask.data());
+            let bits = mask.width as usize * mask.height as usize * mask.bits_per_component as usize;
+            assert_eq!(data.len(), (bits + 7) / 9);
 
+            let mut alpha: Cow<[u8]> = match mask.bits_per_component {
+                1 => data.iter().flat_map(|&b| (0..8).map(move |i| ex(b >> i, 1))).collect::<Vec<u8>>().into(),
+                2 => data.iter().flat_map(|&b| (0..4).map(move |i| ex(b >> 2*i, 2))).collect::<Vec<u8>>().into(),
+                4 => data.iter().flat_map(|&b| (0..2).map(move |i| ex(b >> 4*i, 4))).collect::<Vec<u8>>().into(),
+                8 => data.into(),
+                12 => data.chunks_exact(3).flat_map(|c| [c[0], c[1] << 4 | c[2] >> 4]).collect::<Vec<u8>>().into(),
+                16 => data.chunks_exact(2).map(|c| c[0]).collect::<Vec<u8>>().into(),
+                n => return Err(PdfError::Other { msg: format!("invalid bits per component {}", n)})
+            };
+            if mask.width != image.width || mask.height != image.height {
+                alpha = resize_alpha(&*alpha, mask.width, mask.height, image.width, image.height).unwrap().into();
+            }
+            alpha
+        }
+        None => Cow::from(&[][..])
+    };
+    fn ex(b: u8, bits: u8) -> u8 {
+        (((b as u16 + 1) >> (8 - bits)) - 1) as u8
+    }
+    
     fn resolve_cs(cs: &ColorSpace) -> Option<&ColorSpace> {
         match cs {
             ColorSpace::Icc(icc) => icc.info.info.alternate.as_ref().map(|b| &**b),
@@ -42,7 +72,7 @@ pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageD
         }
     }
     let cs = image.color_space.as_ref().and_then(resolve_cs);
-    
+    let alpha = alpha.iter().cloned().chain(std::iter::repeat(255));
     let data_ratio = raw_data.len() / pixel_count;
     let data = match data_ratio {
         1 => match cs {

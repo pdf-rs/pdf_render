@@ -153,11 +153,11 @@ impl TextState {
         if let Some(bbox) = bbox.rect() {
             let origin = tm.translation();
             let transform = gs.transform * tm * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
-            let p1 = gs.transform * origin;
-            let p2 = p1 + Vector2F::new(total_width, self.font_size);
+            let p1 = origin;
+            let p2 = (tm * Transform2F::from_translation(Vector2F::new(total_width, self.font_size))).translation();
 
             backend.add_text(TextSpan {
-                rect: RectF::from_points(p1.min(p2), p1.max(p2)),
+                rect: gs.transform * RectF::from_points(p1.min(p2), p1.max(p2)),
                 width: total_width,
                 bbox,
                 text,

@@ -34,8 +34,6 @@ pub use scene::SceneBackend;
 pub use crate::image::load_image;
 use custom_debug_derive::Debug;
 
-use pdf::file::File as PdfFile;
-use pdf::backend::Backend as PdfBackend;
 use pdf::object::*;
 use pdf::error::PdfError;
 use pathfinder_geometry::{
@@ -77,18 +75,18 @@ impl From<RectF> for BBox {
 
 
 pub fn page_bounds(page: &Page) -> RectF {
-    let Rect { left, right, top, bottom } = page.media_box().expect("no media box");
+    let Rect { left, right, top, bottom } = page.crop_box().expect("no media box");
     RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top)) * SCALE
 }
 pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Page, transform: Transform2F) -> Result<(), PdfError> {
     let bounds = page_bounds(page);
     let rotate = Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
-    let br = rotate * bounds;
+    let br = rotate * RectF::new(Vector2F::zero(), bounds.size());
     let translate = Transform2F::from_translation(Vector2F::new(
         -br.min_x().min(br.max_x()),
         -br.min_y().min(br.max_y()),
     ));
-    let view_box = transform * translate * rotate * bounds;
+    let view_box = transform * translate * br;
     backend.set_view_box(view_box);
     
     let root_transformation = transform

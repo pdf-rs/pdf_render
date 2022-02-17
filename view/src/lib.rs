@@ -41,7 +41,7 @@ impl<B: Backend + 'static> Interactive for PdfView<B> {
         info!("drawing page {}", ctx.page_nr());
         let page = self.file.get_page(ctx.page_nr as u32).unwrap();
 
-        ctx.set_bounds(page_bounds(&self.file, &page));
+        ctx.set_bounds(page_bounds(&page));
 
         let mut backend = SceneBackend::new(&mut self.cache);
         render_page(&mut backend, &self.file, &page, ctx.view_transform()).unwrap();
