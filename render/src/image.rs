@@ -19,17 +19,17 @@ impl ImageData {
 }
 
 use std::borrow::Cow;
-fn resize_alpha(data: &[u8], src_width: i32, src_height: i32, dest_width: i32, dest_height: i32) -> Option<Vec<u8>> {
+fn resize_alpha(data: &[u8], src_width: u32, src_height: u32, dest_width: u32, dest_height: u32) -> Option<Vec<u8>> {
     use image::{ImageBuffer, imageops::{resize, FilterType}, Luma};
 
-    let src: ImageBuffer<Luma<u8>, &[u8]> = ImageBuffer::from_raw(src_width as u32, src_height as u32, data)?;
-    let dest = resize(&src, dest_width as u32, dest_height as u32, FilterType::CatmullRom);
+    let src: ImageBuffer<Luma<u8>, &[u8]> = ImageBuffer::from_raw(src_width, src_height, data)?;
+    let dest = resize(&src, dest_width, dest_height, FilterType::CatmullRom);
 
     Some(dest.into_raw())
 }
 
 pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageData, PdfError> {
-    let raw_data = image.decode()?;
+    let raw_data = image.image_data()?;
 
     let pixel_count = image.width as usize * image.height as usize;
     if raw_data.len() % pixel_count != 0 {
@@ -42,7 +42,9 @@ pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageD
     let alpha = match mask {
         Some(ref mask) => {
             let data = t!(mask.data());
-            let bits = mask.width as usize * mask.height as usize * mask.bits_per_component as usize;
+            let mask_width = mask.width as usize;
+            let mask_height = mask.height as usize;
+            let bits = mask_width * mask_height * mask.bits_per_component as usize;
             assert_eq!(data.len(), (bits + 7) / 9);
 
             let mut alpha: Cow<[u8]> = match mask.bits_per_component {
@@ -125,6 +127,11 @@ pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageD
                     let [r, g, b] = lut[b as usize];
                     ColorU { r, g, b, a }
                 }).collect()
+            }
+            None => {
+                info!("image has data/pixel ratio of 1, but no colorspace");
+                assert_eq!(raw_data.len(), pixel_count);
+                raw_data.iter().zip(alpha).map(|(&g, a)| ColorU { r: g, g: g, b: g, a }).collect()
             }
             _ => unimplemented!("cs={:?}", cs),
         }

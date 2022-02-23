@@ -342,7 +342,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         
         let ops = form.operations(self.resolve)?;
         for (i, op) in ops.iter().enumerate() {
-            debug!(" form op {}: {:?}", i, op);
+            //debug!(" form op {}: {:?}", i, op);
             inner.draw_op(op)?;
         }
 
@@ -458,16 +458,23 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resourc
                             let mut cmyk = [0.0; 4];
                             f.apply(&[x], &mut cmyk)?;
                             let [c, m, y, k] = cmyk;
-                            debug!("c={c}, m={m}, y={y}, k={k}");
+                            //debug!("c={c}, m={m}, y={y}, k={k}");
                             Ok(cmyk2rgb((c, m, y, k)))
                         },
                         &ColorSpace::DeviceRGB => {
                             let mut rgb = [0.0, 0.0, 0.0];
                             f.apply(&[x], &mut rgb)?;
                             let [r, g, b] = rgb;
-                            debug!("r={r}, g={g}, b={b}");
+                            //debug!("r={r}, g={g}, b={b}");
                             Ok((r, g, b))
                         },
+                        &ColorSpace::DeviceGray => {
+                            let mut gray = [0.0];
+                            f.apply(&[x], &mut gray)?;
+                            let [gray] = gray;
+                            //debug!("gray={gray}");
+                            Ok((gray, gray, gray))
+                        }
                         c => unimplemented!("Separation(alt={:?})", c)
                     }
                 }

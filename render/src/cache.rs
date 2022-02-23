@@ -30,7 +30,7 @@ use std::rc::Rc;
 
 use super::{BBox, fontentry::FontEntry, renderstate::RenderState, Backend};
 use super::image::load_image;
-use super::font::load_font;
+use super::font::{load_font, StandardCache};
 
 
 pub type FontMap = HashMap<Ref<PdfFont>, Option<Rc<FontEntry>>>;
@@ -41,6 +41,7 @@ pub struct Cache {
     standard_fonts: PathBuf,
     data_dir: Option<PathBuf>,
     images: ImageMap,
+    std: StandardCache,
 }
 impl Cache {
     pub fn new() -> Cache {
@@ -59,13 +60,14 @@ impl Cache {
             images: HashMap::new(),
             standard_fonts,
             data_dir: None,
+            std: StandardCache::new(),
         }
     }
     pub fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Rc<FontEntry>>> {
         match self.fonts.entry(font_ref) {
             Entry::Occupied(e) => Ok(e.get().clone()),
             Entry::Vacant(e) => {
-                let font = load_font(font_ref, resolve, &self.standard_fonts)?;
+                let font = load_font(font_ref, resolve, &self.standard_fonts, &mut self.std)?;
                 Ok(e.insert(font).clone())
             }
         }
@@ -76,7 +78,7 @@ impl Cache {
             Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(e) => {
                 let img = load_image(im, resolve).map(|image|
-                    Image::new(Vector2I::new(im.width, im.height), Arc::new(image.data))
+                    Image::new(Vector2I::new(im.info.width as i32, im.info.height as i32), Arc::new(image.data))
                 );
                 e.insert(img)
             }

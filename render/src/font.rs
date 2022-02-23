@@ -9,7 +9,6 @@ use font::{self};
 use std::rc::Rc;
 use super::FontEntry;
 
-
 pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
     ("Courier", "CourierStd.otf"),
     ("Courier-Bold", "CourierStd-Bold.otf"),
@@ -34,21 +33,47 @@ pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
     ("Arial-ItalicMT", "Arial-ItalicMT.otf"),
 ];
 
-pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts: &Path) -> Result<Option<Rc<FontEntry>>> {
+type FontRc = Rc<dyn font::Font + Send + Sync>;
+pub struct StandardCache {
+    inner: Vec<Option<FontRc>>
+}
+impl StandardCache {
+    pub fn new() -> Self {
+        StandardCache { inner: vec![None; STANDARD_FONTS.len()] }
+    }
+}
+
+pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts: &Path, cache: &mut StandardCache) -> Result<Option<Rc<FontEntry>>> {
     let pdf_font = resolve.get(font_ref)?;
     debug!("loading {:?}", pdf_font);
     
-    let data: Cow<[u8]> = match pdf_font.embedded_data() {
-        Some(Ok(data)) => data.into(),
+    let font: FontRc = match pdf_font.embedded_data() {
+        Some(Ok(data)) => {
+            let font =font::parse(&data).map_err(|e| {
+                let name = format!("font_{}", pdf_font.name.as_ref().map(|s| s.as_str()).unwrap_or("unnamed"));
+                std::fs::write(&name, &data).unwrap();
+                println!("font dumped in {}", name);
+                PdfError::Other { msg: format!("Font Error: {:?}", e) }
+            })?;
+            FontRc::from(font)
+        }
         Some(Err(e)) => return Err(e),
         None => {
-            match STANDARD_FONTS.iter().find(|&&(name, _)| pdf_font.name.as_ref().map(|s| s == name).unwrap_or(false)) {
-                Some(&(_, file_name)) => {
-                    if let Ok(data) = std::fs::read(standard_fonts.join(file_name)) {
-                        data.into()
+            match STANDARD_FONTS.iter().enumerate().find(|(_, &(name, _))| pdf_font.name.as_ref().map(|s| s == name).unwrap_or(false)) {
+                Some((i, &(_, file_name))) => {
+                    let cache_entry = &mut cache.inner[i];
+                    if let Some(rc) = cache_entry {
+                        rc.clone()
                     } else {
-                        warn!("can't open {} for {:?}", file_name, pdf_font.name);
-                        return Ok(None);
+                        if let Ok(data) = std::fs::read(standard_fonts.join(file_name)) {
+                            let font = font::parse(&data).map_err(|e| PdfError::Other { msg: format!("Font Error: {:?}", e) })?;
+                            let rc = FontRc::from(font);
+                            *cache_entry = Some(rc.clone());
+                            rc
+                        } else {
+                            warn!("can't open {} for {:?}", file_name, pdf_font.name);
+                            return Ok(None);
+                        }
                     }
                 }
                 None => {
@@ -59,12 +84,6 @@ pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts:
         }
     };
 
-    let font = font::parse(&data).map_err(|e| {
-        let name = format!("font_{}", pdf_font.name.as_ref().map(|s| s.as_str()).unwrap_or("unnamed"));
-        std::fs::write(&name, &data).unwrap();
-        println!("font dumped in {}", name);
-        PdfError::Other { msg: format!("Font Error: {:?}", e) }
-    })?;
     let entry = match FontEntry::build(font, pdf_font, resolve) {
         Ok(e) => Rc::new(e),
         Err(e) => {

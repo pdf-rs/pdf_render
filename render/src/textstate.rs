@@ -92,12 +92,12 @@ impl TextState {
         });
 
         let draw_mode = match self.mode {
-            TextMode::Fill => DrawMode::Fill(gs.fill_color),
-            TextMode::FillAndClip => DrawMode::Fill(gs.fill_color),
-            TextMode::FillThenStroke => DrawMode::FillStroke(gs.fill_color, gs.stroke_color, gs.stroke_style),
-            TextMode::Invisible => return,
-            TextMode::Stroke => DrawMode::Stroke(gs.stroke_color, gs.stroke_style),
-            TextMode::StrokeAndClip => DrawMode::Stroke(gs.stroke_color, gs.stroke_style),
+            TextMode::Fill => Some(DrawMode::Fill(gs.fill_color)),
+            TextMode::FillAndClip => Some(DrawMode::Fill(gs.fill_color)),
+            TextMode::FillThenStroke => Some(DrawMode::FillStroke(gs.fill_color, gs.stroke_color, gs.stroke_style)),
+            TextMode::Invisible => None,
+            TextMode::Stroke => Some(DrawMode::Stroke(gs.stroke_color, gs.stroke_style)),
+            TextMode::StrokeAndClip => Some(DrawMode::Stroke(gs.stroke_color, gs.stroke_style)),
         };
         let e = self.font_entry.as_ref().expect("no font");
         let mut bbox = BBox::empty();
@@ -140,7 +140,9 @@ impl TextState {
                 let transform = gs.transform * self.text_matrix * tr;
                 if glyph.path.len() != 0 {
                     bbox.add(gs.transform * transform * glyph.path.bounds());
-                    backend.draw_glyph(&glyph, draw_mode, transform);
+                    if let Some(draw_mode) = draw_mode {
+                        backend.draw_glyph(&glyph, draw_mode, transform);
+                    }
                 }
             } else {
                 debug!("no glyph for gid {:?}", gid);

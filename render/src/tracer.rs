@@ -16,7 +16,7 @@ use pdf::error::PdfError;
 use std::rc::Rc;
 use std::path::PathBuf;
 use std::collections::HashMap;
-use crate::font::load_font;
+use crate::font::{load_font, StandardCache};
 
 pub struct Tracer<'a> {
     items: Vec<DrawItem>,
@@ -26,12 +26,14 @@ pub struct Tracer<'a> {
 pub struct TraceCache {
     standard_fonts: PathBuf,
     fonts: HashMap<Ref<PdfFont>, Option<Rc<FontEntry>>>,
+    std: StandardCache,
 }
 impl TraceCache {
     pub fn new() -> Self {
         TraceCache {
             standard_fonts: PathBuf::from(std::env::var_os("STANDARD_FONTS").expect("no STANDARD_FONTS")),
             fonts: HashMap::new(),
+            std: StandardCache::new(),
         }
     }
 }
@@ -84,7 +86,7 @@ impl<'a> Backend for Tracer<'a> {
         match self.cache.fonts.entry(font_ref) {
             Entry::Occupied(e) => Ok(e.get().clone()),
             Entry::Vacant(entry) => {
-                match load_font(font_ref, resolve, self.cache.standard_fonts.as_ref()) {
+                match load_font(font_ref, resolve, self.cache.standard_fonts.as_ref(), &mut self.cache.std) {
                     Ok(f) => {
                         Ok(entry.insert(f.clone()).clone())
                     }

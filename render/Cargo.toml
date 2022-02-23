@@ -6,8 +6,6 @@ edition = "2021"
 
 [features]
 unstable = []
-dump = ["pdf/dump"]
-jpeg2k = ["pdf/jpeg2k"]
 
 [[bench]]
 name = "render"
