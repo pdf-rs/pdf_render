@@ -31,7 +31,7 @@ pub use cache::{Cache};
 pub use fontentry::FontEntry;
 pub use backend::{DrawMode, Backend};
 pub use scene::SceneBackend;
-pub use crate::image::load_image;
+pub use crate::image::{load_image, ImageData};
 use custom_debug_derive::Debug;
 
 use pdf::object::*;
