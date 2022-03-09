@@ -46,7 +46,7 @@ use std::rc::Rc;
 const SCALE: f32 = 25.4 / 72.;
 
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct BBox(Option<RectF>);
 impl BBox {
     pub fn empty() -> Self {
@@ -120,12 +120,15 @@ pub struct TextSpan {
     #[debug(skip)]
     pub font: Rc<FontEntry>,
     pub text: String,
+    pub chars: Vec<TextChar>,
     pub color: ColorU,
 
     // apply this transform to a text draw in at the origin with the given width and font-size
     pub transform: Transform2F,
-
-    // in text units
-    pub char_space: f32,
-    pub word_space: f32,
+}
+#[derive(Debug)]
+pub struct TextChar {
+    pub offset: usize,
+    pub pos: f32,
+    pub width: f32,
 }

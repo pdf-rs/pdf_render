@@ -17,7 +17,6 @@ fn bench_render_page(c: &mut Criterion) {
         }
     }
     group.finish();
-    cache.report();
 }
 
 criterion_group!(benches, bench_render_page);

@@ -20,9 +20,10 @@ use pathfinder_content::{
 use pathfinder_color::{ColorU, ColorF};
 use super::{
     graphicsstate::{GraphicsState},
-    textstate::{TextState},
+    textstate::{TextState, Span},
     BBox,
     DrawMode,
+    TextSpan,
 };
 
 trait Cvt {
@@ -262,20 +263,25 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             Op::SetTextMatrix { matrix } => self.text_state.set_matrix(matrix.cvt()),
             Op::TextNewline => self.text_state.next_line(),
             Op::TextDraw { ref text } => {
-                self.text_state.draw_text(self.backend, &self.graphics_state, &text.data);
+                self.text(|backend, text_state, graphics_state, span| {
+                    text_state.draw_text(backend, graphics_state, &text.data, span);
+                });
             },
             Op::TextDrawAdjusted { ref array } => {
-                let mut bb = BBox::empty();
-                for arg in array {
-                    match *arg {
-                        TextDrawAdjusted::Text(ref data) => {
-                            self.text_state.draw_text(self.backend, &self.graphics_state, data.as_bytes());
-                        },
-                        TextDrawAdjusted::Spacing(offset) => {
-                            self.text_state.advance(-0.001 * offset); // because why not PDF…
+                self.text(|backend, text_state, graphics_state, span| {
+                    for arg in array {
+                        match *arg {
+                            TextDrawAdjusted::Text(ref data) => {
+                                text_state.draw_text(backend, graphics_state, data.as_bytes(), span);
+                            },
+                            TextDrawAdjusted::Spacing(offset) => {
+                                // because why not PDF…
+                                let advance = text_state.advance(-0.001 * offset);
+                                span.width += advance;
+                            }
                         }
                     }
-                }
+                });
             },
             Op::XObject { ref name } => {
                 let &xobject_ref = self.resources.xobjects.get(name).ok_or(PdfError::NotFound { word: name.into()})?;
@@ -296,6 +302,32 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         }
 
         Ok(())
+    }
+
+    fn text(&mut self, inner: impl FnOnce(&mut B, &mut TextState, &mut GraphicsState, &mut Span)) {
+        let mut span = Span::default();
+        let tm = self.text_state.text_matrix;
+        let origin = tm.translation();
+
+        inner(&mut self.backend, &mut self.text_state, &mut self.graphics_state, &mut span);
+
+        if let (Some(bbox), Some(e)) = (span.bbox.rect(), self.text_state.font_entry.as_ref()) {
+            let transform = self.graphics_state.transform * tm * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
+            let p1 = origin;
+            let p2 = (tm * Transform2F::from_translation(Vector2F::new(span.width, self.text_state.font_size))).translation();
+
+            self.backend.add_text(TextSpan {
+                rect: self.graphics_state.transform * RectF::from_points(p1.min(p2), p1.max(p2)),
+                width: span.width,
+                bbox,
+                text: span.text,
+                chars: span.chars,
+                font: e.clone(),
+                font_size: self.text_state.font_size,
+                color: self.graphics_state.fill_color.to_u8(),
+                transform,
+            });
+        }
     }
 
     fn color_space(&self, name: &str) -> Result<&'a ColorSpace> {

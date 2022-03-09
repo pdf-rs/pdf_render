@@ -13,7 +13,7 @@ use super::{
     graphicsstate::{GraphicsState},
     DrawMode,
     Backend,
-    TextSpan,
+    TextChar,
 };
 use std::convert::TryInto;
 use pdf::content::TextMode;
@@ -68,7 +68,7 @@ impl TextState {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    pub fn draw_text(&mut self, backend: &mut impl Backend, gs: &GraphicsState, data: &[u8]) {
+    pub fn draw_text(&mut self, backend: &mut impl Backend, gs: &GraphicsState, data: &[u8], span: &mut Span) {
         let e = match self.font_entry {
             Some(ref e) => e,
             None => {
@@ -100,22 +100,13 @@ impl TextState {
             TextMode::StrokeAndClip => Some(DrawMode::Stroke(gs.stroke_color, gs.stroke_style)),
         };
         let e = self.font_entry.as_ref().expect("no font");
-        let mut bbox = BBox::empty();
 
-        let mut text = String::new();
-        let tm = self.text_matrix;
         let tr = Transform2F::row_major(
             self.horiz_scale * self.font_size, 0., 0.,
             0., self.font_size, self.rise
         ) * e.font.font_matrix();
         
-        let mut total_width = 0.0;
         for (cid, gid, is_space) in glyphs {
-            if let Some(part) = e.to_unicode.as_ref().and_then(|m| m.get(cid)) {
-                text.push_str(part);
-            } else {
-                debug!("no unicode for cid={}", cid);
-            }
 
             //debug!("cid {} -> gid {:?}", cid, gid);
             let gid = match gid {
@@ -133,13 +124,13 @@ impl TextState {
             if is_space {
                 let advance = self.word_space * self.horiz_scale + width;
                 self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
-                total_width += advance;
+                span.width += advance;
                 continue;
             }
             if let Some(glyph) = glyph {
                 let transform = gs.transform * self.text_matrix * tr;
                 if glyph.path.len() != 0 {
-                    bbox.add(gs.transform * transform * glyph.path.bounds());
+                    span.bbox.add(gs.transform * transform * glyph.path.bounds());
                     if let Some(draw_mode) = draw_mode {
                         backend.draw_glyph(&glyph, draw_mode, transform);
                     }
@@ -149,32 +140,33 @@ impl TextState {
             }
             let advance = self.char_space * self.horiz_scale + width;
             self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
-            total_width += advance;
-        }
-
-        if let Some(bbox) = bbox.rect() {
-            let origin = tm.translation();
-            let transform = gs.transform * tm * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
-            let p1 = origin;
-            let p2 = (tm * Transform2F::from_translation(Vector2F::new(total_width, self.font_size))).translation();
-
-            backend.add_text(TextSpan {
-                rect: gs.transform * RectF::from_points(p1.min(p2), p1.max(p2)),
-                width: total_width,
-                bbox,
-                text,
-                font: e.clone(),
-                font_size: self.font_size,
-                color: gs.fill_color.to_u8(),
-                transform,
-                char_space: self.char_space * self.horiz_scale,
-                word_space: self.word_space * self.horiz_scale,
-            });
+            
+            if let Some(part) = e.to_unicode.as_ref().and_then(|m| m.get(cid)) {
+                let offset = span.text.len();
+                span.text.push_str(part);
+                span.chars.push(TextChar {
+                    offset,
+                    pos: span.width,
+                    width
+                })
+            } else {
+                debug!("no unicode for cid={}", cid);
+            }
+            span.width += advance;
         }
     }
-    pub fn advance(&mut self, delta: f32) {
+    pub fn advance(&mut self, delta: f32) -> f32 {
         //debug!("advance by {}", delta);
         let advance = delta * self.font_size * self.horiz_scale;
         self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
+        advance
     }
+}
+
+#[derive(Default)]
+pub struct Span {
+    pub text: String,
+    pub chars: Vec<TextChar>,
+    pub width: f32,
+    pub bbox: BBox,
 }
