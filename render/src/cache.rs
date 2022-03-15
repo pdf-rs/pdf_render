@@ -78,7 +78,7 @@ impl Cache {
             Entry::Occupied(e) => e.into_mut(),
             Entry::Vacant(e) => {
                 let img = load_image(im, resolve).map(|image|
-                    Image::new(Vector2I::new(im.info.width as i32, im.info.height as i32), Arc::new(image.data))
+                    Image::new(Vector2I::new(im.width as i32, im.height as i32), Arc::new(image.data))
                 );
                 e.insert(img)
             }

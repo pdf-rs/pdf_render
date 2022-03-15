@@ -28,7 +28,7 @@ impl FontEntry {
         let encoding = pdf_font.encoding().clone();
         let base_encoding = encoding.as_ref().map(|e| &e.base);
 
-        let mut to_unicode = t!(pdf_font.to_unicode().transpose());
+        let mut to_unicode = t!(pdf_font.to_unicode(resolve).transpose());
         let encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
             let cmap = map.iter().enumerate().map(|(cid, &gid)| (cid as u16, GlyphId(gid as u32))).collect();

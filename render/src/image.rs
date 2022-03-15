@@ -2,6 +2,7 @@ use pdf::object::*;
 use pdf::error::PdfError;
 use std::path::Path;
 use pathfinder_color::ColorU;
+use std::sync::Arc;
 
 pub struct ImageData {
     pub data: Vec<ColorU>,
@@ -29,7 +30,7 @@ fn resize_alpha(data: &[u8], src_width: u32, src_height: u32, dest_width: u32, d
 }
 
 pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageData, PdfError> {
-    let raw_data = image.image_data()?;
+    let raw_data = image.image_data(resolve)?;
 
     let pixel_count = image.width as usize * image.height as usize;
     if raw_data.len() % pixel_count != 0 {
@@ -38,20 +39,41 @@ pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageD
     }
     info!("smask: {:?}", image.smask);
 
+    enum Data<'a> {
+        Arc(Arc<[u8]>),
+        Vec(Vec<u8>),
+        Slice(&'a [u8])
+    }
+    impl<'a> std::ops::Deref for Data<'a> {
+        type Target = [u8];
+        fn deref(&self) -> &[u8] {
+            match self {
+                Data::Arc(ref d) => &**d,
+                Data::Vec(ref d) => &*d,
+                Data::Slice(s) => s
+            }
+        }
+    }
+    impl<'a> From<Vec<u8>> for Data<'a> {
+        fn from(v: Vec<u8>) -> Self {
+            Data::Vec(v)
+        }
+    }
+
     let mask = t!(image.smask.map(|r| resolve.get(r)).transpose());
     let alpha = match mask {
         Some(ref mask) => {
-            let data = t!(mask.data());
+            let data = Data::Arc(t!(mask.data(resolve)));
             let mask_width = mask.width as usize;
             let mask_height = mask.height as usize;
             let bits = mask_width * mask_height * mask.bits_per_component as usize;
             assert_eq!(data.len(), (bits + 7) / 9);
 
-            let mut alpha: Cow<[u8]> = match mask.bits_per_component {
+            let mut alpha: Data = match mask.bits_per_component {
                 1 => data.iter().flat_map(|&b| (0..8).map(move |i| ex(b >> i, 1))).collect::<Vec<u8>>().into(),
                 2 => data.iter().flat_map(|&b| (0..4).map(move |i| ex(b >> 2*i, 2))).collect::<Vec<u8>>().into(),
                 4 => data.iter().flat_map(|&b| (0..2).map(move |i| ex(b >> 4*i, 4))).collect::<Vec<u8>>().into(),
-                8 => data.into(),
+                8 => data,
                 12 => data.chunks_exact(3).flat_map(|c| [c[0], c[1] << 4 | c[2] >> 4]).collect::<Vec<u8>>().into(),
                 16 => data.chunks_exact(2).map(|c| c[0]).collect::<Vec<u8>>().into(),
                 n => return Err(PdfError::Other { msg: format!("invalid bits per component {}", n)})
@@ -61,7 +83,7 @@ pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageD
             }
             alpha
         }
-        None => Cow::from(&[][..])
+        None => Data::Slice(&[][..])
     };
     fn ex(b: u8, bits: u8) -> u8 {
         (((b as u16 + 1) >> (8 - bits)) - 1) as u8

@@ -47,7 +47,7 @@ pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts:
     let pdf_font = resolve.get(font_ref)?;
     debug!("loading {:?}", pdf_font);
     
-    let font: FontRc = match pdf_font.embedded_data() {
+    let font: FontRc = match pdf_font.embedded_data(resolve) {
         Some(Ok(data)) => {
             let font =font::parse(&data).map_err(|e| {
                 let name = format!("font_{}", pdf_font.name.as_ref().map(|s| s.as_str()).unwrap_or("unnamed"));
