@@ -18,7 +18,7 @@ use font::Glyph;
 use super::{FontEntry, TextSpan, DrawMode, Backend};
 use pdf::font::Font as PdfFont;
 use pdf::error::PdfError;
-use std::rc::Rc;
+use std::sync::Arc;
 use crate::Cache;
 
 pub struct SceneBackend<'a> {
@@ -89,7 +89,7 @@ impl<'a> Backend for SceneBackend<'a> {
         }
     }
     fn draw_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, transform: Transform2F, resolve: &impl Resolve) {
-        if let &Ok(ref image) = self.cache.get_image(xobject_ref, im, resolve) {
+        if let Ok(ref image) = *self.cache.get_image(xobject_ref, im, resolve) {
             let size = image.size();
             let size_f = size.to_f32();
             let outline = Outline::from_rect(transform * RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));
@@ -105,7 +105,7 @@ impl<'a> Backend for SceneBackend<'a> {
             self.scene.push_draw_path(draw_path);
         }
     }
-    fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Rc<FontEntry>>, PdfError> {
+    fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
         self.cache.get_font(font_ref, resolve)
     }
     fn add_text(&mut self, span: TextSpan) {}

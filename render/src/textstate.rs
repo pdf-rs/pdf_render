@@ -1,10 +1,6 @@
 use pathfinder_geometry::{
     vector::Vector2F,
     transform2d::Transform2F,
-    rect::RectF,
-};
-use pathfinder_content::{
-    fill::FillRule,
 };
 use font::GlyphId;
 use super::{
@@ -17,7 +13,7 @@ use super::{
 };
 use std::convert::TryInto;
 use pdf::content::TextMode;
-use std::rc::Rc;
+use std::sync::Arc;
 use itertools::Either;
 
 
@@ -29,7 +25,7 @@ pub struct TextState {
     pub word_space: f32, // Word spacing
     pub horiz_scale: f32, // Horizontal scaling
     pub leading: f32, // Leading
-    pub font_entry: Option<Rc<FontEntry>>, // Text font
+    pub font_entry: Option<Arc<FontEntry>>, // Text font
     pub font_size: f32, // Text font size
     pub mode: TextMode, // Text rendering mode
     pub rise: f32, // Text rise

@@ -7,40 +7,26 @@ use std::sync::Arc;
 
 use pdf::file::File as PdfFile;
 use pdf::object::*;
-use pdf::content::Op;
-use pdf::backend::Backend as PdfBackend;
 use pdf::font::{Font as PdfFont};
-use pdf::error::{Result, PdfError};
+use pdf::error::{Result};
 
 use pathfinder_geometry::{
-    vector::{Vector2F, Vector2I},
-    rect::RectF, transform2d::Transform2F,
-};
-use pathfinder_color::ColorU;
-use pathfinder_renderer::{
-    scene::{DrawPath, Scene},
-    paint::Paint,
+    vector::{Vector2I},
 };
 use pathfinder_content::{
-    outline::Outline,
     pattern::{Image},
 };
-use font::{self};
-use std::rc::Rc;
 
-use super::{BBox, fontentry::FontEntry, renderstate::RenderState, Backend};
+use super::{fontentry::FontEntry};
 use super::image::load_image;
 use super::font::{load_font, StandardCache};
+use cachelib::sync::SyncCache;
 
-
-pub type FontMap = HashMap<Ref<PdfFont>, Option<Rc<FontEntry>>>;
-pub type ImageMap = HashMap<Ref<XObject>, Result<Image>>;
 pub struct Cache {
     // shared mapping of fontname -> font
-    fonts: FontMap,
+    fonts: SyncCache<Ref<PdfFont>, Option<Arc<FontEntry>>>,
     standard_fonts: PathBuf,
-    data_dir: Option<PathBuf>,
-    images: ImageMap,
+    images: SyncCache<Ref<XObject>, Arc<Result<Image>>>,
     std: StandardCache,
 }
 impl Cache {
@@ -56,32 +42,35 @@ impl Cache {
             panic!("STANDARD_FONTS (or fonts/) is not directory.");
         }
         Cache {
-            fonts: HashMap::new(),
-            images: HashMap::new(),
+            fonts: SyncCache::new(),
+            images: SyncCache::new(),
             standard_fonts,
-            data_dir: None,
             std: StandardCache::new(),
         }
     }
-    pub fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Rc<FontEntry>>> {
-        match self.fonts.entry(font_ref) {
-            Entry::Occupied(e) => Ok(e.get().clone()),
-            Entry::Vacant(e) => {
-                let font = load_font(font_ref, resolve, &self.standard_fonts, &mut self.std)?;
-                Ok(e.insert(font).clone())
+    pub fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, > {
+        let mut error = None;
+        let val = self.fonts.get(font_ref, || 
+            match load_font(font_ref, resolve, &self.standard_fonts, &mut self.std) {
+                Ok(Some(f)) => Some(Arc::new(f)),
+                Ok(None) => None,
+                Err(e) => {
+                    error = Some(e);
+                    None
+                }
             }
+        );
+        match error {
+            None => Ok(val),
+            Some(e) => Err(e)
         }
     }
 
-    pub fn get_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resolve: &impl Resolve) -> &Result<Image> {
-        match self.images.entry(xobject_ref) {
-            Entry::Occupied(e) => e.into_mut(),
-            Entry::Vacant(e) => {
-                let img = load_image(im, resolve).map(|image|
-                    Image::new(Vector2I::new(im.width as i32, im.height as i32), Arc::new(image.data))
-                );
-                e.insert(img)
-            }
-        }
+    pub fn get_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resolve: &impl Resolve) -> Arc<Result<Image>> {
+        self.images.get(xobject_ref, ||
+            Arc::new(load_image(im, resolve).map(|image|
+                Image::new(Vector2I::new(im.width as i32, im.height as i32), Arc::new(image.data))
+            ))
+        )
     }
 }

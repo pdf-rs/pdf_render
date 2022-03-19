@@ -5,7 +5,7 @@ use pdf::font::{Font as PdfFont, Widths, ToUnicodeMap};
 use pdf::object::{Resolve, RcRef};
 use pdf::error::PdfError;
 use pdf_encoding::{Encoding, glyphname_to_unicode};
-use std::rc::Rc;
+use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum TextEncoding {
@@ -14,7 +14,7 @@ pub enum TextEncoding {
 }
 
 pub struct FontEntry {
-    pub font: Rc<dyn Font>,
+    pub font: Arc<dyn Font + Sync + Send>,
     pub pdf_font: RcRef<PdfFont>,
     pub encoding: TextEncoding,
     pub widths: Option<Widths>,
@@ -23,7 +23,7 @@ pub struct FontEntry {
     pub to_unicode: Option<ToUnicodeMap>,
 }
 impl FontEntry {
-    pub fn build(font: Rc<dyn Font>, pdf_font: RcRef<PdfFont>, resolve: &impl Resolve) -> Result<FontEntry, PdfError> {
+    pub fn build(font: Arc<dyn Font + Sync + Send>, pdf_font: RcRef<PdfFont>, resolve: &impl Resolve) -> Result<FontEntry, PdfError> {
         let mut is_cid = pdf_font.is_cid();
         let encoding = pdf_font.encoding().clone();
         let base_encoding = encoding.as_ref().map(|e| &e.base);

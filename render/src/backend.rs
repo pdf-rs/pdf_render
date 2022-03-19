@@ -13,7 +13,7 @@ use pdf::error::PdfError;
 use font::Glyph;
 use super::{FontEntry, TextSpan};
 use pdf::font::Font as PdfFont;
-use std::rc::Rc;
+use std::sync::Arc;
 
 pub trait Backend {
     fn set_clip_path(&mut self, path: &Outline);
@@ -23,7 +23,7 @@ pub trait Backend {
     fn draw_glyph(&mut self, glyph: &Glyph, mode: DrawMode, transform: Transform2F) {
         self.draw(&glyph.path, mode, FillRule::Winding, transform);
     }
-    fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Rc<FontEntry>>, PdfError>;
+    fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError>;
     fn add_text(&mut self, span: TextSpan);
 }
 #[derive(Copy, Clone)]

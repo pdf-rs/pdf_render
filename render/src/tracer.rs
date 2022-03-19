@@ -3,42 +3,42 @@ use pathfinder_content::{
     outline::Outline,
     fill::FillRule,
 };
-use pathfinder_color::{ColorU, ColorF};
+use pathfinder_color::{ColorU};
 use pathfinder_geometry::{
     rect::RectF,
     transform2d::Transform2F,
     vector::Vector2F,
 };
-use pdf::object::{Ref, XObject, ImageXObject, Resolve, PlainRef};
+use pdf::object::{Ref, XObject, ImageXObject, Resolve};
 use font::Glyph;
 use pdf::font::Font as PdfFont;
 use pdf::error::PdfError;
-use std::rc::Rc;
+use std::sync::Arc;
 use std::path::PathBuf;
-use std::collections::HashMap;
 use crate::font::{load_font, StandardCache};
+use cachelib::sync::SyncCache;
 
 pub struct Tracer<'a> {
     items: Vec<DrawItem>,
     view_box: RectF,
-    cache: &'a mut TraceCache,
+    cache: &'a TraceCache,
 }
 pub struct TraceCache {
     standard_fonts: PathBuf,
-    fonts: HashMap<Ref<PdfFont>, Option<Rc<FontEntry>>>,
+    fonts: SyncCache<Ref<PdfFont>, Option<Arc<FontEntry>>>,
     std: StandardCache,
 }
 impl TraceCache {
     pub fn new() -> Self {
         TraceCache {
             standard_fonts: PathBuf::from(std::env::var_os("STANDARD_FONTS").expect("no STANDARD_FONTS")),
-            fonts: HashMap::new(),
+            fonts: SyncCache::new(),
             std: StandardCache::new(),
         }
     }
 }
 impl<'a> Tracer<'a> {
-    pub fn new(cache: &'a mut TraceCache) -> Self {
+    pub fn new(cache: &'a TraceCache) -> Self {
         Tracer {
             items: vec![],
             view_box: RectF::new(Vector2F::zero(), Vector2F::zero()),
@@ -81,21 +81,21 @@ impl<'a> Backend for Tracer<'a> {
         }));
     }
     fn draw_glyph(&mut self, glyph: &Glyph, mode: DrawMode, transform: Transform2F) {}
-    fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Rc<FontEntry>>, PdfError> {
-        use std::collections::hash_map::Entry;
-        match self.cache.fonts.entry(font_ref) {
-            Entry::Occupied(e) => Ok(e.get().clone()),
-            Entry::Vacant(entry) => {
-                match load_font(font_ref, resolve, self.cache.standard_fonts.as_ref(), &mut self.cache.std) {
-                    Ok(f) => {
-                        Ok(entry.insert(f.clone()).clone())
-                    }
-                    Err(e) => {
-                        entry.insert(None);
-                        Err(e)
-                    }
+    fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
+        let mut error = None;
+        let val = self.cache.fonts.get(font_ref, || 
+            match load_font(font_ref, resolve, &self.cache.standard_fonts, &self.cache.std) {
+                Ok(Some(f)) => Some(Arc::new(f)),
+                Ok(None) => None,
+                Err(e) => {
+                    error = Some(e);
+                    None
                 }
             }
+        );
+        match error {
+            None => Ok(val),
+            Some(e) => Err(e)
         }
     }
     fn add_text(&mut self, span: TextSpan) {

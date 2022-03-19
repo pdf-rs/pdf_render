@@ -42,7 +42,7 @@ use pathfinder_geometry::{
 };
 use pathfinder_color::ColorU;
 use renderstate::RenderState;
-use std::rc::Rc;
+use std::sync::Arc;
 const SCALE: f32 = 25.4 / 72.;
 
 
@@ -118,7 +118,7 @@ pub struct TextSpan {
     pub bbox: RectF,
     pub font_size: f32,
     #[debug(skip)]
-    pub font: Rc<FontEntry>,
+    pub font: Arc<FontEntry>,
     pub text: String,
     pub chars: Vec<TextChar>,
     pub color: ColorU,

@@ -6,8 +6,9 @@ use pdf::font::{Font as PdfFont};
 use pdf::error::{Result, PdfError};
 
 use font::{self};
-use std::rc::Rc;
+use std::sync::Arc;
 use super::FontEntry;
+use cachelib::sync::SyncCache;
 
 pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
     ("Courier", "CourierStd.otf"),
@@ -33,17 +34,17 @@ pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
     ("Arial-ItalicMT", "Arial-ItalicMT.otf"),
 ];
 
-type FontRc = Rc<dyn font::Font + Send + Sync>;
+type FontRc = Arc<dyn font::Font + Send + Sync>;
 pub struct StandardCache {
-    inner: Vec<Option<FontRc>>
+    inner: SyncCache<usize, Option<FontRc>>
 }
 impl StandardCache {
     pub fn new() -> Self {
-        StandardCache { inner: vec![None; STANDARD_FONTS.len()] }
+        StandardCache { inner: SyncCache::new() }
     }
 }
 
-pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts: &Path, cache: &mut StandardCache) -> Result<Option<Rc<FontEntry>>> {
+pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts: &Path, cache: &StandardCache) -> Result<Option<FontEntry>> {
     let pdf_font = resolve.get(font_ref)?;
     debug!("loading {:?}", pdf_font);
     
@@ -61,17 +62,25 @@ pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts:
         None => {
             match STANDARD_FONTS.iter().enumerate().find(|(_, &(name, _))| pdf_font.name.as_ref().map(|s| s == name).unwrap_or(false)) {
                 Some((i, &(_, file_name))) => {
-                    let cache_entry = &mut cache.inner[i];
-                    if let Some(rc) = cache_entry {
-                        rc.clone()
-                    } else {
-                        if let Ok(data) = std::fs::read(standard_fonts.join(file_name)) {
-                            let font = font::parse(&data).map_err(|e| PdfError::Other { msg: format!("Font Error: {:?}", e) })?;
-                            let rc = FontRc::from(font);
-                            *cache_entry = Some(rc.clone());
-                            rc
-                        } else {
-                            warn!("can't open {} for {:?}", file_name, pdf_font.name);
+                    let val = cache.inner.get(i, || {
+                        let data = match std::fs::read(standard_fonts.join(file_name)) {
+                            Ok(data) => data,
+                            Err(e) => {
+                                warn!("can't open {} for {:?} {:?}", file_name, pdf_font.name, e);
+                                return None;
+                            }
+                        };
+                        match font::parse(&data) {
+                            Ok(f) => Some(f.into()),
+                            Err(e) => {
+                                warn!("Font Error: {:?}", e);
+                                return None;
+                            }
+                        }
+                    });
+                    match val {
+                        Some(f) => f,
+                        None => {
                             return Ok(None);
                         }
                     }
@@ -84,14 +93,5 @@ pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts:
         }
     };
 
-    let entry = match FontEntry::build(font, pdf_font, resolve) {
-        Ok(e) => Rc::new(e),
-        Err(e) => {
-            info!("Failed to build FontEntry: {:?}", e);
-            return Ok(None);
-        }
-    };
-    debug!("is_cid={}", entry.is_cid);
-    
-    Ok(Some(entry))
+    Ok(Some(FontEntry::build(font, pdf_font, resolve)?))
 }
