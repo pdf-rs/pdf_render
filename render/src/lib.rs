@@ -28,7 +28,7 @@ mod scene;
 mod font;
 
 pub use cache::{Cache};
-pub use fontentry::FontEntry;
+pub use fontentry::{FontEntry, TextEncoding};
 pub use backend::{DrawMode, Backend};
 pub use scene::SceneBackend;
 pub use crate::image::{load_image, ImageData};
