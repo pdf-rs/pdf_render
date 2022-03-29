@@ -80,11 +80,15 @@ impl TextState {
         };
 
         let glyphs = codepoints.map(|cid| {
-            let (gid, is_space) = match e.encoding {
-                TextEncoding::CID => (Some(GlyphId(cid as u32)), false),
-                TextEncoding::Cmap(ref cmap) => (cmap.get(&cid).cloned(), cid == 0x20),
-            };
-            (cid, gid, is_space)
+            match e.encoding {
+                TextEncoding::CID => (cid, Some(GlyphId(cid as u32)), false, std::char::from_u32(0xf000 + cid as u32)),
+                TextEncoding::Cmap(ref cmap) => {
+                    match cmap.get(&cid) {
+                        Some(&(gid, unicode)) => (cid, Some(gid), cid == 0x20, unicode),
+                        None => (cid, None, cid == 0x20, None)
+                    }
+                }
+            }
         });
 
         let draw_mode = match self.mode {
@@ -102,7 +106,7 @@ impl TextState {
             0., self.font_size, self.rise
         ) * e.font.font_matrix();
         
-        for (cid, gid, is_space) in glyphs {
+        for (cid, gid, is_space, unicode) in glyphs {
 
             //debug!("cid {} -> gid {:?}", cid, gid);
             let gid = match gid {
@@ -137,16 +141,14 @@ impl TextState {
             let advance = self.char_space * self.horiz_scale + width;
             self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
             
-            if let Some(part) = e.to_unicode.as_ref().and_then(|m| m.get(cid)) {
-                let offset = span.text.len();
-                span.text.push_str(part);
+            let offset = span.text.len();
+            if let Some(c) = unicode {
+                span.text.push(c);
                 span.chars.push(TextChar {
                     offset,
                     pos: span.width,
                     width
-                })
-            } else {
-                debug!("no unicode for cid={}", cid);
+                });
             }
             span.width += advance;
         }
