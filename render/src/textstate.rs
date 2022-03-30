@@ -16,6 +16,10 @@ use pdf::content::TextMode;
 use std::sync::Arc;
 use itertools::Either;
 
+enum CharOrStr<'a> {
+    Char(char),
+    Str(&'a str)
+}
 
 #[derive(Clone)]
 pub struct TextState {
@@ -82,13 +86,13 @@ impl TextState {
         let glyphs = codepoints.map(|cid| {
             match e.encoding {
                 TextEncoding::CID(ref to_unicode) => {
-                    let unicode = to_unicode.get(cid).and_then(|s| s.chars().next())
-                        .or_else(|| std::char::from_u32(0xf000 + cid as u32));
+                    let unicode = to_unicode.get(cid).map(CharOrStr::Str)
+                        .or_else(|| std::char::from_u32(0xf000 + cid as u32).map(CharOrStr::Char));
                     (cid, Some(GlyphId(cid as u32)), false, unicode)
                 },
                 TextEncoding::Cmap(ref cmap) => {
                     match cmap.get(&cid) {
-                        Some(&(gid, unicode)) => (cid, Some(gid), cid == 0x20, unicode),
+                        Some(&(gid, unicode)) => (cid, Some(gid), cid == 0x20, unicode.map(CharOrStr::Char)),
                         None => (cid, None, cid == 0x20, None)
                     }
                 }
@@ -147,7 +151,10 @@ impl TextState {
             
             let offset = span.text.len();
             if let Some(c) = unicode {
-                span.text.push(c);
+                match c {
+                    CharOrStr::Char(c) => span.text.push(c),
+                    CharOrStr::Str(s) => span.text.push_str(s),
+                }
                 span.chars.push(TextChar {
                     offset,
                     pos: span.width,
