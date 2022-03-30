@@ -81,7 +81,11 @@ impl TextState {
 
         let glyphs = codepoints.map(|cid| {
             match e.encoding {
-                TextEncoding::CID => (cid, Some(GlyphId(cid as u32)), false, std::char::from_u32(0xf000 + cid as u32)),
+                TextEncoding::CID(ref to_unicode) => {
+                    let unicode = to_unicode.get(cid).and_then(|s| s.chars().next())
+                        .or_else(|| std::char::from_u32(0xf000 + cid as u32));
+                    (cid, Some(GlyphId(cid as u32)), false, unicode)
+                },
                 TextEncoding::Cmap(ref cmap) => {
                     match cmap.get(&cid) {
                         Some(&(gid, unicode)) => (cid, Some(gid), cid == 0x20, unicode),

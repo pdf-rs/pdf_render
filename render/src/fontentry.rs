@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use font::{self, Font, GlyphId};
+use font::{self, Font, GlyphId, TrueTypeFont, CffFont};
 use pdf::encoding::BaseEncoding;
 use pdf::font::{Font as PdfFont, Widths, ToUnicodeMap};
 use pdf::object::{Resolve, RcRef};
@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 #[derive(Debug)]
 pub enum TextEncoding {
-    CID,
+    CID(ToUnicodeMap),
     Cmap(HashMap<u16, (GlyphId, Option<char>)>)
 }
 
@@ -27,17 +27,17 @@ impl FontEntry {
         let encoding = pdf_font.encoding().clone();
         let base_encoding = encoding.as_ref().map(|e| &e.base);
 
-        let mut to_unicode = t!(pdf_font.to_unicode(resolve).transpose());
+        let mut to_unicode = t!(pdf_font.to_unicode(resolve).transpose()).unwrap_or_else(|| ToUnicodeMap::new());
         let encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
             let cmap = map.iter().enumerate().map(|(cid, &gid)| {
-                let unicode = to_unicode.as_ref().and_then(|u| u.get(cid as u16)).and_then(|s| s.chars().next());
+                let unicode = to_unicode.get(cid as u16).and_then(|s| s.chars().next());
                 (cid as u16, (GlyphId(gid as u32), unicode))
             }).collect();
             TextEncoding::Cmap(cmap)
         } else if base_encoding == Some(&BaseEncoding::IdentityH) {
             is_cid = true;
-            TextEncoding::CID
+            TextEncoding::CID(to_unicode)
         } else {
             let mut cmap = HashMap::new();
             let source_encoding = match base_encoding {
@@ -62,18 +62,18 @@ impl FontEntry {
                         for b in 0 .. 256 {
                             if let Some(gid) = transcoder.translate(b).and_then(|cp| font.gid_for_codepoint(cp)) {
                                 cmap.insert(b as u16, (gid, forward.get(b as u8)));
-                                //debug!("{} -> {:?}", b, gid);
+                                debug!("{} -> {:?}", b, gid);
                             }
                         }
                     }
                 },
-                (Some(source), None) => {
-                    if let Some(encoder) = source.to(Encoding::Unicode) {
+                (Some(enc), None) => {
+                    if let Some(encoder) = enc.to(Encoding::Unicode) {
                         for b in 0 .. 256 {
                             let unicode = encoder.translate(b as u32);
                             if let Some(gid) = unicode.and_then(|c| font.gid_for_unicode_codepoint(c)) {
                                 cmap.insert(b, (gid, unicode.and_then(std::char::from_u32)));
-                                //debug!("{} -> {:?}", b, gid);
+                                debug!("{} -> {:?}", b, gid);
                             }
                         }
                     }
@@ -82,11 +82,15 @@ impl FontEntry {
                     warn!("can't translate from text encoding {:?} to font encoding {:?}", base_encoding, font_encoding);
                     
                     // assuming same encoding
+                    /*
                     for cp in 0 .. 256 {
                         if let Some(gid) = font.gid_for_codepoint(cp) {
-                            cmap.insert(cp as u16, (gid, std::char::from_u32(0xf000 + cp)));
+                            let unicode = to_unicode.get(cp as u16).and_then(|s| s.chars().next())
+                                .or_else(|| std::char::from_u32(0xf000 + cp));
+                            cmap.insert(cp as u16, (gid, unicode));
                         }
                     }
+                    */
                 }
             }
             if let Some(encoding) = encoding {
@@ -103,10 +107,9 @@ impl FontEntry {
                     }
                 }
             }
-            //debug!("cmap: {:?}", cmap);
-            //debug!("to_unicode: {:?}", to_unicode);
-            if cmap.is_empty() {
-                TextEncoding::CID
+            
+            if cmap.len() == 0 {
+                TextEncoding::CID(to_unicode)
             } else {
                 TextEncoding::Cmap(cmap)
             }

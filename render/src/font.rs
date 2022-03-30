@@ -50,7 +50,7 @@ pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts:
     
     let font: FontRc = match pdf_font.embedded_data(resolve) {
         Some(Ok(data)) => {
-            let font =font::parse(&data).map_err(|e| {
+            let font = font::parse(&data).map_err(|e| {
                 let name = format!("font_{}", pdf_font.name.as_ref().map(|s| s.as_str()).unwrap_or("unnamed"));
                 std::fs::write(&name, &data).unwrap();
                 println!("font dumped in {}", name);
