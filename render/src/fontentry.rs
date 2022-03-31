@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use font::{self, Font, GlyphId, TrueTypeFont, CffFont};
 use pdf::encoding::BaseEncoding;
-use pdf::font::{Font as PdfFont, Widths, ToUnicodeMap};
+use pdf::font::{Font as PdfFont, Widths, ToUnicodeMap, CidToGidMap};
 use pdf::object::{Resolve, RcRef};
 use pdf::error::PdfError;
 use pdf_encoding::{Encoding, glyphname_to_unicode};
@@ -26,15 +26,20 @@ impl FontEntry {
         let mut is_cid = pdf_font.is_cid();
         let encoding = pdf_font.encoding().clone();
         let base_encoding = encoding.as_ref().map(|e| &e.base);
-
+        
         let mut to_unicode = t!(pdf_font.to_unicode(resolve).transpose()).unwrap_or_else(|| ToUnicodeMap::new());
         let encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
-            let cmap = map.iter().enumerate().map(|(cid, &gid)| {
-                let unicode = to_unicode.get(cid as u16).and_then(|s| s.chars().next());
-                (cid as u16, (GlyphId(gid as u32), unicode))
-            }).collect();
-            TextEncoding::Cmap(cmap)
+            match map {
+                CidToGidMap::Identity => TextEncoding::CID(to_unicode),
+                CidToGidMap::Table(ref data) => {
+                    let cmap = data.iter().enumerate().map(|(cid, &gid)| {
+                        let unicode = to_unicode.get(cid as u16).and_then(|s| s.chars().next());
+                        (cid as u16, (GlyphId(gid as u32), unicode))
+                    }).collect();
+                    TextEncoding::Cmap(cmap)
+                }
+            }
         } else if base_encoding == Some(&BaseEncoding::IdentityH) {
             is_cid = true;
             TextEncoding::CID(to_unicode)

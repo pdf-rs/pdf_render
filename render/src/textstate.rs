@@ -88,12 +88,12 @@ impl TextState {
                 TextEncoding::CID(ref to_unicode) => {
                     let unicode = to_unicode.get(cid).map(CharOrStr::Str)
                         .or_else(|| std::char::from_u32(0xf000 + cid as u32).map(CharOrStr::Char));
-                    (cid, Some(GlyphId(cid as u32)), false, unicode)
+                    (cid, Some(GlyphId(cid as u32)), unicode)
                 },
                 TextEncoding::Cmap(ref cmap) => {
                     match cmap.get(&cid) {
-                        Some(&(gid, unicode)) => (cid, Some(gid), cid == 0x20, unicode.map(CharOrStr::Char)),
-                        None => (cid, None, cid == 0x20, None)
+                        Some(&(gid, unicode)) => (cid, Some(gid), unicode.map(CharOrStr::Char)),
+                        None => (cid, None, None)
                     }
                 }
             }
@@ -114,7 +114,8 @@ impl TextState {
             0., self.font_size, self.rise
         ) * e.font.font_matrix();
         
-        for (cid, gid, is_space, unicode) in glyphs {
+        for (cid, gid, unicode) in glyphs {
+            let is_space = !e.is_cid && cid == 0x20;
 
             //debug!("cid {} -> gid {:?}", cid, gid);
             let gid = match gid {
