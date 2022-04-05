@@ -115,7 +115,7 @@ impl TextState {
         ) * e.font.font_matrix();
         
         for (cid, gid, unicode) in glyphs {
-            let is_space = !e.is_cid && cid == 0x20;
+            let is_space = matches!(e.encoding, TextEncoding::Cmap(_)) && cid == 0x20;
 
             //debug!("cid {} -> gid {:?}", cid, gid);
             let gid = match gid {
