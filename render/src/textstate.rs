@@ -87,7 +87,7 @@ impl TextState {
             match e.encoding {
                 TextEncoding::CID(ref to_unicode) => {
                     let unicode = to_unicode.get(cid).map(CharOrStr::Str)
-                        .or_else(|| std::char::from_u32(0xf000 + cid as u32).map(CharOrStr::Char));
+                        .or_else(|| std::char::from_u32(cid as u32).map(CharOrStr::Char));
                     (cid, Some(GlyphId(cid as u32)), unicode)
                 },
                 TextEncoding::Cmap(ref cmap) => {

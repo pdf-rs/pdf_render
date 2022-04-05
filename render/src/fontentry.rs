@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use font::{self, Font, GlyphId, TrueTypeFont, CffFont};
+use font::{self, Font, GlyphId, TrueTypeFont, CffFont, Type1Font};
 use pdf::encoding::BaseEncoding;
 use pdf::font::{Font as PdfFont, Widths, ToUnicodeMap, CidToGidMap};
 use pdf::object::{Resolve, RcRef};
@@ -27,7 +27,15 @@ impl FontEntry {
         let encoding = pdf_font.encoding().clone();
         let base_encoding = encoding.as_ref().map(|e| &e.base);
         
-        let mut to_unicode = t!(pdf_font.to_unicode(resolve).transpose()).unwrap_or_else(|| ToUnicodeMap::new());
+        let to_unicode = t!(pdf_font.to_unicode(resolve).transpose()).unwrap_or_else(|| {
+            if let Some(type1) = font.downcast_ref::<Type1Font>() {
+                ToUnicodeMap::create(type1.unicode_names().map(|(gid, uni)| (gid.0 as u16, uni.into())))
+            } else {
+                let chars = (0..font.num_glyphs() as u16)
+                    .filter_map(|cid| std::char::from_u32(cid as u32).map(|c| (cid, c.to_string())));
+                ToUnicodeMap::create(chars)
+            }
+        });
         let encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
             match map {
