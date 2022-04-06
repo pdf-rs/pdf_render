@@ -10,7 +10,7 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub enum TextEncoding {
     CID(ToUnicodeMap),
-    Cmap(HashMap<u16, (GlyphId, Option<char>)>)
+    Cmap(HashMap<u16, (GlyphId, Option<String>)>)
 }
 
 pub struct FontEntry {
@@ -36,13 +36,14 @@ impl FontEntry {
                 ToUnicodeMap::create(chars)
             }
         });
+        dbg!(&to_unicode);
         let encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
             match map {
                 CidToGidMap::Identity => TextEncoding::CID(to_unicode),
                 CidToGidMap::Table(ref data) => {
                     let cmap = data.iter().enumerate().map(|(cid, &gid)| {
-                        let unicode = to_unicode.get(cid as u16).and_then(|s| s.chars().next());
+                        let unicode = to_unicode.get(cid as u16).map(|s| s.into());
                         (cid as u16, (GlyphId(gid as u32), unicode))
                     }).collect();
                     TextEncoding::Cmap(cmap)
@@ -74,7 +75,7 @@ impl FontEntry {
                         let forward = source.forward_map().unwrap();
                         for b in 0 .. 256 {
                             if let Some(gid) = transcoder.translate(b).and_then(|cp| font.gid_for_codepoint(cp)) {
-                                cmap.insert(b as u16, (gid, forward.get(b as u8)));
+                                cmap.insert(b as u16, (gid, forward.get(b as u8).map(|c| c.to_string())));
                                 debug!("{} -> {:?}", b, gid);
                             }
                         }
@@ -85,7 +86,7 @@ impl FontEntry {
                         for b in 0 .. 256 {
                             let unicode = encoder.translate(b as u32);
                             if let Some(gid) = unicode.and_then(|c| font.gid_for_unicode_codepoint(c)) {
-                                cmap.insert(b, (gid, unicode.and_then(std::char::from_u32)));
+                                cmap.insert(b, (gid, unicode.and_then(std::char::from_u32).map(|c| c.to_string())));
                                 debug!("{} -> {:?}", b, gid);
                             }
                         }
@@ -108,13 +109,15 @@ impl FontEntry {
             }
             if let Some(encoding) = encoding {
                 for (&cp, name) in encoding.differences.iter() {
-                    //debug!("{} -> {}", cp, name);
+                    debug!("{} -> {}", cp, name);
                     match font.gid_for_name(&name) {
                         Some(gid) => {
-                            let unicode = glyphname_to_unicode(name)
-                                .or_else(|| name.find(".").and_then(|i| glyphname_to_unicode(&name[..i])))
-                                .and_then(|s| s.chars().next());
-                            cmap.insert(cp as u16, (gid, unicode));
+                            debug!(" -> {:?}", gid);
+                            let unicode = to_unicode.get(cp as u16)
+                                .or_else(|| glyphname_to_unicode(name))
+                                .or_else(|| name.find(".").and_then(|i| glyphname_to_unicode(&name[..i])));
+                            
+                            cmap.insert(cp as u16, (gid, unicode.map(|s| s.into())));
                         }
                         None => info!("no glyph for name {}", name)
                     }

@@ -16,11 +16,6 @@ use pdf::content::TextMode;
 use std::sync::Arc;
 use itertools::Either;
 
-enum CharOrStr<'a> {
-    Char(char),
-    Str(&'a str)
-}
-
 #[derive(Clone)]
 pub struct TextState {
     pub text_matrix: Transform2F, // tracks current glyph
@@ -86,13 +81,12 @@ impl TextState {
         let glyphs = codepoints.map(|cid| {
             match e.encoding {
                 TextEncoding::CID(ref to_unicode) => {
-                    let unicode = to_unicode.get(cid).map(CharOrStr::Str)
-                        .or_else(|| std::char::from_u32(cid as u32).map(CharOrStr::Char));
+                    let unicode = to_unicode.get(cid);
                     (cid, Some(GlyphId(cid as u32)), unicode)
                 },
                 TextEncoding::Cmap(ref cmap) => {
                     match cmap.get(&cid) {
-                        Some(&(gid, unicode)) => (cid, Some(gid), unicode.map(CharOrStr::Char)),
+                        Some(&(gid, ref unicode)) => (cid, Some(gid), unicode.as_deref()),
                         None => (cid, None, None)
                     }
                 }
@@ -151,11 +145,8 @@ impl TextState {
             self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
             
             let offset = span.text.len();
-            if let Some(c) = unicode {
-                match c {
-                    CharOrStr::Char(c) => span.text.push(c),
-                    CharOrStr::Str(s) => span.text.push_str(s),
-                }
+            if let Some(s) = unicode {
+                span.text.push_str(s);
                 span.chars.push(TextChar {
                     offset,
                     pos: span.width,
