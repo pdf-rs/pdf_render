@@ -36,7 +36,7 @@ impl FontEntry {
                 ToUnicodeMap::create(chars)
             }
         });
-        dbg!(&to_unicode);
+        
         let encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
             match map {
