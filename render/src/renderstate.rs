@@ -425,7 +425,13 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                 ColorSpace::Icc(ref icc) => {
                     match icc.info.alternate {
                         Some(ref alt) => alt,
-                        None => return Err(PdfError::Other { msg: format!("ICC profile without alternate color space") }),
+                        None => {
+                            match args.len() {
+                                3 => &ColorSpace::DeviceRGB,
+                                4 => &ColorSpace::DeviceCMYK,
+                                _ => return Err(PdfError::Other { msg: format!("ICC profile without alternate color space") })
+                            }
+                        }
                     }
                 }
                 _ => &**cs
