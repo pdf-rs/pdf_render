@@ -36,9 +36,11 @@ impl FontEntry {
                 ToUnicodeMap::create(chars)
             }
         });
+        debug!("to_unicode: {:?}", to_unicode);
         
         let encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
+            debug!("gid to cid map: {:?}", map);
             match map {
                 CidToGidMap::Identity => TextEncoding::CID(to_unicode),
                 CidToGidMap::Table(ref data) => {
@@ -96,30 +98,27 @@ impl FontEntry {
                     warn!("can't translate from text encoding {:?} to font encoding {:?}", base_encoding, font_encoding);
                     
                     // assuming same encoding
-                    /*
-                    for cp in 0 .. 256 {
-                        if let Some(gid) = font.gid_for_codepoint(cp) {
-                            let unicode = to_unicode.get(cp as u16).and_then(|s| s.chars().next())
-                                .or_else(|| std::char::from_u32(0xf000 + cp));
-                            cmap.insert(cp as u16, (gid, unicode));
-                        }
-                    }
-                    */
+                    
+                    
                 }
             }
             if let Some(encoding) = encoding {
                 for (&cp, name) in encoding.differences.iter() {
-                    debug!("{} -> {}", cp, name);
                     match font.gid_for_name(&name) {
                         Some(gid) => {
-                            debug!(" -> {:?}", gid);
-                            let unicode = to_unicode.get(cp as u16)
-                                .or_else(|| glyphname_to_unicode(name))
+                            let unicode = glyphname_to_unicode(name)
                                 .or_else(|| name.find(".").and_then(|i| glyphname_to_unicode(&name[..i])));
                             
+                            debug!("{} -> gid {:?}, unicode {:?}", cp, gid, unicode);
                             cmap.insert(cp as u16, (gid, unicode.map(|s| s.into())));
                         }
                         None => info!("no glyph for name {}", name)
+                    }
+                }
+            } else {
+                for (cp, unicode) in to_unicode.iter() {
+                    if let Some(gid) = font.gid_for_unicode_codepoint(cp as u32) {
+                        cmap.insert(cp as u16, (gid, Some(unicode.into())));
                     }
                 }
             }
