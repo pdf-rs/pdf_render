@@ -43,6 +43,7 @@ use pathfinder_geometry::{
 use pathfinder_color::ColorU;
 use renderstate::RenderState;
 use std::sync::Arc;
+use itertools::Itertools;
 const SCALE: f32 = 25.4 / 72.;
 
 
@@ -125,6 +126,15 @@ pub struct TextSpan {
 
     // apply this transform to a text draw in at the origin with the given width and font-size
     pub transform: Transform2F,
+}
+impl TextSpan {
+    pub fn parts(&self) -> impl Iterator<Item=(&str, f32, usize)> + '_ {
+        self.chars.iter().map(|c| (c.offset, c.pos))
+            .chain(std::iter::once((self.text.len(), 0.0)))
+            .tuple_windows()
+            .map(|((start, pos), (end, _))| (&self.text[start..end], pos, start))
+
+    }
 }
 #[derive(Debug)]
 pub struct TextChar {
