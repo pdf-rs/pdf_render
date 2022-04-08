@@ -219,11 +219,11 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 }
             },
             Op::StrokeColor { ref color } => {
-                let color = t!(convert_color(&mut self.graphics_state.stroke_color_space, color, &self.resources));
+                let color = t!(convert_color(&mut self.graphics_state.stroke_color_space, color, &self.resources, self.resolve.options()));
                 self.graphics_state.set_stroke_color(color);
             },
             Op::FillColor { ref color } => {
-                let color = t!(convert_color(&mut self.graphics_state.fill_color_space, color, &self.resources));
+                let color = t!(convert_color(&mut self.graphics_state.fill_color_space, color, &self.resources, self.resolve.options()));
                 self.graphics_state.set_fill_color(color);
             },
             Op::FillColorSpace { ref name } => {
@@ -396,7 +396,17 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
     }
 }
 
-fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resources) -> Result<(f32, f32, f32)> {
+fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resources, options: &ParseOptions) -> Result<(f32, f32, f32)> {
+    match convert_color2(cs, color, resources) {
+        Ok(color) => Ok(color),
+        Err(e) if options.allow_error_in_option => {
+            warn!("failed to convert color: {:?}", e);
+            Ok((0.0, 0.0, 0.0))
+        }
+        Err(e) => Err(e)
+    }
+}
+fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resources) -> Result<(f32, f32, f32)> {
     match *color {
         Color::Gray(g) => {
             *cs = &ColorSpace::DeviceGray;
