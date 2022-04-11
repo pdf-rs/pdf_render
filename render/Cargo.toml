@@ -29,6 +29,7 @@ image = "0.23"
 instant = "*"
 custom_debug_derive = "*"
 cachelib = { git = "https://github.com/s3bk/cachelib" }
+istring = { git = "https://github.com/s3bk/istring" }
 
 [dev-dependencies]
 criterion = "0.3"

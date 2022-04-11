@@ -284,7 +284,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 });
             },
             Op::XObject { ref name } => {
-                let &xobject_ref = self.resources.xobjects.get(name).ok_or(PdfError::NotFound { word: name.into()})?;
+                let &xobject_ref = self.resources.xobjects.get(name).ok_or(PdfError::NotFound { word: name.as_str().into()})?;
                 let xobject = self.resolve.get(xobject_ref)?;
                 match *xobject {
                     XObject::Image(ref im) => {
@@ -383,7 +383,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
     fn get_properties<'b>(&'b self, p: &'b Primitive) -> Result<&'b Dictionary> {
         match p {
             Primitive::Dictionary(ref dict) => Ok(dict),
-            Primitive::Name(ref name) => self.resources.properties.get(name)
+            Primitive::Name(ref name) => self.resources.properties.get(name.as_str())
                 .map(|rc| &**rc)
                 .ok_or_else(|| {
                     PdfError::MissingEntry { typ: "Properties", field: name.into() }

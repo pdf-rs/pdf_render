@@ -128,15 +128,25 @@ pub struct TextSpan {
     pub transform: Transform2F,
 }
 impl TextSpan {
-    pub fn parts(&self) -> impl Iterator<Item=(&str, f32, usize)> + '_ {
-        self.chars.iter().map(|c| (c.offset, c.pos))
-            .chain(std::iter::once((self.text.len(), 0.0)))
+    pub fn parts(&self) -> impl Iterator<Item=Part> + '_ {
+        self.chars.iter().cloned()
+            .chain(std::iter::once(TextChar { offset: self.text.len(), pos: self.width, width: 0.0 }))
             .tuple_windows()
-            .map(|((start, pos), (end, _))| (&self.text[start..end], pos, start))
-
+            .map(|(a, b)| Part {
+                text: &self.text[a.offset..b.offset],
+                pos: a.pos,
+                width: a.width,
+                offset: a.offset
+            })
     }
 }
-#[derive(Debug)]
+pub struct Part<'a> {
+    pub text: &'a str,
+    pub pos: f32,
+    pub width: f32,
+    pub offset: usize,
+}
+#[derive(Debug, Clone, Copy)]
 pub struct TextChar {
     pub offset: usize,
     pub pos: f32,

@@ -6,11 +6,12 @@ use pdf::object::{Resolve, RcRef};
 use pdf::error::PdfError;
 use pdf_encoding::{Encoding, glyphname_to_unicode};
 use std::sync::Arc;
+use istring::SmallString;
 
 #[derive(Debug)]
 pub enum TextEncoding {
     CID(ToUnicodeMap),
-    Cmap(HashMap<u16, (GlyphId, Option<String>)>)
+    Cmap(HashMap<u16, (GlyphId, Option<SmallString>)>)
 }
 
 pub struct FontEntry {
@@ -32,7 +33,7 @@ impl FontEntry {
                 ToUnicodeMap::create(type1.unicode_names().map(|(gid, uni)| (gid.0 as u16, uni.into())))
             } else {
                 let chars = (0..font.num_glyphs() as u16)
-                    .filter_map(|cid| std::char::from_u32(cid as u32).map(|c| (cid, c.to_string())));
+                    .filter_map(|cid| std::char::from_u32(cid as u32).map(|c| (cid, c.into())));
                 ToUnicodeMap::create(chars)
             }
         });
@@ -55,7 +56,7 @@ impl FontEntry {
             is_cid = true;
             TextEncoding::CID(to_unicode)
         } else {
-            let mut cmap = HashMap::new();
+            let mut cmap = HashMap::<u16, (GlyphId, Option<SmallString>)>::new();
             let source_encoding = match base_encoding {
                 Some(BaseEncoding::StandardEncoding) => Some(Encoding::AdobeStandard),
                 Some(BaseEncoding::SymbolEncoding) => Some(Encoding::AdobeSymbol),
@@ -77,8 +78,8 @@ impl FontEntry {
                         let forward = source.forward_map().unwrap();
                         for b in 0 .. 256 {
                             if let Some(gid) = transcoder.translate(b).and_then(|cp| font.gid_for_codepoint(cp)) {
-                                cmap.insert(b as u16, (gid, forward.get(b as u8).map(|c| c.to_string())));
-                                debug!("{} -> {:?}", b, gid);
+                                cmap.insert(b as u16, (gid, forward.get(b as u8).map(|c| c.into())));
+                                //debug!("{} -> {:?}", b, gid);
                             }
                         }
                     }
@@ -88,7 +89,7 @@ impl FontEntry {
                         for b in 0 .. 256 {
                             let unicode = encoder.translate(b as u32);
                             if let Some(gid) = unicode.and_then(|c| font.gid_for_unicode_codepoint(c)) {
-                                cmap.insert(b, (gid, unicode.and_then(std::char::from_u32).map(|c| c.to_string())));
+                                cmap.insert(b, (gid, unicode.and_then(std::char::from_u32).map(|c| c.into())));
                                 debug!("{} -> {:?}", b, gid);
                             }
                         }
@@ -131,7 +132,7 @@ impl FontEntry {
         };
         
         let widths = pdf_font.widths(resolve)?;
-        let name = pdf_font.name.as_ref().ok_or_else(|| PdfError::Other { msg: "font has no name".into() })?.clone();
+        let name = pdf_font.name.as_ref().ok_or_else(|| PdfError::Other { msg: "font has no name".into() })?.as_str().into();
         Ok(FontEntry {
             font,
             pdf_font,
