@@ -8,6 +8,7 @@ use font::{self};
 use std::sync::Arc;
 use super::FontEntry;
 use cachelib::{sync::SyncCache, ValueSize};
+use std::hash::{Hash, Hasher};
 
 pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
     ("Courier", "CourierStd.otf"),
@@ -36,19 +37,35 @@ pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
 #[derive(Clone)]
 pub struct FontRc(Arc<dyn font::Font + Send + Sync + 'static>);
 impl ValueSize for FontRc {
+    #[inline]
     fn size(&self) -> usize {
         1 // TODO
     }
 }
 impl From<Box<dyn font::Font + Send + Sync + 'static>> for FontRc {
+    #[inline]
     fn from(f: Box<dyn font::Font + Send + Sync + 'static>) -> Self {
         FontRc(f.into())
     }
 }
 impl Deref for FontRc {
     type Target = dyn font::Font + Send + Sync + 'static;
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &*self.0
+    }
+}
+impl PartialEq for FontRc {
+    #[inline]
+    fn eq(&self, rhs: &Self) -> bool {
+        Arc::as_ptr(&self.0) == Arc::as_ptr(&rhs.0)
+    }
+}
+impl Eq for FontRc {}
+impl Hash for FontRc {
+    #[inline]
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.0).hash(state)
     }
 }
 pub struct StandardCache {
