@@ -20,6 +20,9 @@ pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
     ("Times-Bold", "MinionPro-Bold.otf"),
     ("Times-Italic", "MinionPro-It.otf"),
     ("Times-BoldItalic", "MinionPro-BoldIt.otf"),
+    ("TimesNewRomanPSMT", "TimesNewRomanPSMT.ttf"),
+    ("TimesNewRomanPS-BoldMT", "TimesNewRomanPS-BoldMT.otf"),
+    ("TimesNewRomanPS-BoldItalicMT", "TimesNewRomanPS-BoldMT.otf"),
     
     ("Helvetica", "MyriadPro-Regular.otf"),
     ("Helvetica-Bold", "MyriadPro-Bold.otf"),
