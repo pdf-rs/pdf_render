@@ -15,6 +15,7 @@ use std::convert::TryInto;
 use pdf::content::TextMode;
 use std::sync::Arc;
 use itertools::Either;
+use istring::SmallString;
 
 #[derive(Clone)]
 pub struct TextState {
@@ -80,13 +81,17 @@ impl TextState {
 
         let glyphs = codepoints.map(|cid| {
             match e.encoding {
-                TextEncoding::CID(ref to_unicode) => {
-                    let unicode = to_unicode.get(cid);
+                TextEncoding::CID(None) => {
+                    let unicode = std::char::from_u32(cid as u32).map(|c| SmallString::from(c));
+                    (cid, Some(GlyphId(cid as u32)), unicode)
+                },
+                TextEncoding::CID(Some(ref to_unicode)) => {
+                    let unicode = to_unicode.get(cid).map(SmallString::from);
                     (cid, Some(GlyphId(cid as u32)), unicode)
                 },
                 TextEncoding::Cmap(ref cmap) => {
                     match cmap.get(&cid) {
-                        Some(&(gid, ref unicode)) => (cid, Some(gid), unicode.as_deref()),
+                        Some(&(gid, ref unicode)) => (cid, Some(gid), unicode.clone()),
                         None => (cid, None, None)
                     }
                 }
@@ -109,7 +114,7 @@ impl TextState {
         ) * e.font.font_matrix();
         
         for (cid, gid, unicode) in glyphs {
-            let is_space = matches!(e.encoding, TextEncoding::Cmap(_)) && cid == 0x20;
+            let is_space = matches!(e.encoding, TextEncoding::Cmap(_)) && unicode.as_deref() == Some(" ");
 
             //debug!("cid {} -> gid {:?}", cid, gid);
             let gid = match gid {
@@ -146,7 +151,7 @@ impl TextState {
             
             let offset = span.text.len();
             if let Some(s) = unicode {
-                span.text.push_str(s);
+                span.text.push_str(&*s);
                 span.chars.push(TextChar {
                     offset,
                     pos: span.width,

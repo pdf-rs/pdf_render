@@ -316,6 +316,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             let p1 = origin;
             let p2 = (tm * Transform2F::from_translation(Vector2F::new(span.width, self.text_state.font_size))).translation();
 
+            debug!("text {}", span.text);
             self.backend.add_text(TextSpan {
                 rect: self.graphics_state.transform * RectF::from_points(p1.min(p2), p1.max(p2)),
                 width: span.width,
