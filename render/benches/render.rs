@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 use pdf::file::File as PdfFile;
-use pdf_render::Cache;
+use pdf_render::{Cache, render_page, SceneBackend};
 use std::time::Duration;
 
 fn bench_render_page(c: &mut Criterion) {
@@ -11,9 +11,10 @@ fn bench_render_page(c: &mut Criterion) {
     group.warm_up_time(Duration::from_secs(1));
 
     let mut cache = Cache::new();
+    let mut backend = SceneBackend::new(&mut cache);
     for (i, page) in file.pages().enumerate() {
         if let Ok(page) = page {
-            group.bench_function(&format!("page {}", i), |b| b.iter(|| cache.render_page(&file, &page, Default::default()).unwrap()));
+            group.bench_function(&format!("page {}", i), |b| b.iter(|| render_page(&mut backend, &file, &page, Default::default()).unwrap()));
         }
     }
     group.finish();

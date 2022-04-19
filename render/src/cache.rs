@@ -1,11 +1,6 @@
-use std::path::{Path, PathBuf};
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
-use std::fs;
-use std::borrow::Cow;
+use std::path::{PathBuf};
 use std::sync::Arc;
 
-use pdf::file::File as PdfFile;
 use pdf::object::*;
 use pdf::font::{Font as PdfFont};
 use pdf::error::{Result};
@@ -20,13 +15,24 @@ use pathfinder_content::{
 use super::{fontentry::FontEntry};
 use super::image::load_image;
 use super::font::{load_font, StandardCache};
-use cachelib::sync::SyncCache;
+use cachelib::{sync::SyncCache, ValueSize};
+
+#[derive(Clone)]
+pub struct ImageResult(pub Arc<Result<Image>>);
+impl ValueSize for ImageResult {
+    fn size(&self) -> usize {
+        match *self.0 {
+            Ok(ref im) => im.pixels().len() * 4,
+            Err(ref e) => 1,
+        }
+    }
+}
 
 pub struct Cache {
     // shared mapping of fontname -> font
-    fonts: SyncCache<Ref<PdfFont>, Option<Arc<FontEntry>>>,
+    fonts: Arc<SyncCache<Ref<PdfFont>, Option<Arc<FontEntry>>>>,
     standard_fonts: PathBuf,
-    images: SyncCache<Ref<XObject>, Arc<Result<Image>>>,
+    images: Arc<SyncCache<Ref<XObject>, ImageResult>>,
     std: StandardCache,
 }
 impl Cache {
@@ -66,11 +72,11 @@ impl Cache {
         }
     }
 
-    pub fn get_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resolve: &impl Resolve) -> Arc<Result<Image>> {
+    pub fn get_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resolve: &impl Resolve) -> ImageResult {
         self.images.get(xobject_ref, ||
-            Arc::new(load_image(im, resolve).map(|image|
+            ImageResult(Arc::new(load_image(im, resolve).map(|image|
                 Image::new(Vector2I::new(im.width as i32, im.height as i32), Arc::new(image.data))
-            ))
+            )))
         )
     }
 }

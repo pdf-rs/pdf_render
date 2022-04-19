@@ -25,7 +25,7 @@ pub struct Tracer<'a> {
 }
 pub struct TraceCache {
     standard_fonts: PathBuf,
-    fonts: SyncCache<Ref<PdfFont>, Option<Arc<FontEntry>>>,
+    fonts: Arc<SyncCache<Ref<PdfFont>, Option<Arc<FontEntry>>>>,
     std: StandardCache,
 }
 impl TraceCache {

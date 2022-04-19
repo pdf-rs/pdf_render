@@ -89,7 +89,7 @@ impl<'a> Backend for SceneBackend<'a> {
         }
     }
     fn draw_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, transform: Transform2F, resolve: &impl Resolve) {
-        if let Ok(ref image) = *self.cache.get_image(xobject_ref, im, resolve) {
+        if let Ok(ref image) = *self.cache.get_image(xobject_ref, im, resolve).0 {
             let size = image.size();
             let size_f = size.to_f32();
             let outline = Outline::from_rect(transform * RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));

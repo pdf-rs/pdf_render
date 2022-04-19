@@ -1,6 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::fs;
-use std::borrow::Cow;
+use std::ops::Deref;
 use pdf::object::*;
 use pdf::font::{Font as PdfFont};
 use pdf::error::{Result, PdfError};
@@ -8,7 +7,7 @@ use pdf::error::{Result, PdfError};
 use font::{self};
 use std::sync::Arc;
 use super::FontEntry;
-use cachelib::sync::SyncCache;
+use cachelib::{sync::SyncCache, ValueSize};
 
 pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
     ("Courier", "CourierStd.otf"),
@@ -34,9 +33,26 @@ pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
     ("Arial-ItalicMT", "Arial-ItalicMT.otf"),
 ];
 
-type FontRc = Arc<dyn font::Font + Send + Sync>;
+#[derive(Clone)]
+pub struct FontRc(Arc<dyn font::Font + Send + Sync + 'static>);
+impl ValueSize for FontRc {
+    fn size(&self) -> usize {
+        1 // TODO
+    }
+}
+impl From<Box<dyn font::Font + Send + Sync + 'static>> for FontRc {
+    fn from(f: Box<dyn font::Font + Send + Sync + 'static>) -> Self {
+        FontRc(f.into())
+    }
+}
+impl Deref for FontRc {
+    type Target = dyn font::Font + Send + Sync + 'static;
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
 pub struct StandardCache {
-    inner: SyncCache<usize, Option<FontRc>>
+    inner: Arc<SyncCache<usize, Option<FontRc>>>
 }
 impl StandardCache {
     pub fn new() -> Self {
