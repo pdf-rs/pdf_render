@@ -9,33 +9,16 @@ use std::sync::Arc;
 use super::FontEntry;
 use cachelib::{sync::SyncCache, ValueSize};
 use std::hash::{Hash, Hasher};
+use once_cell::sync::OnceCell;
 
-pub static STANDARD_FONTS: &[(&'static str, &'static str)] = &[
-    ("Courier", "CourierStd.otf"),
-    ("Courier-Bold", "CourierStd-Bold.otf"),
-    ("Courier-Oblique", "CourierStd-Oblique.otf"),
-    ("Courier-BoldOblique", "CourierStd-BoldOblique.otf"),
-    
-    ("Times-Roman", "MinionPro-Regular.otf"),
-    ("Times-Bold", "MinionPro-Bold.otf"),
-    ("Times-Italic", "MinionPro-It.otf"),
-    ("Times-BoldItalic", "MinionPro-BoldIt.otf"),
-    ("TimesNewRomanPSMT", "TimesNewRomanPSMT.ttf"),
-    ("TimesNewRomanPS-BoldMT", "TimesNewRomanPS-BoldMT.otf"),
-    ("TimesNewRomanPS-BoldItalicMT", "TimesNewRomanPS-BoldMT.otf"),
-    
-    ("Helvetica", "MyriadPro-Regular.otf"),
-    ("Helvetica-Bold", "MyriadPro-Bold.otf"),
-    ("Helvetica-Oblique", "MyriadPro-It.otf"),
-    ("Helvetica-BoldOblique", "MyriadPro-BoldIt.otf"),
-    
-    ("Symbol", "SY______.PFB"),
-    ("ZapfDingbats", "AdobePiStd.otf"),
-    
-    ("Arial-BoldMT", "Arial-BoldMT.otf"),
-    ("ArialMT", "ArialMT.ttf"),
-    ("Arial-ItalicMT", "Arial-ItalicMT.otf"),
-];
+static STANDARD_FONTS: OnceCell<Vec<(String, String)>> = OnceCell::new();
+pub fn standard_fonts(dir: &Path) -> &[(String, String)] {
+    STANDARD_FONTS.get_or_init(|| {
+        let data = std::fs::read_to_string(dir.join("fonts.json")).expect("can't read fonts.json");
+        let fonts: Vec<(String, String)> = serde_json::from_str(&data).expect("fonts.json is invalid");
+        fonts
+    })
+}
 
 #[derive(Clone)]
 pub struct FontRc(Arc<dyn font::Font + Send + Sync + 'static>);
@@ -72,7 +55,7 @@ impl Hash for FontRc {
     }
 }
 pub struct StandardCache {
-    inner: Arc<SyncCache<usize, Option<FontRc>>>
+    inner: Arc<SyncCache<String, Option<FontRc>>>
 }
 impl StandardCache {
     pub fn new() -> Self {
@@ -80,7 +63,7 @@ impl StandardCache {
     }
 }
 
-pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts: &Path, cache: &StandardCache) -> Result<Option<FontEntry>> {
+pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts_dir: &Path, cache: &StandardCache) -> Result<Option<FontEntry>> {
     let pdf_font = resolve.get(font_ref)?;
     debug!("loading {:?}", pdf_font);
     
@@ -96,10 +79,10 @@ pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts:
         }
         Some(Err(e)) => return Err(e),
         None => {
-            match STANDARD_FONTS.iter().enumerate().find(|(_, &(name, _))| pdf_font.name.as_ref().map(|s| s == name).unwrap_or(false)) {
-                Some((i, &(_, file_name))) => {
-                    let val = cache.inner.get(i, || {
-                        let data = match std::fs::read(standard_fonts.join(file_name)) {
+            match standard_fonts(standard_fonts_dir).iter().find(|&(ref name, _)| pdf_font.name.as_ref().map(|s| s == name.as_str()).unwrap_or(false)) {
+                Some(&(_, ref file_name)) => {
+                    let val = cache.inner.get(file_name.clone(), || {
+                        let data = match std::fs::read(standard_fonts_dir.join(file_name)) {
                             Ok(data) => data,
                             Err(e) => {
                                 warn!("can't open {} for {:?} {:?}", file_name, pdf_font.name, e);

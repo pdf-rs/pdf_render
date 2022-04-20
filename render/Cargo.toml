@@ -30,6 +30,8 @@ instant = "*"
 custom_debug_derive = "*"
 cachelib = { git = "https://github.com/s3bk/cachelib" }
 istring = { git = "https://github.com/s3bk/istring" }
+once_cell = "*"
+serde_json = "*"
 
 [dev-dependencies]
 criterion = "0.3"
