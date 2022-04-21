@@ -67,7 +67,7 @@ pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageD
             let mask_width = mask.width as usize;
             let mask_height = mask.height as usize;
             let bits = mask_width * mask_height * mask.bits_per_component as usize;
-            assert_eq!(data.len(), (bits + 7) / 9);
+            assert_eq!(data.len(), (bits + 7) / 8);
 
             let mut alpha: Data = match mask.bits_per_component {
                 1 => data.iter().flat_map(|&b| (0..8).map(move |i| ex(b >> i, 1))).collect::<Vec<u8>>().into(),
