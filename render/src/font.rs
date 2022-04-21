@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::ops::Deref;
+use std::collections::HashMap;
 use pdf::object::*;
 use pdf::font::{Font as PdfFont};
 use pdf::error::{Result, PdfError};
@@ -9,16 +10,6 @@ use std::sync::Arc;
 use super::FontEntry;
 use cachelib::{sync::SyncCache, ValueSize};
 use std::hash::{Hash, Hasher};
-use once_cell::sync::OnceCell;
-
-static STANDARD_FONTS: OnceCell<Vec<(String, String)>> = OnceCell::new();
-pub fn standard_fonts(dir: &Path) -> &[(String, String)] {
-    STANDARD_FONTS.get_or_init(|| {
-        let data = std::fs::read_to_string(dir.join("fonts.json")).expect("can't read fonts.json");
-        let fonts: Vec<(String, String)> = serde_json::from_str(&data).expect("fonts.json is invalid");
-        fonts
-    })
-}
 
 #[derive(Clone)]
 pub struct FontRc(Arc<dyn font::Font + Send + Sync + 'static>);
@@ -55,15 +46,24 @@ impl Hash for FontRc {
     }
 }
 pub struct StandardCache {
-    inner: Arc<SyncCache<String, Option<FontRc>>>
+    inner: Arc<SyncCache<String, Option<FontRc>>>,
+    dir: PathBuf,
+    fonts: HashMap<String, String>,
 }
 impl StandardCache {
-    pub fn new() -> Self {
-        StandardCache { inner: SyncCache::new() }
+    pub fn new(dir: PathBuf) -> Self {
+        let data = std::fs::read_to_string(dir.join("fonts.json")).expect("can't read fonts.json");
+        let fonts: HashMap<String, String> = serde_json::from_str(&data).expect("fonts.json is invalid");
+
+        StandardCache {
+            inner: SyncCache::new(),
+            dir,
+            fonts,
+        }
     }
 }
 
-pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts_dir: &Path, cache: &StandardCache) -> Result<Option<FontEntry>> {
+pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, cache: &StandardCache) -> Result<Option<FontEntry>> {
     let pdf_font = resolve.get(font_ref)?;
     debug!("loading {:?}", pdf_font);
     
@@ -79,10 +79,14 @@ pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, standard_fonts_
         }
         Some(Err(e)) => return Err(e),
         None => {
-            match standard_fonts(standard_fonts_dir).iter().find(|&(ref name, _)| pdf_font.name.as_ref().map(|s| s == name.as_str()).unwrap_or(false)) {
-                Some(&(_, ref file_name)) => {
+            let name = match pdf_font.name {
+                Some(ref name) => name.as_str(),
+                None => return Ok(None)
+            };
+            match cache.fonts.get(name) {
+                Some(file_name) => {
                     let val = cache.inner.get(file_name.clone(), || {
-                        let data = match std::fs::read(standard_fonts_dir.join(file_name)) {
+                        let data = match std::fs::read(cache.dir.join(file_name)) {
                             Ok(data) => data,
                             Err(e) => {
                                 warn!("can't open {} for {:?} {:?}", file_name, pdf_font.name, e);

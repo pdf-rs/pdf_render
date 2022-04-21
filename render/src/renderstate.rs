@@ -253,7 +253,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                     self.text_state.font_entry = Some(e);
                     self.text_state.font_size = size;
                 } else {
-                    warn!("no font {}", name);
+                    info!("no font {}", name);
                     self.text_state.font_entry = None;
                 }
             },

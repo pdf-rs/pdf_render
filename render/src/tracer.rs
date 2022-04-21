@@ -24,16 +24,16 @@ pub struct Tracer<'a> {
     cache: &'a TraceCache,
 }
 pub struct TraceCache {
-    standard_fonts: PathBuf,
     fonts: Arc<SyncCache<Ref<PdfFont>, Option<Arc<FontEntry>>>>,
     std: StandardCache,
 }
 impl TraceCache {
     pub fn new() -> Self {
+        let standard_fonts = PathBuf::from(std::env::var_os("STANDARD_FONTS").expect("no STANDARD_FONTS"));
+
         TraceCache {
-            standard_fonts: PathBuf::from(std::env::var_os("STANDARD_FONTS").expect("no STANDARD_FONTS")),
             fonts: SyncCache::new(),
-            std: StandardCache::new(),
+            std: StandardCache::new(standard_fonts),
         }
     }
 }
@@ -84,7 +84,7 @@ impl<'a> Backend for Tracer<'a> {
     fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
         let mut error = None;
         let val = self.cache.fonts.get(font_ref, || 
-            match load_font(font_ref, resolve, &self.cache.standard_fonts, &self.cache.std) {
+            match load_font(font_ref, resolve, &self.cache.std) {
                 Ok(Some(f)) => Some(Arc::new(f)),
                 Ok(None) => None,
                 Err(e) => {

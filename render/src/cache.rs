@@ -2,6 +2,7 @@ use std::path::{PathBuf};
 use std::sync::Arc;
 
 use pdf::object::*;
+use pdf::primitive::Name;
 use pdf::font::{Font as PdfFont};
 use pdf::error::{Result};
 
@@ -31,9 +32,9 @@ impl ValueSize for ImageResult {
 pub struct Cache {
     // shared mapping of fontname -> font
     fonts: Arc<SyncCache<Ref<PdfFont>, Option<Arc<FontEntry>>>>,
-    standard_fonts: PathBuf,
     images: Arc<SyncCache<Ref<XObject>, ImageResult>>,
     std: StandardCache,
+    missing_fonts: Vec<Name>,
 }
 impl Cache {
     pub fn new() -> Cache {
@@ -50,16 +51,23 @@ impl Cache {
         Cache {
             fonts: SyncCache::new(),
             images: SyncCache::new(),
-            standard_fonts,
-            std: StandardCache::new(),
+            std: StandardCache::new(standard_fonts),
+            missing_fonts: Vec::new(),
         }
     }
     pub fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, > {
         let mut error = None;
         let val = self.fonts.get(font_ref, || 
-            match load_font(font_ref, resolve, &self.standard_fonts, &mut self.std) {
+            match load_font(font_ref, resolve, &mut self.std) {
                 Ok(Some(f)) => Some(Arc::new(f)),
-                Ok(None) => None,
+                Ok(None) => {
+                    if let Ok(pdf_font) = resolve.get(font_ref) {
+                        if let Some(ref name) = pdf_font.name {
+                            self.missing_fonts.push(name.clone());
+                        }
+                    }
+                    None
+                },
                 Err(e) => {
                     error = Some(e);
                     None
@@ -78,5 +86,13 @@ impl Cache {
                 Image::new(Vector2I::new(im.width as i32, im.height as i32), Arc::new(image.data))
             )))
         )
+    }
+}
+impl Drop for Cache {
+    fn drop(&mut self) {
+        println!("missing fonts:");
+        for name in self.missing_fonts.iter() {
+            println!("{}", name.as_str());
+        }
     }
 }

@@ -68,7 +68,7 @@ impl TextState {
         let e = match self.font_entry {
             Some(ref e) => e,
             None => {
-                warn!("no font set");
+                debug!("no font set");
                 return;
             }
         };
