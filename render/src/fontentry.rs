@@ -37,6 +37,8 @@ impl FontEntry {
         } else if let Some(cmap) = font.downcast_ref::<TrueTypeFont>().and_then(|ttf| ttf.cmap.as_ref())
             .or_else(|| font.downcast_ref::<OpenTypeFont>().and_then(|otf| otf.cmap.as_ref())) {
             cmap.items().filter_map(|(cp, gid)| std::char::from_u32(cp).map(|c| (gid, c.into()))).collect()
+        } else if let Some(cff) = font.downcast_ref::<CffFont>() {
+            cff.unicode_map.iter().map(|(&u, &gid)| (GlyphId(gid as u32), u.into())).collect()
         } else {
             (0..font.num_glyphs())
                 .filter_map(|gid| std::char::from_u32(gid).map(|c| (GlyphId(gid), c.into())))
@@ -105,8 +107,15 @@ impl FontEntry {
                     }
                 }
                 _ => {
-                    warn!("can't translate from text encoding {:?} to font encoding {:?}", base_encoding, font_encoding);
-                    
+                    if let Some(cff) = font.downcast_ref::<CffFont>() {
+                        for (cp, &gid) in cff.codepoint_map.iter().enumerate() {
+                            let gid = GlyphId(gid as u32);
+                            let unicode = glyph_unicode.get(&gid).cloned();
+                            cmap.insert(cp as u16, (gid, unicode));
+                        }
+                    } else {
+                        warn!("can't translate from text encoding {:?} to font encoding {:?}", base_encoding, font_encoding);
+                    }
                     // assuming same encoding
                     
                     
