@@ -10,6 +10,6 @@ edition = "2018"
 pdf = { git = "https://github.com/pdf-rs/pdf" }
 pdf_render = { path = "../../render" }
 argh = "*"
-pathfinder_rasterize = { path = "../../../pathfinder_rasterize" } #{ git = "https://github.com/s3bk/pathfinder_rasterizer" }
+pathfinder_rasterize = { git = "https://github.com/s3bk/pathfinder_rasterizer" }
 pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
 env_logger = "*"
