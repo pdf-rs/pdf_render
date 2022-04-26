@@ -99,12 +99,16 @@ impl TextState {
         });
 
         let draw_mode = match self.mode {
-            TextMode::Fill => Some(DrawMode::Fill(gs.fill_color)),
-            TextMode::FillAndClip => Some(DrawMode::Fill(gs.fill_color)),
-            TextMode::FillThenStroke => Some(DrawMode::FillStroke(gs.fill_color, gs.stroke_color, gs.stroke_style)),
+            TextMode::Fill => Some(DrawMode::Fill(gs.fill_color, gs.fill_color_alpha)),
+            TextMode::FillAndClip => Some(DrawMode::Fill(gs.fill_color, gs.fill_color_alpha)),
+            TextMode::FillThenStroke => Some(DrawMode::FillStroke(
+                gs.fill_color, gs.fill_color_alpha,
+                gs.stroke_color, gs.stroke_color_alpha,
+                gs.stroke_style
+            )),
             TextMode::Invisible => None,
-            TextMode::Stroke => Some(DrawMode::Stroke(gs.stroke_color, gs.stroke_style)),
-            TextMode::StrokeAndClip => Some(DrawMode::Stroke(gs.stroke_color, gs.stroke_style)),
+            TextMode::Stroke => Some(DrawMode::Stroke(gs.stroke_color, gs.stroke_color_alpha, gs.stroke_style)),
+            TextMode::StrokeAndClip => Some(DrawMode::Stroke(gs.stroke_color, gs.stroke_color_alpha, gs.stroke_style)),
         };
         let e = self.font_entry.as_ref().expect("no font");
 

@@ -4,10 +4,11 @@ use std::path::Path;
 use pathfinder_color::ColorU;
 use std::sync::Arc;
 
+#[derive(Hash, PartialEq, Eq)]
 pub struct ImageData {
     pub data: Vec<ColorU>,
     pub width: u32,
-    pub  height: u32,
+    pub height: u32,
 }
 impl ImageData {
     pub fn rgba_data(&self) -> &[u8] {
@@ -29,7 +30,7 @@ fn resize_alpha(data: &[u8], src_width: u32, src_height: u32, dest_width: u32, d
     Some(dest.into_raw())
 }
 
-pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageData, PdfError> {
+pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Resolve) -> Result<ImageData, PdfError> {
     let raw_data = image.image_data(resolve)?;
 
     let pixel_count = image.width as usize * image.height as usize;
@@ -89,13 +90,15 @@ pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageD
         (((b as u16 + 1) >> (8 - bits)) - 1) as u8
     }
     
-    fn resolve_cs(cs: &ColorSpace) -> Option<&ColorSpace> {
+    fn resolve_cs<'a>(cs: &'a ColorSpace, resources: &'a Resources) -> Option<&'a ColorSpace> {
         match cs {
             ColorSpace::Icc(icc) => icc.info.info.alternate.as_ref().map(|b| &**b),
+            ColorSpace::Named(ref name) => resources.color_spaces.get(name),
             _ => Some(cs),
         }
     }
-    let cs = image.color_space.as_ref().and_then(resolve_cs);
+
+    let cs = image.color_space.as_ref().and_then(|cs| resolve_cs(cs, &resources));
     let alpha = alpha.iter().cloned().chain(std::iter::repeat(255));
     let data_ratio = raw_data.len() / pixel_count;
     let data = match data_ratio {
@@ -105,7 +108,7 @@ pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageD
                 raw_data.iter().zip(alpha).map(|(&g, a)| ColorU { r: g, g: g, b: g, a }).collect()
             }
             Some(ColorSpace::Indexed(ref base, ref lookup)) => {
-                match resolve_cs(&**base) {
+                match resolve_cs(&**base, resources) {
                     Some(ColorSpace::DeviceRGB) => {
                         raw_data.iter().zip(alpha).map(|(&b, a)| {
                             let off = b as usize * 3;
@@ -114,6 +117,7 @@ pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageD
                         }).collect()
                     }
                     Some(ColorSpace::DeviceCMYK) => {
+                        debug!("indexed CMYK {}", lookup.len());
                         raw_data.iter().zip(alpha).map(|(&b, a)| {
                             let off = b as usize * 4;
                             let c = lookup.get(off .. off + 4).unwrap_or(&[0; 4]);
@@ -126,7 +130,7 @@ pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageD
             Some(ColorSpace::Separation(_, ref alt, ref func)) => {
                 let mut lut = [[0u8; 3]; 256];
 
-                match resolve_cs(alt) {
+                match resolve_cs(alt, resources) {
                     Some(ColorSpace::DeviceRGB) => {
                         for (i, rgb) in lut.iter_mut().enumerate() {
                             let mut c = [0.; 3];
@@ -174,18 +178,20 @@ pub fn load_image(image: &ImageXObject, resolve: &impl Resolve) -> Result<ImageD
 
     Ok(ImageData { data, width: image.width as u32, height: image.height as u32 })
 }
+/*
+red = 1.0 – min ( 1.0, cyan + black )
+green = 1.0 – min ( 1.0, magenta + black )
+blue = 1.0 – min ( 1.0, yellow + black )
+*/
+
 fn cmyk2rgb([c, m, y, k]: [u8; 4]) -> [u8; 3] {
-    let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
     let r = 255 - c.saturating_add(k);
     let g = 255 - m.saturating_add(k);
     let b = 255 - y.saturating_add(k);
     [r, g, b]
 }
-fn cmyk2color([c, m, y, k]: [u8; 4], a: u8) -> ColorU {
-    let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
-    let r = 255 - c.saturating_add(k);
-    let g = 255 - m.saturating_add(k);
-    let b = 255 - y.saturating_add(k);
+fn cmyk2color(cmyk: [u8; 4], a: u8) -> ColorU {
+    let [r, g, b] = cmyk2rgb(cmyk);
     ColorU::new(r, g, b, a)
 }
 

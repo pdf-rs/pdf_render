@@ -13,13 +13,12 @@ use pathfinder_geometry::{
     vector::{Vector2F, Vector2I},
     rect::RectF, transform2d::Transform2F,
 };
-use pdf::object::{Ref, XObject, ImageXObject, Resolve};
+use pdf::object::{Ref, XObject, ImageXObject, Resolve, Resources};
 use font::Glyph;
-use super::{FontEntry, TextSpan, DrawMode, Backend};
+use super::{FontEntry, TextSpan, DrawMode, Backend, Fill, Cache};
 use pdf::font::Font as PdfFont;
 use pdf::error::PdfError;
 use std::sync::Arc;
-use crate::Cache;
 
 pub struct SceneBackend<'a> {
     clip_path: Option<ClipPath>,
@@ -52,6 +51,15 @@ impl<'a> SceneBackend<'a> {
             _ => unreachable!()
         }
     }
+    fn paint(&mut self, fill: Fill, alpha: f32) -> PaintId {
+        let paint = match fill {
+            Fill::Solid(r, g, b) => Paint::from_color(ColorF::new(r, g, b, alpha).to_u8()),
+            Fill::Pattern(id) => {
+                Paint::black()
+            }
+        };
+        self.scene.push_paint(&paint)
+    }
 }
 impl<'a> Backend for SceneBackend<'a> {
     fn set_clip_path(&mut self, path: &Outline) {
@@ -66,8 +74,8 @@ impl<'a> Backend for SceneBackend<'a> {
     }
     fn draw(&mut self, outline: &Outline, mode: DrawMode, fill_rule: FillRule, transform: Transform2F) {
         match mode {
-            DrawMode::Fill(c) | DrawMode::FillStroke(c, _, _) => {
-                let paint = self.scene.push_paint(&Paint::from_color(c.to_u8()));
+            DrawMode::Fill(fill, alpha) | DrawMode::FillStroke(fill, alpha, _, _, _) => {
+                let paint = self.paint(fill, alpha);
                 let mut draw_path = DrawPath::new(outline.clone().transformed(&transform), paint);
                 draw_path.set_clip_path(self.clip_path_id());
                 draw_path.set_fill_rule(fill_rule);
@@ -76,9 +84,9 @@ impl<'a> Backend for SceneBackend<'a> {
             _ => {}
         }
         match mode {
-            DrawMode::Stroke(c, s) | DrawMode::FillStroke(_, c, s) => {
-                let paint = self.scene.push_paint(&Paint::from_color(c.to_u8()));
-                let mut stroke = OutlineStrokeToFill::new(outline, s);
+            DrawMode::Stroke(fill, alpha, style) | DrawMode::FillStroke(_, _, fill, alpha, style) => {
+                let paint = self.paint(fill, alpha);
+                let mut stroke = OutlineStrokeToFill::new(outline, style);
                 stroke.offset();
                 let mut draw_path = DrawPath::new(stroke.into_outline().transformed(&transform), paint);
                 draw_path.set_clip_path(self.clip_path_id());
@@ -88,8 +96,8 @@ impl<'a> Backend for SceneBackend<'a> {
             _ => {}
         }
     }
-    fn draw_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, transform: Transform2F, resolve: &impl Resolve) {
-        if let Ok(ref image) = *self.cache.get_image(xobject_ref, im, resolve).0 {
+    fn draw_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resources: &Resources, transform: Transform2F, resolve: &impl Resolve) {
+        if let Ok(ref image) = *self.cache.get_image(xobject_ref, im, resources, resolve).0 {
             let size = image.size();
             let size_f = size.to_f32();
             let outline = Outline::from_rect(transform * RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));
@@ -105,6 +113,10 @@ impl<'a> Backend for SceneBackend<'a> {
             self.scene.push_draw_path(draw_path);
         }
     }
+    fn draw_inline_image(&mut self, im: &Arc<ImageXObject>, resources: &Resources, transform: Transform2F, resolve: &impl Resolve) {
+
+    }
+
     fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
         self.cache.get_font(font_ref, resolve)
     }

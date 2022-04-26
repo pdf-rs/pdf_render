@@ -1,4 +1,4 @@
-use crate::{TextSpan, DrawMode, Backend, FontEntry};
+use crate::{TextSpan, DrawMode, Backend, FontEntry, Fill};
 use pathfinder_content::{
     outline::Outline,
     fill::FillRule,
@@ -9,7 +9,10 @@ use pathfinder_geometry::{
     transform2d::Transform2F,
     vector::Vector2F,
 };
-use pdf::object::{Ref, XObject, ImageXObject, Resolve};
+use pathfinder_content::{
+    stroke::{StrokeStyle},
+}; 
+use pdf::object::{Ref, XObject, ImageXObject, Resolve, Stream, ImageDict, Resources};
 use font::Glyph;
 use pdf::font::Font as PdfFont;
 use pdf::error::PdfError;
@@ -56,13 +59,13 @@ impl<'a> Backend for Tracer<'a> {
     fn set_clip_path(&mut self, path: &Outline) {}
     fn draw(&mut self, outline: &Outline, mode: DrawMode, fill_rule: FillRule, transform: Transform2F) {
         let stroke = match mode {
-            DrawMode::FillStroke(_, c, s) | DrawMode::Stroke(c, s) => Some((c.to_u8(), s.line_width)),
-            DrawMode::Fill(_) => None,
+            DrawMode::FillStroke(_, _, fill, alpha, style) | DrawMode::Stroke(fill, alpha, style) => Some((fill, alpha, style)),
+            DrawMode::Fill(_, _) => None,
         };
         self.items.push(DrawItem::Vector(VectorPath {
             outline: outline.clone(),
             fill: match mode {
-                DrawMode::Fill(c) | DrawMode::FillStroke(c, _, _) => Some(c.to_u8()),
+                DrawMode::Fill(fill, alpha) | DrawMode::FillStroke(fill, alpha, _, _, _) => Some((fill, alpha)),
                 _ => None
             },
             stroke,
@@ -72,12 +75,21 @@ impl<'a> Backend for Tracer<'a> {
     fn set_view_box(&mut self, r: RectF) {
         self.view_box = r;
     }
-    fn draw_image(&mut self, xref: Ref<XObject>, im: &ImageXObject, transform: Transform2F, resolve: &impl Resolve) {
+    fn draw_image(&mut self, xref: Ref<XObject>, im: &ImageXObject, resources: &Resources, transform: Transform2F, resolve: &impl Resolve) {
         let rect = transform * RectF::new(
             Vector2F::new(0.0, 0.0), Vector2F::new(1.0, 1.0)
         );
         self.items.push(DrawItem::Image(ImageObject {
             rect, id: xref,
+        }));
+    }
+    fn draw_inline_image(&mut self, im: &Arc<ImageXObject>, resources: &Resources, transform: Transform2F, resolve: &impl Resolve) {
+        let rect = transform * RectF::new(
+            Vector2F::new(0.0, 0.0), Vector2F::new(1.0, 1.0)
+        );
+
+        self.items.push(DrawItem::InlineImage(InlineImageObject {
+            rect, im: im.clone()
         }));
     }
     fn draw_glyph(&mut self, glyph: &Glyph, mode: DrawMode, transform: Transform2F) {}
@@ -108,6 +120,11 @@ pub struct ImageObject {
     pub rect: RectF,
     pub id: Ref<XObject>,
 }
+#[derive(Debug)]
+pub struct InlineImageObject {
+    pub rect: RectF,
+    pub im: Arc<ImageXObject>,
+}
 
 pub struct TraceResults {
     pub draw: Vec<DrawItem>,
@@ -136,13 +153,14 @@ impl TraceResults {
 pub enum DrawItem {
     Vector(VectorPath),
     Image(ImageObject),
+    InlineImage(InlineImageObject),
     Text(TextSpan),
 }
 
 #[derive(Debug)]
 pub struct VectorPath {
     pub outline: Outline,
-    pub fill: Option<ColorU>,
-    pub stroke: Option<(ColorU, f32)>,
+    pub fill: Option<(Fill, f32)>,
+    pub stroke: Option<(Fill, f32, StrokeStyle)>,
     pub transform: Transform2F,
 }

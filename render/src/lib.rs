@@ -79,7 +79,7 @@ pub fn page_bounds(page: &Page) -> RectF {
     let Rect { left, right, top, bottom } = page.crop_box().expect("no media box");
     RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top)) * SCALE
 }
-pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Page, transform: Transform2F) -> Result<(), PdfError> {
+pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Page, transform: Transform2F) -> Result<Transform2F, PdfError> {
     let bounds = page_bounds(page);
     let rotate = Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
     let br = rotate * RectF::new(Vector2F::zero(), bounds.size());
@@ -105,7 +105,33 @@ pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Pa
         renderstate.draw_op(op)?;
     }
 
+    Ok(root_transformation)
+}
+pub fn render_pattern(backend: &mut impl Backend, pattern: &Pattern, resolve: &impl Resolve) -> Result<(), PdfError> {
+    match pattern {
+        Pattern::Stream(ref dict, ref ops) => {
+            let resources = resolve.get(dict.resources)?;
+            let mut renderstate = RenderState::new(backend, resolve, &*resources, Transform2F::default());
+            for (i, op) in ops.iter().enumerate() {
+                debug!("op {}: {:?}", i, op);
+                renderstate.draw_op(op)?;
+            }
+        }
+        Pattern::Dict(_) => {}
+    }
     Ok(())
+}
+
+
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub enum Fill {
+    Solid(f32, f32, f32),
+    Pattern(Ref<Pattern>),
+}
+impl Fill {
+    pub fn black() -> Self {
+        Fill::Solid(0., 0., 0.)
+    }
 }
 
 #[derive(Debug)]
@@ -122,7 +148,8 @@ pub struct TextSpan {
     pub font: Arc<FontEntry>,
     pub text: String,
     pub chars: Vec<TextChar>,
-    pub color: ColorU,
+    pub color: Fill,
+    pub alpha: f32,
 
     // apply this transform to a text draw in at the origin with the given width and font-size
     pub transform: Transform2F,

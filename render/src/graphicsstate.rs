@@ -11,16 +11,19 @@ use pathfinder_renderer::{
     paint::{PaintId, Paint},
 };
 use pathfinder_color::ColorF;
-use crate::DrawMode;
+use crate::{DrawMode, Fill};
+
 
 #[derive(Clone)]
 pub struct GraphicsState<'a> {
     pub transform: Transform2F,
     pub stroke_style: StrokeStyle,
 
-    pub fill_color: ColorF,
+    pub fill_color: Fill,
+    pub fill_color_alpha: f32,
     pub fill_paint: Option<PaintId>,
-    pub stroke_color: ColorF,
+    pub stroke_color: Fill,
+    pub stroke_color_alpha: f32,
     pub stroke_paint: Option<PaintId>,
     pub clip_path: Option<ClipPath>,
     pub clip_path_id: Option<ClipPathId>,
@@ -33,33 +36,29 @@ pub struct GraphicsState<'a> {
 
 
 impl<'a> GraphicsState<'a> {
-    pub fn set_fill_color(&mut self, (r, g, b): (f32, f32, f32)) {
-        if (r, g, b) != (self.fill_color.r(), self.fill_color.g(), self.fill_color.b()) {
-            self.fill_color.set_r(r);
-            self.fill_color.set_g(g);
-            self.fill_color.set_b(b);
+    pub fn set_fill_color(&mut self, fill: Fill) {
+        if fill != self.fill_color {
+            self.fill_color = fill;
             self.fill_paint = None;
         }
     }
     pub fn set_fill_alpha(&mut self, alpha: f32) {
         let a = self.fill_alpha * alpha;
-        if a != self.fill_color.a() {
-            self.fill_color.set_a(a);
+        if a != self.fill_color_alpha {
+            self.fill_color_alpha = a;
             self.fill_paint = None;
         }
     }
-    pub fn set_stroke_color(&mut self, (r, g, b): (f32, f32, f32)) {
-        if (r, g, b) != (self.fill_color.r(), self.stroke_color.g(), self.stroke_color.b()) {
-            self.stroke_color.set_r(r);
-            self.stroke_color.set_g(g);
-            self.stroke_color.set_b(b);
+    pub fn set_stroke_color(&mut self, fill: Fill) {
+        if fill != self.stroke_color {
+            self.stroke_color = fill;
             self.stroke_paint = None;
         }
     }
     pub fn set_stroke_alpha(&mut self, alpha: f32) {
         let a = self.stroke_alpha * alpha;
-        if a != self.stroke_color.a() {
-            self.stroke_color.set_a(a);
+        if a != self.stroke_color_alpha {
+            self.stroke_alpha = a;
             self.stroke_paint = None;
         }
     }

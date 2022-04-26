@@ -8,10 +8,10 @@ use pathfinder_content::{
     stroke::{StrokeStyle},
     outline::Outline,
 };
-use pdf::object::{Ref, XObject, ImageXObject, Resolve};
+use pdf::object::{Ref, XObject, ImageXObject, Resolve, Stream, ImageDict, Resources};
 use pdf::error::PdfError;
 use font::Glyph;
-use super::{FontEntry, TextSpan};
+use super::{FontEntry, TextSpan, Fill};
 use pdf::font::Font as PdfFont;
 use std::sync::Arc;
 
@@ -19,8 +19,10 @@ pub trait Backend {
     fn set_clip_path(&mut self, path: &Outline);
     fn draw(&mut self, outline: &Outline, mode: DrawMode, fill_rule: FillRule, transform: Transform2F);
     fn set_view_box(&mut self, r: RectF);
-    fn draw_image(&mut self, xref: Ref<XObject>, im: &ImageXObject, transform: Transform2F, resolve: &impl Resolve);
+    fn draw_image(&mut self, xref: Ref<XObject>, im: &ImageXObject, resources: &Resources, transform: Transform2F, resolve: &impl Resolve);
+    fn draw_inline_image(&mut self, im: &Arc<ImageXObject>, resources: &Resources, transform: Transform2F, resolve: &impl Resolve);
     fn draw_glyph(&mut self, glyph: &Glyph, mode: DrawMode, transform: Transform2F) {
+        
         self.draw(&glyph.path, mode, FillRule::Winding, transform);
     }
     fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError>;
@@ -28,7 +30,7 @@ pub trait Backend {
 }
 #[derive(Copy, Clone)]
 pub enum DrawMode {
-    Fill(ColorF),
-    Stroke(ColorF, StrokeStyle),
-    FillStroke(ColorF, ColorF, StrokeStyle),
+    Fill(Fill, f32),
+    Stroke(Fill, f32, StrokeStyle),
+    FillStroke(Fill, f32, Fill, f32, StrokeStyle),
 }

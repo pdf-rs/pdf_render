@@ -15,7 +15,7 @@ use pathfinder_content::{
     fill::FillRule,
     stroke::{LineCap, LineJoin, StrokeStyle},
     outline::{Outline, Contour},
-    pattern::{Pattern, Image},
+    pattern::{Image},
 };
 use pathfinder_color::{ColorU, ColorF};
 use super::{
@@ -24,6 +24,7 @@ use super::{
     BBox,
     DrawMode,
     TextSpan,
+    Fill,
 };
 
 trait Cvt {
@@ -91,10 +92,12 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
     pub fn new(backend: &'a mut B, resolve: &'a R, resources: &'a Resources, root_transformation: Transform2F) -> Self {
         let graphics_state = GraphicsState {
             transform: root_transformation,
-            fill_color: ColorF::black(),
+            fill_color: Fill::black(),
+            fill_color_alpha: 1.0,
             fill_paint: None,
             fill_alpha: 1.0,
-            stroke_color: ColorF::black(),
+            stroke_color: Fill::black(),
+            stroke_color_alpha: 1.0,
             stroke_paint: None,
             stroke_alpha: 1.0,
             clip_path: None,
@@ -157,18 +160,24 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             Op::Stroke => {
                 self.draw(DrawMode::Stroke(
                     self.graphics_state.stroke_color,
+                    self.graphics_state.stroke_color_alpha,
                     self.graphics_state.stroke_style
                 ), FillRule::Winding);
             },
             Op::FillAndStroke { winding } => {
                 self.draw(DrawMode::FillStroke(
                     self.graphics_state.fill_color,
+                    self.graphics_state.fill_color_alpha,
                     self.graphics_state.stroke_color,
+                    self.graphics_state.stroke_color_alpha,
                     self.graphics_state.stroke_style
                 ), winding.cvt());
             }
             Op::Fill { winding } => {
-                self.draw(DrawMode::Fill(self.graphics_state.fill_color), winding.cvt());
+                self.draw(DrawMode::Fill(
+                    self.graphics_state.fill_color,
+                    self.graphics_state.fill_color_alpha
+                ), winding.cvt());
             }
             Op::Shade { ref name } => {},
             Op::Clip { winding } => {
@@ -219,20 +228,20 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 }
             },
             Op::StrokeColor { ref color } => {
-                let color = t!(convert_color(&mut self.graphics_state.stroke_color_space, color, &self.resources, self.resolve.options()));
+                let color = t!(convert_color(&mut self.graphics_state.stroke_color_space, color, &self.resources, self.resolve));
                 self.graphics_state.set_stroke_color(color);
             },
             Op::FillColor { ref color } => {
-                let color = t!(convert_color(&mut self.graphics_state.fill_color_space, color, &self.resources, self.resolve.options()));
+                let color = t!(convert_color(&mut self.graphics_state.fill_color_space, color, &self.resources, self.resolve));
                 self.graphics_state.set_fill_color(color);
             },
             Op::FillColorSpace { ref name } => {
                 self.graphics_state.fill_color_space = self.color_space(name)?;
-                self.graphics_state.set_fill_color((0., 0., 0.));
+                self.graphics_state.set_fill_color(Fill::black());
             },
             Op::StrokeColorSpace { ref name } => {
                 self.graphics_state.stroke_color_space = self.color_space(name)?;
-                self.graphics_state.set_stroke_color((0., 0., 0.));
+                self.graphics_state.set_stroke_color(Fill::black());
             },
             Op::RenderingIntent { intent } => {},
             Op::BeginText => self.text_state.reset_matrix(),
@@ -288,7 +297,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 let xobject = self.resolve.get(xobject_ref)?;
                 match *xobject {
                     XObject::Image(ref im) => {
-                        self.backend.draw_image(xobject_ref, im, self.graphics_state.transform, self.resolve);
+                        self.backend.draw_image(xobject_ref, im, self.resources, self.graphics_state.transform, self.resolve);
                     }
                     XObject::Form(ref content) => {
                         self.draw_form(content)?;
@@ -298,7 +307,9 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                     }
                 }
             },
-            Op::InlineImage { .. } => {}
+            Op::InlineImage { ref image } => {
+                self.backend.draw_inline_image(image, &self.resources, self.graphics_state.transform, self.resolve);
+            }
         }
 
         Ok(())
@@ -325,7 +336,8 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 chars: span.chars,
                 font: e.clone(),
                 font_size: self.text_state.font_size,
-                color: self.graphics_state.fill_color.to_u8(),
+                color: self.graphics_state.fill_color,
+                alpha: self.graphics_state.fill_color_alpha,
                 transform,
             });
         }
@@ -352,8 +364,8 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
     }
     fn draw_form(&mut self, form: &FormXObject) -> Result<()> {
         let graphics_state = GraphicsState {
-            stroke_alpha: self.graphics_state.stroke_color.a(),
-            fill_alpha: self.graphics_state.fill_color.a(),
+            stroke_alpha: self.graphics_state.stroke_color_alpha,
+            fill_alpha: self.graphics_state.fill_color_alpha,
             clip_path: self.graphics_state.clip_path.clone(),
             .. self.graphics_state
         };
@@ -373,9 +385,9 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             resolve: self.resolve,
         };
         
-        let ops = form.operations(self.resolve)?;
+        let ops = t!(form.operations(self.resolve));
         for (i, op) in ops.iter().enumerate() {
-            //debug!(" form op {}: {:?}", i, op);
+            debug!(" form op {}: {:?}", i, op);
             inner.draw_op(op)?;
         }
 
@@ -397,17 +409,17 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
     }
 }
 
-fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resources, options: &ParseOptions) -> Result<(f32, f32, f32)> {
-    match convert_color2(cs, color, resources) {
+fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resources, resolve: &impl Resolve) -> Result<Fill> {
+    match convert_color2(cs, color, resources, resolve) {
         Ok(color) => Ok(color),
-        Err(e) if options.allow_error_in_option => {
+        Err(e) if resolve.options().allow_error_in_option => {
             warn!("failed to convert color: {:?}", e);
-            Ok((0.0, 0.0, 0.0))
+            Ok(Fill::Solid(0.0, 0.0, 0.0))
         }
         Err(e) => Err(e)
     }
 }
-fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resources) -> Result<(f32, f32, f32)> {
+fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resources, resolve: &impl Resolve) -> Result<Fill> {
     match *color {
         Color::Gray(g) => {
             *cs = &ColorSpace::DeviceGray;
@@ -415,7 +427,8 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
         }
         Color::Rgb(rgb) => {
             *cs = &ColorSpace::DeviceRGB;
-            Ok(rgb.cvt())
+            let (r, g, b) = rgb.cvt();
+            Ok(Fill::Solid(r, g, b))
         }
         Color::Cmyk(cmyk) => {
             *cs = &ColorSpace::DeviceCMYK;
@@ -434,6 +447,11 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                             }
                         }
                     }
+                }
+                ColorSpace::Named(ref name) => {
+                    resources.color_spaces.get(name).ok_or_else(|| 
+                        PdfError::Other { msg: format!("named color space {} not found", name) }
+                    )?
                 }
                 _ => &**cs
             };
@@ -454,7 +472,7 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                     let r = args[0].as_number()?;
                     let g = args[1].as_number()?;
                     let b = args[2].as_number()?;
-                    Ok((r, g, b))
+                    Ok(Fill::Solid(r, g, b))
                 }
                 ColorSpace::DeviceCMYK | ColorSpace::CalCMYK(_) => {
                     if args.len() != 4 {
@@ -480,9 +498,9 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                         ref a => Some(a),
                     };
                     match alt {
-                        Some(ColorSpace::DeviceGray) => Ok((out[0], out[0], out[0])),
+                        Some(ColorSpace::DeviceGray) => Ok(Fill::Solid(out[0], out[0], out[0])),
                         Some(ColorSpace::DeviceRGB) => {
-                            Ok((out[0], out[1], out[2]))
+                            Ok(Fill::Solid(out[0], out[1], out[2]))
                         }
                         Some(ColorSpace::DeviceCMYK) => {
                             Ok(cmyk2rgb((out[0], out[1], out[2], out[3])))
@@ -515,14 +533,14 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                             f.apply(&[x], &mut rgb)?;
                             let [r, g, b] = rgb;
                             //debug!("r={r}, g={g}, b={b}");
-                            Ok((r, g, b))
+                            Ok(Fill::Solid(r, g, b))
                         },
                         &ColorSpace::DeviceGray => {
                             let mut gray = [0.0];
                             f.apply(&[x], &mut gray)?;
                             let [gray] = gray;
                             //debug!("gray={gray}");
-                            Ok((gray, gray, gray))
+                            Ok(Fill::Solid(gray, gray, gray))
                         }
                         c => unimplemented!("Separation(alt={:?})", c)
                     }
@@ -536,7 +554,7 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                         ColorSpace::DeviceRGB => {
                             let c = &lut[3 * i as usize ..];
                             let cvt = |b: u8| b as f32;
-                            Ok((cvt(c[0]), cvt(c[1]), cvt(c[2])))
+                            Ok(Fill::Solid(cvt(c[0]), cvt(c[1]), cvt(c[2])))
                         }
                         ColorSpace::DeviceCMYK => {
                             let c = &lut[4 * i as usize ..];
@@ -548,22 +566,26 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                 }
                 ColorSpace::Pattern => {
                     let name = args[0].as_name()?;
-                    //dbg!(&resources.pattern);
-                    unimplemented!("Pattern {}", name)
+                    if let Some(pat) = resources.pattern.get(name) {
+                        Ok(Fill::Pattern(pat.get_ref()))
+                    } else {
+                        unimplemented!("Pattern {} not found", name)
+                    }
                 }
-                ColorSpace::Other(ref p) => unimplemented!("Other Color space {:?}", p)
+                ColorSpace::Other(ref p) => unimplemented!("Other Color space {:?}", p),
+                ColorSpace::Named(ref p) => unimplemented!("nested Named {:?}", p),
             }
         }
     }
 }
 
-fn gray2rgb(g: f32) -> (f32, f32, f32) {
-    (g, g, g)
+fn gray2rgb(g: f32) -> Fill {
+    Fill::Solid(g, g, g)
 }
 
-fn cmyk2rgb((c, m, y, k): (f32, f32, f32, f32)) -> (f32, f32, f32) {
+fn cmyk2rgb((c, m, y, k): (f32, f32, f32, f32)) -> Fill {
     let clamp = |f| if f > 1.0 { 1.0 } else { f };
-    (
+    Fill::Solid(
         1.0 - clamp(c + k),
         1.0 - clamp(m + k),
         1.0 - clamp(y + k),
