@@ -34,7 +34,7 @@ impl FontEntry {
         let glyph_unicode: HashMap<GlyphId, SmallString> = 
         if let Some(type1) = font.downcast_ref::<Type1Font>() {
             debug!("Font is Type1");
-            font_codepoints = Some(dbg!(&type1.codepoints));
+            font_codepoints = Some(&type1.codepoints);
             type1.unicode_names().map(|(gid, s)| (gid, s.into())).collect()
         } else if let Some(cmap) = font.downcast_ref::<TrueTypeFont>().and_then(|ttf| ttf.cmap.as_ref())
             .or_else(|| font.downcast_ref::<OpenTypeFont>().and_then(|otf| otf.cmap.as_ref())) {

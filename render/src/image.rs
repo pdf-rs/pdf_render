@@ -67,10 +67,11 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
             let data = Data::Arc(t!(mask.data(resolve)));
             let mask_width = mask.width as usize;
             let mask_height = mask.height as usize;
-            let bits = mask_width * mask_height * mask.bits_per_component as usize;
+            let bits_per_component = mask.bits_per_component.ok_or_else(|| PdfError::Other { msg: format!("no bits per component")})?;
+            let bits = mask_width * mask_height * bits_per_component as usize;
             assert_eq!(data.len(), (bits + 7) / 8);
 
-            let mut alpha: Data = match mask.bits_per_component {
+            let mut alpha: Data = match bits_per_component {
                 1 => data.iter().flat_map(|&b| (0..8).map(move |i| ex(b >> i, 1))).collect::<Vec<u8>>().into(),
                 2 => data.iter().flat_map(|&b| (0..4).map(move |i| ex(b >> 2*i, 2))).collect::<Vec<u8>>().into(),
                 4 => data.iter().flat_map(|&b| (0..2).map(move |i| ex(b >> 4*i, 4))).collect::<Vec<u8>>().into(),
@@ -185,6 +186,7 @@ blue = 1.0 – min ( 1.0, yellow + black )
 */
 
 fn cmyk2rgb([c, m, y, k]: [u8; 4]) -> [u8; 3] {
+    let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
     let r = 255 - c.saturating_add(k);
     let g = 255 - m.saturating_add(k);
     let b = 255 - y.saturating_add(k);
