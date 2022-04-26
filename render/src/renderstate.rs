@@ -566,8 +566,8 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                 }
                 ColorSpace::Pattern => {
                     let name = args[0].as_name()?;
-                    if let Some(pat) = resources.pattern.get(name) {
-                        Ok(Fill::Pattern(pat.get_ref()))
+                    if let Some(&pat) = resources.pattern.get(name) {
+                        Ok(Fill::Pattern(pat))
                     } else {
                         unimplemented!("Pattern {} not found", name)
                     }
