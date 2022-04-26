@@ -30,9 +30,11 @@ impl FontEntry {
         let base_encoding = encoding.as_ref().map(|e| &e.base);
         
         let to_unicode = t!(pdf_font.to_unicode(resolve).transpose());
+        let mut font_codepoints = None;
         let glyph_unicode: HashMap<GlyphId, SmallString> = 
         if let Some(type1) = font.downcast_ref::<Type1Font>() {
             debug!("Font is Type1");
+            font_codepoints = Some(dbg!(&type1.codepoints));
             type1.unicode_names().map(|(gid, s)| (gid, s.into())).collect()
         } else if let Some(cmap) = font.downcast_ref::<TrueTypeFont>().and_then(|ttf| ttf.cmap.as_ref())
             .or_else(|| font.downcast_ref::<OpenTypeFont>().and_then(|otf| otf.cmap.as_ref())) {
@@ -141,6 +143,10 @@ impl FontEntry {
                         if let Some(gid) = font.gid_for_unicode_codepoint(cp as u32) {
                             cmap.insert(cp as u16, (gid, Some(unicode.into())));
                         }
+                    }
+                } else if let Some(codepoints) = font_codepoints {
+                    for (&cp, &gid) in codepoints.iter() {
+                        cmap.insert(cp as u16, (GlyphId(gid), glyph_unicode.get(&GlyphId(gid)).cloned()));
                     }
                 } else {
                     debug!("assuming text has unicode codepoints");
