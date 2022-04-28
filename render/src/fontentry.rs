@@ -11,7 +11,7 @@ use crate::font::FontRc;
 
 #[derive(Debug)]
 pub enum TextEncoding {
-    CID(Option<ToUnicodeMap>),
+    CID(Option<HashMap<u16, (Option<GlyphId>, SmallString)>>),
     Cmap(HashMap<u16, (GlyphId, Option<SmallString>)>)
 }
 
@@ -48,12 +48,25 @@ impl FontEntry {
         };
         
         debug!("to_unicode: {:?}", to_unicode);
+        let build_map = || {
+            if let Some(ref to_unicode) = to_unicode {
+                let map = to_unicode.iter().map(|(cid, s)| {
+                    let gid = font.gid_for_codepoint(cid as u32);
+                    (cid, (gid, s.into()))
+                }).collect();
+                Some(map)
+            } else {
+                None
+            }
+        };
         
         let encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
             debug!("gid to cid map: {:?}", map);
             match map {
-                CidToGidMap::Identity => TextEncoding::CID(to_unicode),
+                CidToGidMap::Identity => {
+                    TextEncoding::CID(build_map())
+                }
                 CidToGidMap::Table(ref data) => {
                     let cmap = data.iter().enumerate().map(|(cid, &gid)| {
                         let unicode = match to_unicode {
@@ -67,7 +80,7 @@ impl FontEntry {
             }
         } else if base_encoding == Some(&BaseEncoding::IdentityH) {
             is_cid = true;
-            TextEncoding::CID(to_unicode)
+            TextEncoding::CID(build_map())
         } else {
             let mut cmap = HashMap::<u16, (GlyphId, Option<SmallString>)>::new();
             let source_encoding = match base_encoding {
@@ -161,7 +174,7 @@ impl FontEntry {
             debug!("cmap: {:?}", &cmap);
 
             if cmap.len() == 0 {
-                TextEncoding::CID(to_unicode)
+                TextEncoding::CID(build_map())
             } else {
                 TextEncoding::Cmap(cmap)
             }

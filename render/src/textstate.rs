@@ -86,8 +86,10 @@ impl TextState {
                     (cid, Some(GlyphId(cid as u32)), unicode)
                 },
                 TextEncoding::CID(Some(ref to_unicode)) => {
-                    let unicode = to_unicode.get(cid).map(SmallString::from);
-                    (cid, Some(GlyphId(cid as u32)), unicode)
+                    match to_unicode.get(&cid) {
+                        Some(&(gid, ref unicode)) => (cid, gid, Some(unicode.clone())),
+                        None => (cid, None, None)
+                    }
                 },
                 TextEncoding::Cmap(ref cmap) => {
                     match cmap.get(&cid) {
@@ -120,7 +122,7 @@ impl TextState {
         for (cid, gid, unicode) in glyphs {
             let is_space = matches!(e.encoding, TextEncoding::Cmap(_)) && unicode.as_deref() == Some(" ");
 
-            //debug!("cid {} -> gid {:?}", cid, gid);
+            debug!("cid {} -> gid {:?} {:?}", cid, gid, unicode);
             let gid = match gid {
                 Some(gid) => gid,
                 None => {
