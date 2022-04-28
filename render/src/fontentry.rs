@@ -65,7 +65,14 @@ impl FontEntry {
             debug!("gid to cid map: {:?}", map);
             match map {
                 CidToGidMap::Identity => {
-                    TextEncoding::CID(build_map())
+                    if let Some(ref to_unicode) = to_unicode {
+                        let map = to_unicode.iter().map(|(cid, s)| {
+                            (cid, (Some(GlyphId(cid as u32)), s.into()))
+                        }).collect();
+                        TextEncoding::CID(Some(map))
+                    } else {
+                        TextEncoding::CID(None)
+                    }
                 }
                 CidToGidMap::Table(ref data) => {
                     let cmap = data.iter().enumerate().map(|(cid, &gid)| {
