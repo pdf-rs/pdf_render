@@ -1,4 +1,3 @@
-use pathfinder_color::ColorF;
 use pathfinder_geometry::{
     transform2d::Transform2F,
     rect::RectF,
@@ -8,7 +7,7 @@ use pathfinder_content::{
     stroke::{StrokeStyle},
     outline::Outline,
 };
-use pdf::object::{Ref, XObject, ImageXObject, Resolve, Stream, ImageDict, Resources};
+use pdf::object::{Ref, XObject, ImageXObject, Resolve, Resources};
 use pdf::error::PdfError;
 use font::Glyph;
 use super::{FontEntry, TextSpan, Fill};

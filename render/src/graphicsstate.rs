@@ -3,15 +3,14 @@ use pdf::object::ColorSpace;
 use pathfinder_geometry::transform2d::Transform2F;
 use pathfinder_content::{
     fill::FillRule,
-    stroke::{StrokeStyle, OutlineStrokeToFill},
+    stroke::{StrokeStyle},
     outline::Outline,
 };
 use pathfinder_renderer::{
-    scene::{DrawPath, ClipPath, ClipPathId, Scene},
-    paint::{PaintId, Paint},
+    scene::{ClipPath, ClipPathId},
+    paint::{PaintId},
 };
-use pathfinder_color::ColorF;
-use crate::{DrawMode, Fill};
+use crate::{Fill};
 
 
 #[derive(Clone)]
@@ -62,7 +61,7 @@ impl<'a> GraphicsState<'a> {
             self.stroke_paint = None;
         }
     }
-    pub fn merge_clip_path(&mut self, mut outline: Outline, fill_rule: FillRule) {
+    pub fn merge_clip_path(&mut self, outline: Outline, fill_rule: FillRule) {
         /*
         if let Some(ref outer) = self.clip_path {
             println!("path a: {:?}", outline);

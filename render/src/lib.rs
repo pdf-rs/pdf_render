@@ -37,10 +37,9 @@ use custom_debug_derive::Debug;
 use pdf::object::*;
 use pdf::error::PdfError;
 use pathfinder_geometry::{
-    vector::{Vector2F, Vector2I},
+    vector::{Vector2F},
     rect::RectF, transform2d::Transform2F,
 };
-use pathfinder_color::ColorU;
 use renderstate::RenderState;
 use std::sync::Arc;
 use itertools::Itertools;
@@ -76,7 +75,7 @@ impl From<RectF> for BBox {
 
 
 pub fn page_bounds(page: &Page) -> RectF {
-    let Rect { left, right, top, bottom } = page.crop_box().expect("no media box");
+    let Rect { left, right, top, bottom } = page.media_box().expect("no media box");
     RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top)) * SCALE
 }
 pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Page, transform: Transform2F) -> Result<Transform2F, PdfError> {

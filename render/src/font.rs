@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 use std::ops::Deref;
 use std::collections::HashMap;
 use pdf::object::*;

@@ -1,11 +1,10 @@
 use std::collections::HashMap;
-use font::{self, Font, GlyphId, TrueTypeFont, CffFont, Type1Font, OpenTypeFont};
+use font::{self, GlyphId, TrueTypeFont, CffFont, Type1Font, OpenTypeFont};
 use pdf::encoding::BaseEncoding;
-use pdf::font::{Font as PdfFont, Widths, ToUnicodeMap, CidToGidMap};
+use pdf::font::{Font as PdfFont, Widths, CidToGidMap};
 use pdf::object::{Resolve, RcRef};
 use pdf::error::PdfError;
 use pdf_encoding::{Encoding, glyphname_to_unicode};
-use std::sync::Arc;
 use istring::SmallString;
 use crate::font::FontRc;
 

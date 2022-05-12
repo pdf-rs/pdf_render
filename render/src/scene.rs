@@ -1,20 +1,19 @@
 use pathfinder_color::{ColorF, ColorU};
 use pathfinder_content::{
     fill::FillRule,
-    stroke::{StrokeStyle, OutlineStrokeToFill},
+    stroke::{OutlineStrokeToFill},
     outline::Outline,
-    pattern::{Pattern, Image},
+    pattern::{Pattern},
 };
 use pathfinder_renderer::{
     scene::{DrawPath, ClipPath, ClipPathId, Scene},
     paint::{PaintId, Paint},
 };
 use pathfinder_geometry::{
-    vector::{Vector2F, Vector2I},
+    vector::{Vector2F},
     rect::RectF, transform2d::Transform2F,
 };
 use pdf::object::{Ref, XObject, ImageXObject, Resolve, Resources};
-use font::Glyph;
 use super::{FontEntry, TextSpan, DrawMode, Backend, Fill, Cache};
 use pdf::font::Font as PdfFont;
 use pdf::error::PdfError;
@@ -48,13 +47,12 @@ impl<'a> SceneBackend<'a> {
                 self.clip_path_id = Some(id);
                 Some(id)
             },
-            _ => unreachable!()
         }
     }
     fn paint(&mut self, fill: Fill, alpha: f32) -> PaintId {
         let paint = match fill {
             Fill::Solid(r, g, b) => Paint::from_color(ColorF::new(r, g, b, alpha).to_u8()),
-            Fill::Pattern(id) => {
+            Fill::Pattern(_) => {
                 Paint::black()
             }
         };
@@ -62,7 +60,7 @@ impl<'a> SceneBackend<'a> {
     }
 }
 impl<'a> Backend for SceneBackend<'a> {
-    fn set_clip_path(&mut self, path: &Outline) {
+    fn set_clip_path(&mut self, _path: &Outline) {
 
     }
     fn set_view_box(&mut self, view_box: RectF) {
@@ -113,12 +111,12 @@ impl<'a> Backend for SceneBackend<'a> {
             self.scene.push_draw_path(draw_path);
         }
     }
-    fn draw_inline_image(&mut self, im: &Arc<ImageXObject>, resources: &Resources, transform: Transform2F, resolve: &impl Resolve) {
+    fn draw_inline_image(&mut self, _im: &Arc<ImageXObject>, _resources: &Resources, _transform: Transform2F, _resolve: &impl Resolve) {
 
     }
 
     fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
         self.cache.get_font(font_ref, resolve)
     }
-    fn add_text(&mut self, span: TextSpan) {}
+    fn add_text(&mut self, _span: TextSpan) {}
 }

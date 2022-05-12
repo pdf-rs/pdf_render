@@ -24,7 +24,7 @@ impl ValueSize for ImageResult {
     fn size(&self) -> usize {
         match *self.0 {
             Ok(ref im) => im.pixels().len() * 4,
-            Err(ref e) => 1,
+            Err(_) => 1,
         }
     }
 }

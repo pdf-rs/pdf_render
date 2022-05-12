@@ -1,6 +1,5 @@
 use pdf::object::*;
 use pdf::error::PdfError;
-use std::path::Path;
 use pathfinder_color::ColorU;
 use std::sync::Arc;
 
@@ -20,7 +19,6 @@ impl ImageData {
     }
 }
 
-use std::borrow::Cow;
 fn resize_alpha(data: &[u8], src_width: u32, src_height: u32, dest_width: u32, dest_height: u32) -> Option<Vec<u8>> {
     use image::{ImageBuffer, imageops::{resize, FilterType}, Luma};
 
@@ -36,6 +34,8 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
     let pixel_count = image.width as usize * image.height as usize;
     if raw_data.len() % pixel_count != 0 {
         warn!("invalid data length {} bytes for {} pixels", raw_data.len(), pixel_count);
+        info!("image: {:?}", image.inner.info.info);
+        info!("filters: {:?}", image.inner.filters);
         return Err(PdfError::Other { msg: format!("image data is {} (not a multiple of {}).", raw_data.len(), pixel_count)});
     }
     info!("smask: {:?}", image.smask);

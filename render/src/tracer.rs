@@ -3,7 +3,6 @@ use pathfinder_content::{
     outline::Outline,
     fill::FillRule,
 };
-use pathfinder_color::{ColorU};
 use pathfinder_geometry::{
     rect::RectF,
     transform2d::Transform2F,
@@ -12,7 +11,7 @@ use pathfinder_geometry::{
 use pathfinder_content::{
     stroke::{StrokeStyle},
 }; 
-use pdf::object::{Ref, XObject, ImageXObject, Resolve, Stream, ImageDict, Resources};
+use pdf::object::{Ref, XObject, ImageXObject, Resolve, Resources};
 use font::Glyph;
 use pdf::font::Font as PdfFont;
 use pdf::error::PdfError;
@@ -56,8 +55,8 @@ impl<'a> Tracer<'a> {
     }
 }
 impl<'a> Backend for Tracer<'a> {
-    fn set_clip_path(&mut self, path: &Outline) {}
-    fn draw(&mut self, outline: &Outline, mode: DrawMode, fill_rule: FillRule, transform: Transform2F) {
+    fn set_clip_path(&mut self, _path: &Outline) {}
+    fn draw(&mut self, outline: &Outline, mode: DrawMode, _fill_rule: FillRule, transform: Transform2F) {
         let stroke = match mode {
             DrawMode::FillStroke(_, _, fill, alpha, style) | DrawMode::Stroke(fill, alpha, style) => Some((fill, alpha, style)),
             DrawMode::Fill(_, _) => None,
@@ -75,7 +74,7 @@ impl<'a> Backend for Tracer<'a> {
     fn set_view_box(&mut self, r: RectF) {
         self.view_box = r;
     }
-    fn draw_image(&mut self, xref: Ref<XObject>, im: &ImageXObject, resources: &Resources, transform: Transform2F, resolve: &impl Resolve) {
+    fn draw_image(&mut self, xref: Ref<XObject>, _im: &ImageXObject, _resources: &Resources, transform: Transform2F, _resolve: &impl Resolve) {
         let rect = transform * RectF::new(
             Vector2F::new(0.0, 0.0), Vector2F::new(1.0, 1.0)
         );
@@ -83,7 +82,7 @@ impl<'a> Backend for Tracer<'a> {
             rect, id: xref,
         }));
     }
-    fn draw_inline_image(&mut self, im: &Arc<ImageXObject>, resources: &Resources, transform: Transform2F, resolve: &impl Resolve) {
+    fn draw_inline_image(&mut self, im: &Arc<ImageXObject>, _resources: &Resources, transform: Transform2F, _resolve: &impl Resolve) {
         let rect = transform * RectF::new(
             Vector2F::new(0.0, 0.0), Vector2F::new(1.0, 1.0)
         );
@@ -92,7 +91,7 @@ impl<'a> Backend for Tracer<'a> {
             rect, im: im.clone()
         }));
     }
-    fn draw_glyph(&mut self, glyph: &Glyph, mode: DrawMode, transform: Transform2F) {}
+    fn draw_glyph(&mut self, _glyph: &Glyph, _mode: DrawMode, _transform: Transform2F) {}
     fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
         let mut error = None;
         let val = self.cache.fonts.get(font_ref, || 

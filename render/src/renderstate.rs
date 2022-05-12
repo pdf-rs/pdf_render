@@ -1,7 +1,5 @@
-use pdf::file::File as PdfFile;
 use pdf::object::*;
 use pdf::primitive::{Primitive, Dictionary};
-use pdf::backend::Backend as PdfBackend;
 use pdf::content::{Op, Matrix, Point, Rect, Color, Rgb, Cmyk, Winding, FormXObject};
 use pdf::error::{PdfError, Result};
 use pdf::content::TextDrawAdjusted;
@@ -9,19 +7,16 @@ use crate::backend::Backend;
 
 use pathfinder_geometry::{
     vector::{Vector2F},
-    rect::RectF, transform2d::{Transform2F, Matrix2x2F},
+    rect::RectF, transform2d::{Transform2F},
 };
 use pathfinder_content::{
     fill::FillRule,
     stroke::{LineCap, LineJoin, StrokeStyle},
     outline::{Outline, Contour},
-    pattern::{Image},
 };
-use pathfinder_color::{ColorU, ColorF};
 use super::{
     graphicsstate::{GraphicsState},
     textstate::{TextState, Span},
-    BBox,
     DrawMode,
     TextSpan,
     Fill,
@@ -131,6 +126,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         self.backend.draw(&self.current_outline, mode, fill_rule, self.graphics_state.transform);
         self.current_outline.clear();
     }
+    #[allow(unused_variables)]
     pub fn draw_op(&mut self, op: &Op) -> Result<()> {
         match *op {
             Op::BeginMarkedContent { .. } => {}
@@ -393,6 +389,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
 
         Ok(())
     }
+    #[allow(dead_code)]
     fn get_properties<'b>(&'b self, p: &'b Primitive) -> Result<&'b Dictionary> {
         match p {
             Primitive::Dictionary(ref dict) => Ok(dict),
@@ -410,7 +407,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
 }
 
 fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resources, resolve: &impl Resolve) -> Result<Fill> {
-    match convert_color2(cs, color, resources, resolve) {
+    match convert_color2(cs, color, resources) {
         Ok(color) => Ok(color),
         Err(e) if resolve.options().allow_error_in_option => {
             warn!("failed to convert color: {:?}", e);
@@ -419,7 +416,8 @@ fn convert_color<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resourc
         Err(e) => Err(e)
     }
 }
-fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resources, resolve: &impl Resolve) -> Result<Fill> {
+#[allow(unused_variables)]
+fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resources) -> Result<Fill> {
     match *color {
         Color::Gray(g) => {
             *cs = &ColorSpace::DeviceGray;
