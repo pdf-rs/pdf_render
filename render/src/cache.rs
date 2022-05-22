@@ -16,7 +16,7 @@ use pathfinder_content::{
 use super::{fontentry::FontEntry};
 use super::image::load_image;
 use super::font::{load_font, StandardCache};
-use cachelib::{sync::SyncCache, ValueSize};
+use globalcache::{sync::SyncCache, ValueSize};
 
 #[derive(Clone)]
 pub struct ImageResult(pub Arc<Result<Image>>);

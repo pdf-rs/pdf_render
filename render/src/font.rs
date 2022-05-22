@@ -8,7 +8,7 @@ use pdf::error::{Result, PdfError};
 use font::{self};
 use std::sync::Arc;
 use super::FontEntry;
-use cachelib::{sync::SyncCache, ValueSize};
+use globalcache::{sync::SyncCache, ValueSize};
 use std::hash::{Hash, Hasher};
 
 #[derive(Clone)]

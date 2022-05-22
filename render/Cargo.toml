@@ -25,10 +25,10 @@ log = "0.4"
 font = { git = "https://github.com/pdf-rs/font" }
 pdf_encoding = "0.3"
 itertools = "*"
-image = "0.23"
+image = "0.24.2"
 instant = "*"
 custom_debug_derive = "*"
-cachelib = { git = "https://github.com/s3bk/cachelib" }
+globalcache = { git = "https://github.com/s3bk/cachelib", features = ["sync"] }
 istring = { git = "https://github.com/s3bk/istring" }
 once_cell = "*"
 serde_json = "*"

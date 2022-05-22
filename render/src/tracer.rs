@@ -18,7 +18,7 @@ use pdf::error::PdfError;
 use std::sync::Arc;
 use std::path::PathBuf;
 use crate::font::{load_font, StandardCache};
-use cachelib::sync::SyncCache;
+use globalcache::sync::SyncCache;
 
 pub struct Tracer<'a> {
     items: Vec<DrawItem>,

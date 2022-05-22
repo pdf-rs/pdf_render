@@ -199,7 +199,7 @@ impl FontEntry {
     }
 }
 
-impl cachelib::ValueSize for FontEntry {
+impl globalcache::ValueSize for FontEntry {
     fn size(&self) -> usize {
         1 // TODO
     }
