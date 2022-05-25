@@ -3,8 +3,8 @@ Experimental PDF viewer building on [pdf](https://github.com/pdf-rs/pdf).
 
 Feel free to contribute with ideas, issues or code! Please join [us on Zulip](https://type.zulipchat.com/#narrow/stream/209232-pdf) if you have any questions or problems.
 
-# Building
-See [fonts.md](fonts.md) if you want to support the 14 standard fonts.
+# Fonts
+Get a copy of https://github.com/s3bk/pdf_fonts and set `STANDARD_FONTS` to the directory if `pdf_fonts`.
 
 # Viewer
 run it:
