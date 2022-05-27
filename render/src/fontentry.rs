@@ -144,16 +144,16 @@ impl FontEntry {
             }
             if let Some(encoding) = encoding {
                 for (&cp, name) in encoding.differences.iter() {
-                    match font.gid_for_name(&name) {
-                        Some(gid) => {
-                            let unicode = glyphname_to_unicode(name).map(|s| s.into())
-                                .or_else(|| std::char::from_u32(0xf000 + gid.0).map(SmallString::from));
-                            
-                            debug!("{} -> gid {:?}, unicode {:?}", cp, gid, unicode);
-                            cmap.insert(cp as u16, (gid, unicode));
-                        }
-                        None => info!("no glyph for name {}", name)
-                    }
+                    let uni = glyphname_to_unicode(name);
+                    let gid = font.gid_for_name(&name).or_else(||
+                        uni.and_then(|s| s.chars().next()).and_then(|cp| font.gid_for_unicode_codepoint(cp as u32))
+                    ).unwrap_or(GlyphId(cp));
+                    
+                    let unicode = uni.map(|s| s.into())
+                        .or_else(|| std::char::from_u32(0xf000 + gid.0).map(SmallString::from));
+                    
+                    debug!("{} -> gid {:?}, unicode {:?}", cp, gid, unicode);
+                    cmap.insert(cp as u16, (gid, unicode));
                 }
             } else {
                 if let Some(ref u) = to_unicode {
