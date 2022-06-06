@@ -106,11 +106,11 @@ impl TextState {
             TextMode::FillThenStroke => Some(DrawMode::FillStroke(
                 gs.fill_color, gs.fill_color_alpha,
                 gs.stroke_color, gs.stroke_color_alpha,
-                gs.stroke_style
+                gs.stroke()
             )),
             TextMode::Invisible => None,
-            TextMode::Stroke => Some(DrawMode::Stroke(gs.stroke_color, gs.stroke_color_alpha, gs.stroke_style)),
-            TextMode::StrokeAndClip => Some(DrawMode::Stroke(gs.stroke_color, gs.stroke_color_alpha, gs.stroke_style)),
+            TextMode::Stroke => Some(DrawMode::Stroke(gs.stroke_color, gs.stroke_color_alpha, gs.stroke())),
+            TextMode::StrokeAndClip => Some(DrawMode::Stroke(gs.stroke_color, gs.stroke_color_alpha, gs.stroke())),
         };
         let e = self.font_entry.as_ref().expect("no font");
 
@@ -122,7 +122,7 @@ impl TextState {
         for (cid, gid, unicode) in glyphs {
             let is_space = matches!(e.encoding, TextEncoding::Cmap(_)) && unicode.as_deref() == Some(" ");
 
-            debug!("cid {} -> gid {:?} {:?}", cid, gid, unicode);
+            //debug!("cid {} -> gid {:?} {:?}", cid, gid, unicode);
             let gid = match gid {
                 Some(gid) => gid,
                 None => {
@@ -145,7 +145,7 @@ impl TextState {
                 let transform = gs.transform * self.text_matrix * tr;
                 if glyph.path.len() != 0 {
                     span.bbox.add(gs.transform * transform * glyph.path.bounds());
-                    if let Some(draw_mode) = draw_mode {
+                    if let Some(ref draw_mode) = draw_mode {
                         backend.draw_glyph(&glyph, draw_mode, transform);
                     }
                 }

@@ -147,6 +147,8 @@ impl FontEntry {
                     let uni = glyphname_to_unicode(name);
                     let gid = font.gid_for_name(&name).or_else(||
                         uni.and_then(|s| s.chars().next()).and_then(|cp| font.gid_for_unicode_codepoint(cp as u32))
+                    ).or_else(||
+                        font.gid_for_codepoint(cp)
                     ).unwrap_or(GlyphId(cp));
                     
                     let unicode = uni.map(|s| s.into())

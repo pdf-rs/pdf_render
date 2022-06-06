@@ -10,7 +10,7 @@ use pathfinder_renderer::{
     scene::{ClipPath, ClipPathId},
     paint::{PaintId},
 };
-use crate::{Fill};
+use crate::{Fill, backend::Stroke};
 
 
 #[derive(Clone)]
@@ -28,6 +28,7 @@ pub struct GraphicsState<'a> {
     pub clip_path_id: Option<ClipPathId>,
     pub fill_color_space: &'a ColorSpace,
     pub stroke_color_space: &'a ColorSpace,
+    pub dash_pattern: Option<(&'a [f32], f32)>,
 
     pub stroke_alpha: f32,
     pub fill_alpha: f32,
@@ -79,5 +80,11 @@ impl<'a> GraphicsState<'a> {
         let mut clip_path = ClipPath::new(outline);
         clip_path.set_fill_rule(fill_rule);
         self.clip_path = Some(clip_path);
+    }
+    pub fn stroke(&self) -> Stroke {
+        Stroke {
+            style: self.stroke_style,
+            dash_pattern: self.dash_pattern.map(|(a, p)| (a.into(), p))
+        }
     }
 }

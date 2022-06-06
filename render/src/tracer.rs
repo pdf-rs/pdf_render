@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::path::PathBuf;
 use crate::font::{load_font, StandardCache};
 use globalcache::sync::SyncCache;
+use crate::backend::Stroke;
 
 pub struct Tracer<'a> {
     items: Vec<DrawItem>,
@@ -55,15 +56,17 @@ impl<'a> Tracer<'a> {
     }
 }
 impl<'a> Backend for Tracer<'a> {
-    fn set_clip_path(&mut self, _path: &Outline) {}
-    fn draw(&mut self, outline: &Outline, mode: DrawMode, _fill_rule: FillRule, transform: Transform2F) {
-        let stroke = match mode {
-            DrawMode::FillStroke(_, _, fill, alpha, style) | DrawMode::Stroke(fill, alpha, style) => Some((fill, alpha, style)),
+    fn set_clip_path(&mut self, path: Option<&Outline>) {
+        self.items.push(DrawItem::ClipPath(path.cloned()));
+    }
+    fn draw(&mut self, outline: &Outline, mode: &DrawMode, _fill_rule: FillRule, transform: Transform2F) {
+        let stroke = match *mode {
+            DrawMode::FillStroke(_, _, fill, alpha, ref style) | DrawMode::Stroke(fill, alpha, ref style) => Some((fill, alpha, style.clone())),
             DrawMode::Fill(_, _) => None,
         };
         self.items.push(DrawItem::Vector(VectorPath {
             outline: outline.clone(),
-            fill: match mode {
+            fill: match *mode {
                 DrawMode::Fill(fill, alpha) | DrawMode::FillStroke(fill, alpha, _, _, _) => Some((fill, alpha)),
                 _ => None
             },
@@ -91,7 +94,7 @@ impl<'a> Backend for Tracer<'a> {
             rect, im: im.clone()
         }));
     }
-    fn draw_glyph(&mut self, _glyph: &Glyph, _mode: DrawMode, _transform: Transform2F) {}
+    fn draw_glyph(&mut self, _glyph: &Glyph, _mode: &DrawMode, _transform: Transform2F) {}
     fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
         let mut error = None;
         let val = self.cache.fonts.get(font_ref, || 
@@ -154,12 +157,13 @@ pub enum DrawItem {
     Image(ImageObject),
     InlineImage(InlineImageObject),
     Text(TextSpan),
+    ClipPath(Option<Outline>),
 }
 
 #[derive(Debug)]
 pub struct VectorPath {
     pub outline: Outline,
     pub fill: Option<(Fill, f32)>,
-    pub stroke: Option<(Fill, f32, StrokeStyle)>,
+    pub stroke: Option<(Fill, f32, Stroke)>,
     pub transform: Transform2F,
 }

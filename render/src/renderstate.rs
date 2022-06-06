@@ -20,6 +20,7 @@ use super::{
     DrawMode,
     TextSpan,
     Fill,
+    backend::Stroke,
 };
 
 trait Cvt {
@@ -103,7 +104,8 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 line_cap: LineCap::Butt,
                 line_join: LineJoin::Miter(1.0),
                 line_width: 1.0,
-            }
+            },
+            dash_pattern: None,
         };
         let text_state = TextState::new();
         let stack = vec![];
@@ -121,13 +123,13 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             backend,
         }
     }
-    fn draw(&mut self, mode: DrawMode, fill_rule: FillRule) {
+    fn draw(&mut self, mode: &DrawMode, fill_rule: FillRule) {
         self.flush();
         self.backend.draw(&self.current_outline, mode, fill_rule, self.graphics_state.transform);
         self.current_outline.clear();
     }
     #[allow(unused_variables)]
-    pub fn draw_op(&mut self, op: &Op) -> Result<()> {
+    pub fn draw_op(&mut self, op: &'a Op) -> Result<()> {
         match *op {
             Op::BeginMarkedContent { .. } => {}
             Op::EndMarkedContent { .. } => {}
@@ -154,23 +156,23 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 self.current_outline.clear();
             }
             Op::Stroke => {
-                self.draw(DrawMode::Stroke(
+                self.draw(&DrawMode::Stroke(
                     self.graphics_state.stroke_color,
                     self.graphics_state.stroke_color_alpha,
-                    self.graphics_state.stroke_style
+                    self.graphics_state.stroke(),
                 ), FillRule::Winding);
             },
             Op::FillAndStroke { winding } => {
-                self.draw(DrawMode::FillStroke(
+                self.draw(&DrawMode::FillStroke(
                     self.graphics_state.fill_color,
                     self.graphics_state.fill_color_alpha,
                     self.graphics_state.stroke_color,
                     self.graphics_state.stroke_color_alpha,
-                    self.graphics_state.stroke_style
+                    self.graphics_state.stroke(),
                 ), winding.cvt());
             }
             Op::Fill { winding } => {
-                self.draw(DrawMode::Fill(
+                self.draw(&DrawMode::Fill(
                     self.graphics_state.fill_color,
                     self.graphics_state.fill_color_alpha
                 ), winding.cvt());
@@ -183,6 +185,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
 
                 self.graphics_state.merge_clip_path(path, winding.cvt());
 
+                self.backend.set_clip_path(self.graphics_state.clip_path.as_ref().map(|c| &c.outline));
                 //let o = self.graphics_state.clip_path.as_ref().unwrap().outline().clone();
                 //self.debug_outline(o, ColorU::new(255, 0, 0, 50));
             },
@@ -194,13 +197,14 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 let (g, t) = self.stack.pop().expect("graphcs stack is empty");
                 self.graphics_state = g;
                 self.text_state = t;
+                self.backend.set_clip_path(self.graphics_state.clip_path.as_ref().map(|c| &c.outline));
             },
 
             Op::Transform { matrix } => {
                 self.graphics_state.transform = self.graphics_state.transform * matrix.cvt();
             }
             Op::LineWidth { width } => self.graphics_state.stroke_style.line_width = width,
-            Op::Dash { ref pattern, phase } => {},
+            Op::Dash { ref pattern, phase } => self.graphics_state.dash_pattern = Some((&*pattern, phase)),
             Op::LineJoin { join } => {},
             Op::LineCap { cap } => {},
             Op::MiterLimit { limit } => {},

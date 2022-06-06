@@ -4,6 +4,7 @@ use pathfinder_content::{
     stroke::{OutlineStrokeToFill},
     outline::Outline,
     pattern::{Pattern},
+    dash::OutlineDash,
 };
 use pathfinder_renderer::{
     scene::{DrawPath, ClipPath, ClipPathId, Scene},
@@ -60,7 +61,7 @@ impl<'a> SceneBackend<'a> {
     }
 }
 impl<'a> Backend for SceneBackend<'a> {
-    fn set_clip_path(&mut self, _path: &Outline) {
+    fn set_clip_path(&mut self, _path: Option<&Outline>) {
 
     }
     fn set_view_box(&mut self, view_box: RectF) {
@@ -70,8 +71,8 @@ impl<'a> Backend for SceneBackend<'a> {
         self.scene.push_draw_path(DrawPath::new(Outline::from_rect(view_box), white));
 
     }
-    fn draw(&mut self, outline: &Outline, mode: DrawMode, fill_rule: FillRule, transform: Transform2F) {
-        match mode {
+    fn draw(&mut self, outline: &Outline, mode: &DrawMode, fill_rule: FillRule, transform: Transform2F) {
+        match *mode {
             DrawMode::Fill(fill, alpha) | DrawMode::FillStroke(fill, alpha, _, _, _) => {
                 let paint = self.paint(fill, alpha);
                 let mut draw_path = DrawPath::new(outline.clone().transformed(&transform), paint);
@@ -81,12 +82,23 @@ impl<'a> Backend for SceneBackend<'a> {
             }
             _ => {}
         }
-        match mode {
-            DrawMode::Stroke(fill, alpha, style) | DrawMode::FillStroke(_, _, fill, alpha, style) => {
+        match *mode {
+            DrawMode::Stroke(fill, alpha, ref style) | DrawMode::FillStroke(_, _, fill, alpha, ref style) => {
                 let paint = self.paint(fill, alpha);
-                let mut stroke = OutlineStrokeToFill::new(outline, style);
-                stroke.offset();
-                let mut draw_path = DrawPath::new(stroke.into_outline().transformed(&transform), paint);
+                let contour = match style.dash_pattern {
+                    Some((ref pat, phase)) => {
+                        let dashed = OutlineDash::new(outline, &*pat, phase).into_outline();
+                        let mut stroke = OutlineStrokeToFill::new(&dashed, style.style);
+                        stroke.offset();
+                        stroke.into_outline()
+                    }
+                    None => {
+                        let mut stroke = OutlineStrokeToFill::new(outline, style.style);
+                        stroke.offset();
+                        stroke.into_outline()
+                    }
+                };
+                let mut draw_path = DrawPath::new(contour.transformed(&transform), paint);
                 draw_path.set_clip_path(self.clip_path_id());
                 draw_path.set_fill_rule(fill_rule);
                 self.scene.push_draw_path(draw_path);
