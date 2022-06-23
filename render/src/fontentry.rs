@@ -49,11 +49,29 @@ impl FontEntry {
         debug!("to_unicode: {:?}", to_unicode);
         let build_map = || {
             if let Some(ref to_unicode) = to_unicode {
-                let map = to_unicode.iter().map(|(cid, s)| {
+                let mut num1 = 0;
+                dbg!(font.encoding());
+                let map1: HashMap<_, _> = to_unicode.iter().map(|(cid, s)| {
                     let gid = font.gid_for_codepoint(cid as u32);
+                    if gid.is_some() {
+                        num1 += 1;
+                    }
                     (cid, (gid, s.into()))
                 }).collect();
-                Some(map)
+                if let Some(cff) = font.downcast_ref::<CffFont>() {
+                    let mut num2 = 0;
+                    let map2: HashMap<_, _> = to_unicode.iter().map(|(cid, s)| {
+                        let gid = cff.sid_map.get(&cid).map(|&n| GlyphId(n as u32));
+                        if gid.is_some() {
+                            num2 += 1;
+                        }
+                        (cid, (gid, s.into()))
+                    }).collect();
+                    if num2 > num1 {
+                        return Some(map2);
+                    }
+                }
+                Some(map1)
             } else {
                 None
             }
