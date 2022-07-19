@@ -139,6 +139,7 @@ impl TextState {
                 let advance = self.word_space * self.horiz_scale + width;
                 self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
                 span.width += advance;
+                span.text.push(' ');
                 continue;
             }
             if let Some(glyph) = glyph {
