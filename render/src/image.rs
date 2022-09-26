@@ -64,7 +64,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
     let mask = t!(image.smask.map(|r| resolve.get(r)).transpose());
     let alpha = match mask {
         Some(ref mask) => {
-            let data = Data::Arc(t!(mask.data()));
+            let data = Data::Arc(t!((**mask).data(resolve)));
             let mask_width = mask.width as usize;
             let mask_height = mask.height as usize;
             let bits_per_component = mask.bits_per_component.ok_or_else(|| PdfError::Other { msg: format!("no bits per component")})?;
