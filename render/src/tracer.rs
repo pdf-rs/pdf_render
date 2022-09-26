@@ -128,29 +128,6 @@ pub struct InlineImageObject {
     pub im: Arc<ImageXObject>,
 }
 
-pub struct TraceResults {
-    pub draw: Vec<DrawItem>,
-}
-impl TraceResults {
-    pub fn texts(&self) -> impl Iterator<Item=&TextSpan> {
-        self.draw.iter().filter_map(|i| match i {
-            DrawItem::Text(t) => Some(t),
-            _ => None
-        })
-    }
-    pub fn images(&self) -> impl Iterator<Item=&ImageObject> {
-        self.draw.iter().filter_map(|i| match i {
-            DrawItem::Image(i) => Some(i),
-            _ => None
-        })
-    }
-    pub fn paths(&self) -> impl Iterator<Item=&VectorPath> {
-        self.draw.iter().filter_map(|i| match i {
-            DrawItem::Vector(p) => Some(p),
-            _ => None
-        })
-    }
-}
 #[derive(Debug)]
 pub enum DrawItem {
     Vector(VectorPath),
