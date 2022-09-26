@@ -31,7 +31,7 @@ impl ValueSize for ImageResult {
 
 pub struct Cache {
     // shared mapping of fontname -> font
-    fonts: Arc<SyncCache<Ref<PdfFont>, Option<Arc<FontEntry>>>>,
+    fonts: Arc<SyncCache<usize, Option<Arc<FontEntry>>>>,
     images: Arc<SyncCache<Ref<XObject>, ImageResult>>,
     std: StandardCache,
     missing_fonts: Vec<Name>,
@@ -55,16 +55,14 @@ impl Cache {
             missing_fonts: Vec::new(),
         }
     }
-    pub fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, > {
+    pub fn get_font(&mut self, pdf_font: &Shared<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, > {
         let mut error = None;
-        let val = self.fonts.get(font_ref, || 
-            match load_font(font_ref, resolve, &mut self.std) {
+        let val = self.fonts.get(&**pdf_font as *const PdfFont as usize, || 
+            match load_font(pdf_font, resolve, &mut self.std) {
                 Ok(Some(f)) => Some(Arc::new(f)),
                 Ok(None) => {
-                    if let Ok(pdf_font) = resolve.get(font_ref) {
-                        if let Some(ref name) = pdf_font.name {
-                            self.missing_fonts.push(name.clone());
-                        }
+                    if let Some(ref name) = pdf_font.name {
+                        self.missing_fonts.push(name.clone());
                     }
                     None
                 },

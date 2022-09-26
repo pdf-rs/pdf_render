@@ -14,7 +14,7 @@ use pathfinder_geometry::{
     vector::{Vector2F},
     rect::RectF, transform2d::Transform2F,
 };
-use pdf::object::{Ref, XObject, ImageXObject, Resolve, Resources};
+use pdf::object::{Ref, XObject, ImageXObject, Resolve, Resources, Shared};
 use super::{FontEntry, TextSpan, DrawMode, Backend, Fill, Cache};
 use pdf::font::Font as PdfFont;
 use pdf::error::PdfError;
@@ -127,7 +127,7 @@ impl<'a> Backend for SceneBackend<'a> {
 
     }
 
-    fn get_font(&mut self, font_ref: Ref<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
+    fn get_font(&mut self, font_ref: &Shared<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
         self.cache.get_font(font_ref, resolve)
     }
     fn add_text(&mut self, _span: TextSpan) {}

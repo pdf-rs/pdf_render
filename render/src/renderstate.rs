@@ -218,7 +218,8 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 self.graphics_state.set_stroke_alpha(gs.stroke_alpha.unwrap_or(1.0));
                 
                 if let Some((font_ref, size)) = gs.font {
-                    if let Some(e) = self.backend.get_font(font_ref, self.resolve)? {
+                    let font = self.resolve.get(font_ref)?;
+                    if let Some(e) = self.backend.get_font(font.data(), self.resolve)? {
                         debug!("new font: {} at size {}", e.name, size);
                         self.text_state.font_entry = Some(e);
                         self.text_state.font_size = size;
@@ -252,8 +253,8 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             Op::Leading { leading } => self.text_state.leading = leading,
             Op::TextFont { ref name, size } => {
                 let font = match self.resources.fonts.get(name) {
-                    Some(&font_ref) => {
-                        self.backend.get_font(font_ref, self.resolve)?
+                    Some(font_ref) => {
+                        self.backend.get_font(font_ref.data(), self.resolve)?
                     },
                     None => None
                 };

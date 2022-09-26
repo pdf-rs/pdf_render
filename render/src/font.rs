@@ -63,8 +63,8 @@ impl StandardCache {
     }
 }
 
-pub fn load_font(font_ref: Ref<PdfFont>, resolve: &impl Resolve, cache: &StandardCache) -> Result<Option<FontEntry>> {
-    let pdf_font = resolve.get(font_ref)?;
+pub fn load_font(font_ref: &Shared<PdfFont>, resolve: &impl Resolve, cache: &StandardCache) -> Result<Option<FontEntry>> {
+    let pdf_font = font_ref.clone();
     debug!("loading {:?}", pdf_font);
     
     let font: FontRc = match pdf_font.embedded_data(resolve) {
