@@ -323,25 +323,23 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
 
         inner(&mut self.backend, &mut self.text_state, &mut self.graphics_state, &mut span);
 
-        if let (Some(bbox), Some(e)) = (span.bbox.rect(), self.text_state.font_entry.as_ref()) {
-            let transform = self.graphics_state.transform * tm * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
-            let p1 = origin;
-            let p2 = (tm * Transform2F::from_translation(Vector2F::new(span.width, self.text_state.font_size))).translation();
+        let transform = self.graphics_state.transform * tm * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
+        let p1 = origin;
+        let p2 = (tm * Transform2F::from_translation(Vector2F::new(span.width, self.text_state.font_size))).translation();
 
-            debug!("text {}", span.text);
-            self.backend.add_text(TextSpan {
-                rect: self.graphics_state.transform * RectF::from_points(p1.min(p2), p1.max(p2)),
-                width: span.width,
-                bbox,
-                text: span.text,
-                chars: span.chars,
-                font: e.clone(),
-                font_size: self.text_state.font_size,
-                color: self.graphics_state.fill_color,
-                alpha: self.graphics_state.fill_color_alpha,
-                transform,
-            });
-        }
+        debug!("text {}", span.text);
+        self.backend.add_text(TextSpan {
+            rect: self.graphics_state.transform * RectF::from_points(p1.min(p2), p1.max(p2)),
+            width: span.width,
+            bbox: span.bbox.rect(),
+            text: span.text,
+            chars: span.chars,
+            font: self.text_state.font_entry.clone(),
+            font_size: self.text_state.font_size,
+            color: self.graphics_state.fill_color,
+            alpha: self.graphics_state.fill_color_alpha,
+            transform,
+        });
     }
 
     fn color_space(&self, name: &str) -> Result<&'a ColorSpace> {

@@ -141,10 +141,10 @@ pub struct TextSpan {
     // width in textspace units (before applying transform)
     pub width: f32,
     // Bounding box of the rendered outline
-    pub bbox: RectF,
+    pub bbox: Option<RectF>,
     pub font_size: f32,
     #[debug(skip)]
-    pub font: Arc<FontEntry>,
+    pub font: Option<Arc<FontEntry>>,
     pub text: String,
     pub chars: Vec<TextChar>,
     pub color: Fill,
