@@ -63,7 +63,7 @@ impl StandardCache {
     }
 }
 
-pub fn load_font(font_ref: &Shared<PdfFont>, resolve: &impl Resolve, cache: &StandardCache) -> Result<Option<FontEntry>> {
+pub fn load_font(font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve, cache: &StandardCache) -> Result<Option<FontEntry>> {
     let pdf_font = font_ref.clone();
     debug!("loading {:?}", pdf_font);
     

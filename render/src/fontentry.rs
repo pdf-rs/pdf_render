@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use font::{self, GlyphId, TrueTypeFont, CffFont, Type1Font, OpenTypeFont};
 use pdf::encoding::BaseEncoding;
 use pdf::font::{Font as PdfFont, Widths, CidToGidMap};
-use pdf::object::{Resolve, RcRef, Shared};
+use pdf::object::{Resolve, MaybeRef};
 use pdf::error::PdfError;
 use pdf_encoding::{Encoding, glyphname_to_unicode};
 use istring::SmallString;
@@ -16,14 +16,14 @@ pub enum TextEncoding {
 
 pub struct FontEntry {
     pub font: FontRc,
-    pub pdf_font: Shared<PdfFont>,
+    pub pdf_font: MaybeRef<PdfFont>,
     pub encoding: TextEncoding,
     pub widths: Option<Widths>,
     pub is_cid: bool,
     pub name: String,
 }
 impl FontEntry {
-    pub fn build(font: FontRc, pdf_font: Shared<PdfFont>, resolve: &impl Resolve) -> Result<FontEntry, PdfError> {
+    pub fn build(font: FontRc, pdf_font: MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<FontEntry, PdfError> {
         let mut is_cid = pdf_font.is_cid();
         let encoding = pdf_font.encoding().clone();
         let base_encoding = encoding.as_ref().map(|e| &e.base);

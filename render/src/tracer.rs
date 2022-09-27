@@ -11,7 +11,7 @@ use pathfinder_geometry::{
 use pathfinder_content::{
     stroke::{StrokeStyle},
 }; 
-use pdf::object::{Ref, XObject, ImageXObject, Resolve, Resources, Shared};
+use pdf::object::{Ref, XObject, ImageXObject, Resolve, Resources, MaybeRef};
 use font::Glyph;
 use pdf::font::Font as PdfFont;
 use pdf::error::PdfError;
@@ -95,7 +95,7 @@ impl<'a> Backend for Tracer<'a> {
         }));
     }
     fn draw_glyph(&mut self, _glyph: &Glyph, _mode: &DrawMode, _transform: Transform2F) {}
-    fn get_font(&mut self, font_ref: &Shared<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
+    fn get_font(&mut self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
         let mut error = None;
         let val = self.cache.fonts.get(&**font_ref as *const PdfFont as usize, || 
             match load_font(font_ref, resolve, &self.cache.std) {

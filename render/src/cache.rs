@@ -55,7 +55,7 @@ impl Cache {
             missing_fonts: Vec::new(),
         }
     }
-    pub fn get_font(&mut self, pdf_font: &Shared<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, > {
+    pub fn get_font(&mut self, pdf_font: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, > {
         let mut error = None;
         let val = self.fonts.get(&**pdf_font as *const PdfFont as usize, || 
             match load_font(pdf_font, resolve, &mut self.std) {

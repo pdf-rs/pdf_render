@@ -7,7 +7,7 @@ use pathfinder_content::{
     stroke::{StrokeStyle},
     outline::Outline,
 };
-use pdf::object::{Ref, XObject, ImageXObject, Resolve, Resources, Shared};
+use pdf::object::{Ref, XObject, ImageXObject, Resolve, Resources, MaybeRef};
 use pdf::error::PdfError;
 use font::Glyph;
 use super::{FontEntry, TextSpan, Fill};
@@ -23,7 +23,7 @@ pub trait Backend {
     fn draw_glyph(&mut self, glyph: &Glyph, mode: &DrawMode, transform: Transform2F) {
         self.draw(&glyph.path, mode, FillRule::Winding, transform);
     }
-    fn get_font(&mut self, font_ref: &Shared<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError>;
+    fn get_font(&mut self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError>;
     fn add_text(&mut self, span: TextSpan);
 }
 #[derive(Clone)]
