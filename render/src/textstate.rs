@@ -136,7 +136,7 @@ impl TextState {
                 .unwrap_or(0.0);
             
             if is_space {
-                let advance = self.word_space * self.horiz_scale + width;
+                let advance = (self.char_space + self.word_space) * self.horiz_scale + width;
                 self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
                 span.width += advance;
                 span.text.push(' ');
