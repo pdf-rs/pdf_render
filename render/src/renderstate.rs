@@ -194,7 +194,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 self.stack.push((self.graphics_state.clone(), self.text_state.clone()));
             },
             Op::Restore => {
-                let (g, t) = self.stack.pop().expect("graphcs stack is empty");
+                let (g, t) = self.stack.pop().ok_or_else(|| pdf::error::PdfError::Other { msg: "graphcs stack is empty".into() })?;
                 self.graphics_state = g;
                 self.text_state = t;
                 self.backend.set_clip_path(self.graphics_state.clip_path.as_ref().map(|c| &c.outline));
