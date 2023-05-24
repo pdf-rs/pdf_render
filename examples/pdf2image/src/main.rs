@@ -1,5 +1,5 @@
 use argh::FromArgs;
-use pdf::file::File;
+use pdf::file::{File, FileOptions};
 use pdf_render::{Cache, SceneBackend, render_page};
 use pathfinder_rasterize::Rasterizer;
 use pathfinder_geometry::transform2d::Transform2F;
@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
     let opt: Options = argh::from_env();
 
-    let file = File::open(&opt.pdf)?;
+    let file = FileOptions::uncached().open(&opt.pdf)?;
     let page = file.get_page(opt.page)?;
 
     let mut cache = Cache::new();
