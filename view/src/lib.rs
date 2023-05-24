@@ -1,23 +1,26 @@
 #[macro_use] extern crate log;
 
+use std::sync::Arc;
 use pathfinder_view::{Config, Interactive, Context, Emitter, ElementState, KeyCode, KeyEvent};
 use pathfinder_renderer::scene::Scene;
 use pathfinder_geometry::vector::Vector2F;
 
-use pdf::file::File as PdfFile;
+use pdf::file::{File as PdfFile, Cache as PdfCache};
+use pdf::any::AnySync;
+use pdf::PdfError;
 use pdf::backend::Backend;
 use pdf_render::{Cache, SceneBackend, page_bounds, render_page};
 
 #[cfg(target_arch = "wasm32")]
 use pathfinder_view::WasmView;
 
-pub struct PdfView<B: Backend> {
-    file: PdfFile<B>,
+pub struct PdfView<B: Backend, OC, SC> {
+    file: PdfFile<B, OC, SC>,
     num_pages: usize,
     cache: Cache,
 }
-impl<B: Backend> PdfView<B> {
-    pub fn new(file: PdfFile<B>) -> Self {
+impl<B: Backend, OC: PdfCache<Result<AnySync, Arc<PdfError>>>, SC: PdfCache<Result<Arc<[u8]>, Arc<PdfError>>>> PdfView<B, OC, SC> {
+    pub fn new(file: PdfFile<B, OC, SC>) -> Self {
         PdfView {
             num_pages: file.num_pages() as usize,
             file,
@@ -25,7 +28,8 @@ impl<B: Backend> PdfView<B> {
         }
     }
 }
-impl<B: Backend + 'static> Interactive for PdfView<B> {
+impl<B: Backend + 'static, OC: PdfCache<Result<AnySync, Arc<PdfError>>> + 'static,
+    SC: PdfCache<Result<Arc<[u8]>, Arc<PdfError>>> + 'static> Interactive for PdfView<B, OC, SC> {
     type Event = Vec<u8>;
     fn title(&self) -> String {
         self.file.trailer.info_dict.as_ref()

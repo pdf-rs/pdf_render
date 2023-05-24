@@ -19,6 +19,7 @@ use super::{FontEntry, TextSpan, DrawMode, Backend, Fill, Cache};
 use pdf::font::Font as PdfFont;
 use pdf::error::PdfError;
 use std::sync::Arc;
+use pathfinder_content::effects::BlendMode;
 
 pub struct SceneBackend<'a> {
     clip_path: Option<ClipPath>,
