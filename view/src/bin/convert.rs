@@ -1,4 +1,4 @@
-use pdf::file::File as PdfFile;
+use pdf::file::{File as PdfFile, FileOptions};
 use pdf::object::*;
 use pdf::error::PdfError;
 use std::fs::File;
@@ -62,7 +62,7 @@ fn main() -> Result<(), PdfError> {
     let transform = Transform2F::from_scale(opt.dpi / 25.4);
 
     println!("read: {:?}", opt.input);
-    let file = PdfFile::<Vec<u8>>::open(&opt.input)?;
+    let file = FileOptions::cached().open(&opt.input)?;
     
     let mut cache = Cache::new();
     for (i, page) in file.pages().enumerate().skip(opt.page as usize).take(opt.pages as usize) {
