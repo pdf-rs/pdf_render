@@ -7,7 +7,7 @@ use pathfinder_content::{
     stroke::{StrokeStyle},
     outline::Outline,
 };
-use pdf::object::{Ref, XObject, ImageXObject, Resolve, Resources, MaybeRef};
+use pdf::{object::{Ref, XObject, ImageXObject, Resolve, Resources, MaybeRef}, content::Op};
 use pdf::error::PdfError;
 use font::Glyph;
 use super::{FontEntry, TextSpan, Fill};
@@ -25,6 +25,12 @@ pub trait Backend {
     }
     fn get_font(&mut self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError>;
     fn add_text(&mut self, span: TextSpan);
+
+    /// The following functions are for debugging PDF files and not relevant for rendering them.
+    fn bug_text_no_font(&mut self, data: &[u8]) {}
+    fn bug_text_invisible(&mut self, text: &str) {}
+    fn bug_postscript(&mut self, data: &[u8]) {}
+    fn inspect_op(&mut self, op: &Op) {}
 }
 #[derive(Clone)]
 pub enum DrawMode {

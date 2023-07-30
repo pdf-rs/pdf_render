@@ -39,6 +39,23 @@ impl TraceCache {
             std: StandardCache::new(standard_fonts),
         }
     }
+    pub fn get_font(&self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
+        let mut error = None;
+        let val = self.fonts.get(&**font_ref as *const PdfFont as usize, || 
+            match load_font(font_ref, resolve, &self.std) {
+                Ok(Some(f)) => Some(Arc::new(f)),
+                Ok(None) => None,
+                Err(e) => {
+                    error = Some(e);
+                    None
+                }
+            }
+        );
+        match error {
+            None => Ok(val),
+            Some(e) => Err(e)
+        }
+    }
 }
 impl<'a> Tracer<'a> {
     pub fn new(cache: &'a TraceCache) -> Self {
@@ -96,21 +113,7 @@ impl<'a> Backend for Tracer<'a> {
     }
     fn draw_glyph(&mut self, _glyph: &Glyph, _mode: &DrawMode, _transform: Transform2F) {}
     fn get_font(&mut self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
-        let mut error = None;
-        let val = self.cache.fonts.get(&**font_ref as *const PdfFont as usize, || 
-            match load_font(font_ref, resolve, &self.cache.std) {
-                Ok(Some(f)) => Some(Arc::new(f)),
-                Ok(None) => None,
-                Err(e) => {
-                    error = Some(e);
-                    None
-                }
-            }
-        );
-        match error {
-            None => Ok(val),
-            Some(e) => Err(e)
-        }
+        self.cache.get_font(font_ref, resolve)
     }
     fn add_text(&mut self, span: TextSpan) {
         self.items.push(DrawItem::Text(span));

@@ -6,8 +6,8 @@ use pdf::content::TextDrawAdjusted;
 use crate::backend::Backend;
 
 use pathfinder_geometry::{
-    vector::{Vector2F},
-    rect::RectF, transform2d::{Transform2F},
+    vector::Vector2F,
+    rect::RectF, transform2d::Transform2F,
 };
 use pathfinder_content::{
     fill::FillRule,
@@ -15,12 +15,11 @@ use pathfinder_content::{
     outline::{Outline, Contour},
 };
 use super::{
-    graphicsstate::{GraphicsState},
+    graphicsstate::GraphicsState,
     textstate::{TextState, Span},
     DrawMode,
     TextSpan,
     Fill,
-    backend::Stroke,
 };
 
 trait Cvt {
@@ -130,6 +129,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
     }
     #[allow(unused_variables)]
     pub fn draw_op(&mut self, op: &'a Op) -> Result<()> {
+        self.backend.inspect_op(op);
         match *op {
             Op::BeginMarkedContent { .. } => {}
             Op::EndMarkedContent { .. } => {}
@@ -304,6 +304,8 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                         self.draw_form(content)?;
                     }
                     XObject::Postscript(ref ps) => {
+                        let data = ps.data(self.resolve)?;
+                        self.backend.bug_postscript(&data);
                         warn!("Got PostScript?!");
                     }
                 }
