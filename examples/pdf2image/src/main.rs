@@ -32,12 +32,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     let opt: Options = argh::from_env();
 
     let file = FileOptions::uncached().open(&opt.pdf)?;
+    let resolver = file.resolver();
     let page = file.get_page(opt.page)?;
 
     let mut cache = Cache::new();
     let mut backend = SceneBackend::new(&mut cache);
 
-    render_page(&mut backend, &file, &page, Transform2F::from_scale(opt.dpi / 25.4))?;
+    render_page(&mut backend, &resolver, &page, Transform2F::from_scale(opt.dpi / 25.4))?;
 
     let image = Rasterizer::new().rasterize(backend.finish(), None);
 
