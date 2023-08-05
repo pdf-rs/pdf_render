@@ -8,11 +8,30 @@ use std::sync::Arc;
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 pub struct ImageData<'a> {
-    pub data: Cow<'a, [ColorU]>,
-    pub width: u32,
-    pub height: u32,
+    data: Cow<'a, [ColorU]>,
+    width: u32,
+    height: u32,
 }
 impl<'a> ImageData<'a> {
+    pub fn new(data: impl Into<Cow<'a, [ColorU]>>, width: u32, height: u32) -> Option<Self> {
+        let data = data.into();
+        if width as usize * height as usize != data.len() {
+            return None;
+        }
+        Some(ImageData { data, width, height })
+    }
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+    pub fn data(&self) -> &[ColorU] {
+        &*self.data
+    }
+    pub fn into_data(self) -> Cow<'a, [ColorU]> {
+        self.data
+    }
     pub fn rgba_data(&self) -> &[u8] {
         let ptr: *const ColorU = self.data.as_ptr();
         let len = self.data.len();
@@ -22,10 +41,6 @@ impl<'a> ImageData<'a> {
     }
     /// angle must be in range 0 .. 4
     pub fn rotate(&self, angle: u8) -> ImageData<'_> {
-        if self.width as usize * self.height as usize != self.data.len() {
-            panic!("size does not match");
-        }
-
         match angle {
             0 => ImageData {
                 data: Cow::Borrowed(&*self.data),
@@ -41,19 +56,19 @@ impl<'a> ImageData<'a> {
                     }
                 }
                 
-                ImageData {
-                    data: Cow::Owned(data),
-                    width: self.height,
-                    height: self.width
-                }
+                ImageData::new(
+                    data,
+                    self.height,
+                    self.width
+                ).unwrap()
             }
             2 => {
-                let data = self.data.iter().rev().cloned().collect();
-                ImageData {
-                    data: Cow::Owned(data),
-                    width: self.width,
-                    height: self.height
-                }
+                let data: Vec<ColorU> = self.data.iter().rev().cloned().collect();
+                ImageData::new(
+                    data,
+                    self.width,
+                    self.height
+                ).unwrap()
             }
             3 => {
                 let mut data = Vec::with_capacity(self.data.len());
@@ -64,11 +79,11 @@ impl<'a> ImageData<'a> {
                     }
                 }
                 
-                ImageData {
-                    data: Cow::Owned(data),
-                    width: self.height,
-                    height: self.width
-                }
+                ImageData::new(
+                    data,
+                    self.height,
+                    self.width
+                ).unwrap()
             }
             _ => panic!("invalid rotation")
         }
