@@ -1,21 +1,82 @@
+use image::{RgbaImage, ImageBuffer, Rgba};
 use pdf::object::*;
 use pdf::error::PdfError;
 use pathfinder_color::ColorU;
+use std::borrow::Cow;
+use std::path::Path;
 use std::sync::Arc;
 
-#[derive(Hash, PartialEq, Eq)]
-pub struct ImageData {
-    pub data: Vec<ColorU>,
+#[derive(Hash, PartialEq, Eq, Clone)]
+pub struct ImageData<'a> {
+    pub data: Cow<'a, [ColorU]>,
     pub width: u32,
     pub height: u32,
 }
-impl ImageData {
+impl<'a> ImageData<'a> {
     pub fn rgba_data(&self) -> &[u8] {
         let ptr: *const ColorU = self.data.as_ptr();
         let len = self.data.len();
         unsafe {
             std::slice::from_raw_parts(ptr.cast(), 4 * len)
         }
+    }
+    /// angle must be in range 0 .. 4
+    pub fn rotate(&self, angle: u8) -> ImageData<'_> {
+        if self.width as usize * self.height as usize != self.data.len() {
+            panic!("size does not match");
+        }
+
+        match angle {
+            0 => ImageData {
+                data: Cow::Borrowed(&*self.data),
+                width: self.width,
+                height: self.height
+            },
+            1 => {
+                let mut data = Vec::with_capacity(self.data.len());
+                
+                for y in 0 .. self.width as usize {
+                    for x in (0 .. self.height as usize).rev() {
+                        data.push(self.data[x * self.width as usize + y]);
+                    }
+                }
+                
+                ImageData {
+                    data: Cow::Owned(data),
+                    width: self.height,
+                    height: self.width
+                }
+            }
+            2 => {
+                let data = self.data.iter().rev().cloned().collect();
+                ImageData {
+                    data: Cow::Owned(data),
+                    width: self.width,
+                    height: self.height
+                }
+            }
+            3 => {
+                let mut data = Vec::with_capacity(self.data.len());
+                
+                for y in (0 .. self.width as usize).rev() {
+                    for x in 0 .. self.height as usize {
+                        data.push(self.data[x * self.width as usize + y]);
+                    }
+                }
+                
+                ImageData {
+                    data: Cow::Owned(data),
+                    width: self.height,
+                    height: self.width
+                }
+            }
+            _ => panic!("invalid rotation")
+        }
+    }
+
+    pub fn safe(&self, path: &Path) {
+        let data = self.rgba_data();
+        ImageBuffer::<Rgba<u8>, &[u8]>::from_raw(self.width, self.height, data).unwrap().save(path).unwrap()
     }
 }
 
@@ -28,7 +89,7 @@ fn resize_alpha(data: &[u8], src_width: u32, src_height: u32, dest_width: u32, d
     Some(dest.into_raw())
 }
 
-pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Resolve) -> Result<ImageData, PdfError> {
+pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Resolve) -> Result<ImageData<'static>, PdfError> {
     let raw_data = image.image_data(resolve)?;
 
     let pixel_count = image.width as usize * image.height as usize;
@@ -106,7 +167,6 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
 
     let data = match data_ratio {
         1 | 2 | 4 | 8 => {
-            use std::borrow::Cow;
             let pixel_data: Cow<[u8]> = match data_ratio {
                 1 => raw_data.iter().flat_map(|&b| (0..8).map(move |i| ex(b >> i, 1))).collect::<Vec<u8>>().into(),
                 2 => raw_data.iter().flat_map(|&b| (0..4).map(move |i| ex(b >> 2*i, 2))).collect::<Vec<u8>>().into(),
@@ -190,7 +250,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
         _ => unimplemented!("data/pixel ratio {}", data_ratio),
     };
 
-    Ok(ImageData { data, width: image.width as u32, height: image.height as u32 })
+    Ok(ImageData { data: data.into(), width: image.width as u32, height: image.height as u32 })
 }
 /*
 red = 1.0 – min ( 1.0, cyan + black )

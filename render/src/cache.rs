@@ -81,7 +81,7 @@ impl Cache {
     pub fn get_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resources: &Resources, resolve: &impl Resolve) -> ImageResult {
         self.images.get(xobject_ref, ||
             ImageResult(Arc::new(load_image(im, resources, resolve).map(|image|
-                Image::new(Vector2I::new(im.width as i32, im.height as i32), Arc::new(image.data))
+                Image::new(Vector2I::new(im.width as i32, im.height as i32), Arc::new(image.data.into()))
             )))
         )
     }
