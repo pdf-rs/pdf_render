@@ -63,13 +63,14 @@ fn main() -> Result<(), PdfError> {
 
     println!("read: {:?}", opt.input);
     let file = FileOptions::cached().open(&opt.input)?;
+    let resolver = file.resolver();
     
     let mut cache = Cache::new();
     for (i, page) in file.pages().enumerate().skip(opt.page as usize).take(opt.pages as usize) {
         println!("page {}", i);
         let p: &Page = &*page.unwrap();
         let mut backend = SceneBackend::new(&mut cache);
-        render_page(&mut backend, &file, p, transform)?;
+        render_page(&mut backend, &resolver, p, transform)?;
         let output = if opt.pages > 1 {
             let replacement = format!("{page:0digits$}", page=i, digits=opt.digits);
             opt.output.replace(opt.placeholder.as_str(), &replacement)

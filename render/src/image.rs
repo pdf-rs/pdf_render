@@ -30,7 +30,6 @@ fn resize_alpha(data: &[u8], src_width: u32, src_height: u32, dest_width: u32, d
 
 pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Resolve) -> Result<ImageData, PdfError> {
     let raw_data = image.image_data(resolve)?;
-    let bits_per_component = image.bits_per_component.ok_or_else(|| PdfError::Other { msg: format!("no bits per component")})?;
 
     let pixel_count = image.width as usize * image.height as usize;
 
@@ -88,8 +87,9 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
         }
         None => Data::Slice(&[][..])
     };
+    #[inline]
     fn ex(b: u8, bits: u8) -> u8 {
-        (((b as u16 + 1) >> (8 - bits)) - 1) as u8
+        b & ((1 << bits) - 1)
     }
     
     fn resolve_cs<'a>(cs: &'a ColorSpace, resources: &'a Resources) -> Option<&'a ColorSpace> {
@@ -102,7 +102,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
 
     let cs = image.color_space.as_ref().and_then(|cs| resolve_cs(cs, &resources));
     let alpha = alpha.iter().cloned().chain(std::iter::repeat(255));
-    let data_ratio = raw_data.len() * bits_per_component as usize / pixel_count;
+    let data_ratio = (raw_data.len() * 8) / pixel_count;
 
     let data = match data_ratio {
         1 | 2 | 4 | 8 => {

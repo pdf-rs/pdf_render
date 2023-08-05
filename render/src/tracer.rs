@@ -99,7 +99,7 @@ impl<'a> Backend for Tracer<'a> {
             Vector2F::new(0.0, 0.0), Vector2F::new(1.0, 1.0)
         );
         self.items.push(DrawItem::Image(ImageObject {
-            rect, id: xref,
+            rect, id: xref, transform,
         }));
     }
     fn draw_inline_image(&mut self, im: &Arc<ImageXObject>, _resources: &Resources, transform: Transform2F, _resolve: &impl Resolve) {
@@ -108,7 +108,7 @@ impl<'a> Backend for Tracer<'a> {
         );
 
         self.items.push(DrawItem::InlineImage(InlineImageObject {
-            rect, im: im.clone()
+            rect, im: im.clone(), transform
         }));
     }
     fn draw_glyph(&mut self, _glyph: &Glyph, _mode: &DrawMode, _transform: Transform2F) {}
@@ -124,11 +124,13 @@ impl<'a> Backend for Tracer<'a> {
 pub struct ImageObject {
     pub rect: RectF,
     pub id: Ref<XObject>,
+    pub transform: Transform2F,
 }
 #[derive(Debug)]
 pub struct InlineImageObject {
     pub rect: RectF,
     pub im: Arc<ImageXObject>,
+    pub transform: Transform2F,
 }
 
 #[derive(Debug)]
