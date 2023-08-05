@@ -265,7 +265,17 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
         _ => unimplemented!("data/pixel ratio {}", data_ratio),
     };
 
-    Ok(ImageData { data: data.into(), width: image.width as u32, height: image.height as u32 })
+    let data_len = data.len();
+    match ImageData::new(data, image.width as u32, image.height as u32) {
+        Some(data) => Ok(data),
+        None => {
+            warn!("image width: {}", image.width);
+            warn!("image height: {}", image.height);
+            warn!("data.len(): {}", data_len);
+            warn!("data_ratio: {data_ratio}");
+            Err(PdfError::Other { msg: "size mismatch".into() })
+        }
+    }
 }
 /*
 red = 1.0 – min ( 1.0, cyan + black )
