@@ -183,10 +183,10 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
     let data = match data_ratio {
         1 | 2 | 4 | 8 => {
             let pixel_data: Cow<[u8]> = match data_ratio {
-                1 => raw_data.iter().flat_map(|&b| (0..8).map(move |i| ex(b >> i, 1))).collect::<Vec<u8>>().into(),
-                2 => raw_data.iter().flat_map(|&b| (0..4).map(move |i| ex(b >> 2*i, 2))).collect::<Vec<u8>>().into(),
-                4 => raw_data.iter().flat_map(|&b| (0..2).map(move |i| ex(b >> 4*i, 4))).collect::<Vec<u8>>().into(),
-                8 => Cow::Borrowed(&raw_data),
+                1 => raw_data.iter().flat_map(|&b| (0..8).map(move |i| ex(b >> i, 1))).take(pixel_count).collect::<Vec<u8>>().into(),
+                2 => raw_data.iter().flat_map(|&b| (0..4).map(move |i| ex(b >> 2*i, 2))).take(pixel_count).collect::<Vec<u8>>().into(),
+                4 => raw_data.iter().flat_map(|&b| (0..2).map(move |i| ex(b >> 4*i, 4))).take(pixel_count).collect::<Vec<u8>>().into(),
+                8 => Cow::Borrowed(&raw_data[..pixel_count]),
                 n => return Err(PdfError::Other { msg: format!("invalid bits per component {}", n)})
             };
             let pixel_data = &*pixel_data;
@@ -254,13 +254,13 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
             if !matches!(cs, Some(ColorSpace::DeviceRGB)) {
                 info!("image has data/pixel ratio of 3, but colorspace is {:?}", cs);
             }
-            raw_data.chunks_exact(3).zip(alpha).map(|(c, a)| ColorU { r: c[0], g: c[1], b: c[2], a }).collect()
+            raw_data[..pixel_count * 3].chunks_exact(3).zip(alpha).map(|(c, a)| ColorU { r: c[0], g: c[1], b: c[2], a }).collect()
         }
         32 => {
             if !matches!(cs, Some(ColorSpace::DeviceCMYK)) {
                 info!("image has data/pixel ratio of 4, but colorspace is {:?}", cs);
             }
-            cmyk2color_arr(&raw_data, alpha)
+            cmyk2color_arr(&raw_data[..pixel_count * 4], alpha)
         }
         _ => unimplemented!("data/pixel ratio {}", data_ratio),
     };
