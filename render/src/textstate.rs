@@ -138,8 +138,15 @@ impl TextState {
             if is_space {
                 let advance = (self.char_space + self.word_space) * self.horiz_scale + width;
                 self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
-                span.width += advance;
+
+                let offset = span.text.len();
                 span.text.push(' ');
+                span.chars.push(TextChar {
+                    offset,
+                    pos: span.width,
+                    width
+                });
+                span.width += advance;
                 continue;
             }
             if let Some(glyph) = glyph {
