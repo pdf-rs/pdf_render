@@ -34,7 +34,7 @@ pub use scene::SceneBackend;
 pub use crate::image::{load_image, ImageData};
 use custom_debug_derive::Debug;
 
-use pdf::object::*;
+use pdf::{object::*, content::TextMode};
 use pdf::error::PdfError;
 use pathfinder_geometry::{
     vector::{Vector2F},
@@ -152,6 +152,7 @@ pub struct TextSpan {
 
     // apply this transform to a text draw in at the origin with the given width and font-size
     pub transform: Transform2F,
+    pub mode: TextMode,
 }
 impl TextSpan {
     pub fn parts(&self) -> impl Iterator<Item=Part> + '_ {

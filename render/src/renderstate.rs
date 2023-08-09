@@ -340,6 +340,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             font_size: self.text_state.font_size,
             color: self.graphics_state.fill_color,
             alpha: self.graphics_state.fill_color_alpha,
+            mode: self.text_state.mode,
             transform,
         });
     }
