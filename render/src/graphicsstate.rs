@@ -32,6 +32,10 @@ pub struct GraphicsState<'a> {
 
     pub stroke_alpha: f32,
     pub fill_alpha: f32,
+
+    pub overprint_fill: bool,
+    pub overprint_stroke: bool,
+    pub overprint_mode: i32,
 }
 
 

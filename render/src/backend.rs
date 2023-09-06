@@ -14,12 +14,18 @@ use super::{FontEntry, TextSpan, Fill};
 use pdf::font::Font as PdfFont;
 use std::sync::Arc;
 
+#[derive(Debug, Copy, Clone)]
+pub enum BlendMode {
+    Overlay,
+    Darken
+}
+
 pub trait Backend {
     fn set_clip_path(&mut self, path: Option<&Outline>);
     fn draw(&mut self, outline: &Outline, mode: &DrawMode, fill_rule: FillRule, transform: Transform2F);
     fn set_view_box(&mut self, r: RectF);
-    fn draw_image(&mut self, xref: Ref<XObject>, im: &ImageXObject, resources: &Resources, transform: Transform2F, resolve: &impl Resolve);
-    fn draw_inline_image(&mut self, im: &Arc<ImageXObject>, resources: &Resources, transform: Transform2F, resolve: &impl Resolve);
+    fn draw_image(&mut self, xref: Ref<XObject>, im: &ImageXObject, resources: &Resources, transform: Transform2F, mode: BlendMode, resolve: &impl Resolve);
+    fn draw_inline_image(&mut self, im: &Arc<ImageXObject>, resources: &Resources, transform: Transform2F, mode: BlendMode, resolve: &impl Resolve);
     fn draw_glyph(&mut self, glyph: &Glyph, mode: &DrawMode, transform: Transform2F) {
         self.draw(&glyph.path, mode, FillRule::Winding, transform);
     }
@@ -30,6 +36,7 @@ pub trait Backend {
     fn bug_text_no_font(&mut self, data: &[u8]) {}
     fn bug_text_invisible(&mut self, text: &str) {}
     fn bug_postscript(&mut self, data: &[u8]) {}
+    fn bug_op(&mut self, op_nr: usize) {}
     fn inspect_op(&mut self, op: &Op) {}
 }
 #[derive(Clone)]

@@ -116,6 +116,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
     }
     info!("smask: {:?}", image.smask);
 
+
     enum Data<'a> {
         Arc(Arc<[u8]>),
         Vec(Vec<u8>),
@@ -179,6 +180,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
     let cs = image.color_space.as_ref().and_then(|cs| resolve_cs(cs, &resources));
     let alpha = alpha.iter().cloned().chain(std::iter::repeat(255));
     let data_ratio = (raw_data.len() * 8) / pixel_count;
+    dbg!(data_ratio);
 
     let data = match data_ratio {
         1 | 2 | 4 | 8 => {
@@ -189,33 +191,38 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
                 8 => Cow::Borrowed(&raw_data[..pixel_count]),
                 n => return Err(PdfError::Other { msg: format!("invalid bits per component {}", n)})
             };
-            let pixel_data = &*pixel_data;
+            let pixel_data: &[u8] = &*pixel_data;
+            dbg!(&cs);
             match cs {
-                Some(ColorSpace::DeviceGray) => {
+                Some(&ColorSpace::DeviceGray) => {
                     assert_eq!(pixel_data.len(), pixel_count);
                     pixel_data.iter().zip(alpha).map(|(&g, a)| ColorU { r: g, g: g, b: g, a }).collect()
                 }
-                Some(ColorSpace::Indexed(ref base, ref lookup)) => {
-                    match resolve_cs(&**base, resources) {
+                Some(&ColorSpace::Indexed(ref base, hival, ref lookup)) => {
+                    match dbg!(resolve_cs(&**base, resources)) {
                         Some(ColorSpace::DeviceRGB) => {
-                            pixel_data.iter().zip(alpha).map(|(&b, a)| {
+                            let mut data = Vec::with_capacity(pixel_data.len());
+                            for (&b, a) in pixel_data.iter().zip(alpha) {
                                 let off = b as usize * 3;
-                                let c = lookup.get(off .. off + 3).unwrap_or(&[0; 3]);
-                                ColorU { r: c[0], g: c[1], b: c[2], a }
-                            }).collect()
+                                let c = lookup.get(off .. off + 3).ok_or(PdfError::Bounds { index: off, len: lookup.len() })?;
+                                data.push(ColorU { r: c[0], g: c[1], b: c[2], a });
+                            }
+                            data
                         }
                         Some(ColorSpace::DeviceCMYK) => {
                             debug!("indexed CMYK {}", lookup.len());
-                            pixel_data.iter().zip(alpha).map(|(&b, a)| {
+                            let mut data = Vec::with_capacity(pixel_data.len());
+                            for (&b, a) in pixel_data.iter().zip(alpha) {
                                 let off = b as usize * 4;
-                                let c = lookup.get(off .. off + 4).unwrap_or(&[0; 4]);
-                                cmyk2color(c.try_into().unwrap(), a)
-                            }).collect()
+                                let c = lookup.get(off .. off + 4).ok_or(PdfError::Bounds { index: off, len: lookup.len() })?;
+                                data.push(cmyk2color(c.try_into().unwrap(), a));
+                            }
+                            data
                         }
                         _ => unimplemented!("base cs={:?}", base),
                     }
                 }
-                Some(ColorSpace::Separation(_, ref alt, ref func)) => {
+                Some(&ColorSpace::Separation(_, ref alt, ref func)) => {
                     let mut lut = [[0u8; 3]; 256];
 
                     match resolve_cs(alt, resources) {
@@ -284,7 +291,7 @@ blue = 1.0 – min ( 1.0, yellow + black )
 */
 
 fn cmyk2rgb([c, m, y, k]: [u8; 4]) -> [u8; 3] {
-    let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
+    //let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
     let r = 255 - c.saturating_add(k);
     let g = 255 - m.saturating_add(k);
     let b = 255 - y.saturating_add(k);

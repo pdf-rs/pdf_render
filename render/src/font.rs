@@ -49,18 +49,34 @@ pub struct StandardCache {
     inner: Arc<SyncCache<String, Option<FontRc>>>,
     dir: PathBuf,
     fonts: HashMap<String, String>,
+    dump: Dump,
 }
 impl StandardCache {
     pub fn new(dir: PathBuf) -> Self {
         let data = std::fs::read_to_string(dir.join("fonts.json")).expect("can't read fonts.json");
         let fonts: HashMap<String, String> = serde_json::from_str(&data).expect("fonts.json is invalid");
 
+        let dump = match dbg!(std::env::var("DUMP_FONT").as_deref()) {
+            Err(_) => Dump::Never,
+            Ok("always") => Dump::Always,
+            Ok("error") => Dump::OnError,
+            Ok(_) => Dump::Never
+        };
+        dbg!(&dump);
         StandardCache {
             inner: SyncCache::new(),
             dir,
             fonts,
+            dump
         }
     }
+}
+
+#[derive(Debug)]
+enum Dump {
+    Never,
+    OnError,
+    Always
 }
 
 pub fn load_font(font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve, cache: &StandardCache) -> Result<Option<FontEntry>> {
@@ -69,20 +85,25 @@ pub fn load_font(font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve, cache: &S
     
     let font: FontRc = match pdf_font.embedded_data(resolve) {
         Some(Ok(data)) => {
+            debug!("loading embedded font");
             let font = font::parse(&data).map_err(|e| {
+                PdfError::Other { msg: format!("Font Error: {:?}", e) }
+            });
+            if matches!(cache.dump, Dump::Always) || (matches!(cache.dump, Dump::OnError) && font.is_err()) {
                 let name = format!("font_{}", pdf_font.name.as_ref().map(|s| s.as_str()).unwrap_or("unnamed"));
                 std::fs::write(&name, &data).unwrap();
                 println!("font dumped in {}", name);
-                PdfError::Other { msg: format!("Font Error: {:?}", e) }
-            })?;
-            FontRc::from(font)
+            }
+            FontRc::from(font?)
         }
         Some(Err(e)) => return Err(e),
         None => {
+            debug!("no embedded font.");
             let name = match pdf_font.name {
                 Some(ref name) => name.as_str(),
                 None => return Ok(None)
             };
+            debug!("loading {name} instead");
             match cache.fonts.get(name).or_else(|| cache.fonts.get("Arial")) {
                 Some(file_name) => {
                     let val = cache.inner.get(file_name.clone(), || {

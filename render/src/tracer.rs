@@ -1,4 +1,4 @@
-use crate::{TextSpan, DrawMode, Backend, FontEntry, Fill};
+use crate::{TextSpan, DrawMode, Backend, FontEntry, Fill, backend::BlendMode};
 use pathfinder_content::{
     outline::Outline,
     fill::FillRule,
@@ -25,6 +25,7 @@ pub struct Tracer<'a> {
     items: Vec<DrawItem>,
     view_box: RectF,
     cache: &'a TraceCache,
+    op_nr: usize,
 }
 pub struct TraceCache {
     fonts: Arc<SyncCache<usize, Option<Arc<FontEntry>>>>,
@@ -62,7 +63,8 @@ impl<'a> Tracer<'a> {
         Tracer {
             items: vec![],
             view_box: RectF::new(Vector2F::zero(), Vector2F::zero()),
-            cache
+            cache,
+            op_nr: 0,
         }
     }
     pub fn view_box(&self) -> RectF {
@@ -94,21 +96,21 @@ impl<'a> Backend for Tracer<'a> {
     fn set_view_box(&mut self, r: RectF) {
         self.view_box = r;
     }
-    fn draw_image(&mut self, xref: Ref<XObject>, _im: &ImageXObject, _resources: &Resources, transform: Transform2F, _resolve: &impl Resolve) {
+    fn draw_image(&mut self, xref: Ref<XObject>, _im: &ImageXObject, _resources: &Resources, transform: Transform2F, mode: BlendMode, _resolve: &impl Resolve) {
         let rect = transform * RectF::new(
             Vector2F::new(0.0, 0.0), Vector2F::new(1.0, 1.0)
         );
         self.items.push(DrawItem::Image(ImageObject {
-            rect, id: xref, transform,
+            rect, id: xref, transform, op_nr: self.op_nr, mode
         }));
     }
-    fn draw_inline_image(&mut self, im: &Arc<ImageXObject>, _resources: &Resources, transform: Transform2F, _resolve: &impl Resolve) {
+    fn draw_inline_image(&mut self, im: &Arc<ImageXObject>, _resources: &Resources, transform: Transform2F, mode: BlendMode, _resolve: &impl Resolve) {
         let rect = transform * RectF::new(
             Vector2F::new(0.0, 0.0), Vector2F::new(1.0, 1.0)
         );
 
         self.items.push(DrawItem::InlineImage(InlineImageObject {
-            rect, im: im.clone(), transform
+            rect, im: im.clone(), transform, op_nr: self.op_nr, mode
         }));
     }
     fn draw_glyph(&mut self, _glyph: &Glyph, _mode: &DrawMode, _transform: Transform2F) {}
@@ -118,6 +120,9 @@ impl<'a> Backend for Tracer<'a> {
     fn add_text(&mut self, span: TextSpan) {
         self.items.push(DrawItem::Text(span));
     }
+    fn bug_op(&mut self, op_nr: usize) {
+        self.op_nr = op_nr;
+    }
 }
 
 #[derive(Debug)]
@@ -125,12 +130,16 @@ pub struct ImageObject {
     pub rect: RectF,
     pub id: Ref<XObject>,
     pub transform: Transform2F,
+    pub op_nr: usize,
+    pub mode: BlendMode,
 }
 #[derive(Debug)]
 pub struct InlineImageObject {
     pub rect: RectF,
     pub im: Arc<ImageXObject>,
     pub transform: Transform2F,
+    pub op_nr: usize,
+    pub mode: BlendMode,
 }
 
 #[derive(Debug)]

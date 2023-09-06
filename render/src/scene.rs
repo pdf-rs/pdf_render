@@ -15,11 +15,12 @@ use pathfinder_geometry::{
     rect::RectF, transform2d::Transform2F,
 };
 use pdf::object::{Ref, XObject, ImageXObject, Resolve, Resources, MaybeRef};
+use crate::backend;
+
 use super::{FontEntry, TextSpan, DrawMode, Backend, Fill, Cache};
 use pdf::font::Font as PdfFont;
 use pdf::error::PdfError;
 use std::sync::Arc;
-use pathfinder_content::effects::BlendMode;
 
 pub struct SceneBackend<'a> {
     clip_path: Option<ClipPath>,
@@ -107,7 +108,7 @@ impl<'a> Backend for SceneBackend<'a> {
             _ => {}
         }
     }
-    fn draw_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resources: &Resources, transform: Transform2F, resolve: &impl Resolve) {
+    fn draw_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resources: &Resources, transform: Transform2F, mode: backend::BlendMode, resolve: &impl Resolve) {
         if let Ok(ref image) = *self.cache.get_image(xobject_ref, im, resources, resolve).0 {
             let size = image.size();
             let size_f = size.to_f32();
@@ -124,7 +125,7 @@ impl<'a> Backend for SceneBackend<'a> {
             self.scene.push_draw_path(draw_path);
         }
     }
-    fn draw_inline_image(&mut self, _im: &Arc<ImageXObject>, _resources: &Resources, _transform: Transform2F, _resolve: &impl Resolve) {
+    fn draw_inline_image(&mut self, _im: &Arc<ImageXObject>, _resources: &Resources, _transform: Transform2F, mode: backend::BlendMode, _resolve: &impl Resolve) {
 
     }
 

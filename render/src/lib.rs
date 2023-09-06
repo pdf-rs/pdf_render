@@ -29,7 +29,7 @@ mod font;
 
 pub use cache::{Cache};
 pub use fontentry::{FontEntry, TextEncoding};
-pub use backend::{DrawMode, Backend};
+pub use backend::{DrawMode, Backend, BlendMode};
 pub use scene::SceneBackend;
 pub use crate::image::{load_image, ImageData};
 use custom_debug_derive::Debug;
@@ -101,7 +101,7 @@ pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Pa
     let mut renderstate = RenderState::new(backend, resolve, &resources, root_transformation);
     for (i, op) in ops.iter().enumerate() {
         debug!("op {}: {:?}", i, op);
-        renderstate.draw_op(op)?;
+        renderstate.draw_op(op, i)?;
     }
 
     Ok(root_transformation)
@@ -113,7 +113,7 @@ pub fn render_pattern(backend: &mut impl Backend, pattern: &Pattern, resolve: &i
             let mut renderstate = RenderState::new(backend, resolve, &*resources, Transform2F::default());
             for (i, op) in ops.iter().enumerate() {
                 debug!("op {}: {:?}", i, op);
-                renderstate.draw_op(op)?;
+                renderstate.draw_op(op, i)?;
             }
         }
         Pattern::Dict(_) => {}

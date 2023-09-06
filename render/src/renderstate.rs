@@ -3,7 +3,7 @@ use pdf::primitive::{Primitive, Dictionary};
 use pdf::content::{Op, Matrix, Point, Rect, Color, Rgb, Cmyk, Winding, FormXObject};
 use pdf::error::{PdfError, Result};
 use pdf::content::TextDrawAdjusted;
-use crate::backend::Backend;
+use crate::backend::{Backend, BlendMode};
 
 use pathfinder_geometry::{
     vector::Vector2F,
@@ -105,6 +105,9 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 line_width: 1.0,
             },
             dash_pattern: None,
+            overprint_fill: false,
+            overprint_stroke: false,
+            overprint_mode: 0,
         };
         let text_state = TextState::new();
         let stack = vec![];
@@ -128,8 +131,9 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         self.current_outline.clear();
     }
     #[allow(unused_variables)]
-    pub fn draw_op(&mut self, op: &'a Op) -> Result<()> {
+    pub fn draw_op(&mut self, op: &'a Op, op_nr: usize) -> Result<()> {
         self.backend.inspect_op(op);
+        self.backend.bug_op(op_nr);
         match *op {
             Op::BeginMarkedContent { .. } => {}
             Op::EndMarkedContent { .. } => {}
@@ -211,6 +215,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             Op::Flatness { tolerance } => {},
             Op::GraphicsState { ref name } => {
                 let gs = try_opt!(self.resources.graphics_states.get(name));
+                debug!("GS: {gs:?}");
                 if let Some(lw) = gs.line_width {
                     self.graphics_state.stroke_style.line_width = lw;
                 }
@@ -226,6 +231,16 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                     } else {
                         self.text_state.font_entry = None;
                     }
+                }
+                if let Some(op) = gs.overprint_fill {
+                    self.graphics_state.overprint_fill = op;
+                    self.graphics_state.overprint_stroke = op;
+                }
+                if let Some(op) = gs.overprint_fill {
+                    self.graphics_state.overprint_fill = op;
+                }
+                if let Some(m) = gs.overprint_mode {
+                    self.graphics_state.overprint_mode = m;
                 }
             },
             Op::StrokeColor { ref color } => {
@@ -296,9 +311,10 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             Op::XObject { ref name } => {
                 let &xobject_ref = self.resources.xobjects.get(name).ok_or(PdfError::NotFound { word: name.as_str().into()})?;
                 let xobject = self.resolve.get(xobject_ref)?;
+                let mode = self.blend_mode();
                 match *xobject {
                     XObject::Image(ref im) => {
-                        self.backend.draw_image(xobject_ref, im, self.resources, self.graphics_state.transform, self.resolve);
+                        self.backend.draw_image(xobject_ref, im, self.resources, self.graphics_state.transform, mode, self.resolve);
                     }
                     XObject::Form(ref content) => {
                         self.draw_form(content)?;
@@ -311,11 +327,20 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 }
             },
             Op::InlineImage { ref image } => {
-                self.backend.draw_inline_image(image, &self.resources, self.graphics_state.transform, self.resolve);
+                let mode = self.blend_mode();
+                self.backend.draw_inline_image(image, &self.resources, self.graphics_state.transform, mode, self.resolve);
             }
         }
 
         Ok(())
+    }
+
+    fn blend_mode(&self) -> BlendMode {
+        if self.graphics_state.overprint_mode != 0 {
+            BlendMode::Darken
+        } else {
+            BlendMode::Overlay
+        }
     }
 
     fn text(&mut self, inner: impl FnOnce(&mut B, &mut TextState, &mut GraphicsState, &mut Span)) {
@@ -390,7 +415,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         let ops = t!(form.operations(self.resolve));
         for (i, op) in ops.iter().enumerate() {
             debug!(" form op {}: {:?}", i, op);
-            inner.draw_op(op)?;
+            inner.draw_op(op, i)?;
         }
 
         Ok(())
@@ -549,7 +574,7 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                         c => unimplemented!("Separation(alt={:?})", c)
                     }
                 }
-                ColorSpace::Indexed(ref cs, ref lut) => {
+                ColorSpace::Indexed(ref cs, hival, ref lut) => {
                     if args.len() != 1 {
                         return Err(PdfError::Other { msg: format!("expected 1 color arguments, got {:?}", args) });
                     }

@@ -88,7 +88,7 @@ impl TextState {
                 TextEncoding::CID(Some(ref to_unicode)) => {
                     match to_unicode.get(&cid) {
                         Some(&(gid, ref unicode)) => (cid, gid, Some(unicode.clone())),
-                        None => (cid, None, None)
+                        None => (cid, Some(GlyphId(cid as u32)), None)
                     }
                 },
                 TextEncoding::Cmap(ref cmap) => {
@@ -127,7 +127,7 @@ impl TextState {
                 Some(gid) => gid,
                 None => {
                     debug!("no glyph for cid {}", cid);
-                    GlyphId(0)
+                    GlyphId(cid as _)
                 } // lets hope that works…
             };
             let glyph = e.font.glyph(gid);
