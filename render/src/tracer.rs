@@ -33,7 +33,7 @@ pub struct TraceCache {
 }
 impl TraceCache {
     pub fn new() -> Self {
-        let standard_fonts = PathBuf::from(std::env::var_os("STANDARD_FONTS").expect("no STANDARD_FONTS"));
+        let standard_fonts = PathBuf::from(std::env::var_os("STANDARD_FONTS").expect("STANDARD_FONTS is not set. Please check the README for instructions."));
 
         TraceCache {
             fonts: SyncCache::new(),
