@@ -180,7 +180,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
     let cs = image.color_space.as_ref().and_then(|cs| resolve_cs(cs, &resources));
     let alpha = alpha.iter().cloned().chain(std::iter::repeat(255));
     let data_ratio = (raw_data.len() * 8) / pixel_count;
-    dbg!(data_ratio);
+    // dbg!(data_ratio);
 
     let data = match data_ratio {
         1 | 2 | 4 | 8 => {
@@ -192,14 +192,14 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
                 n => return Err(PdfError::Other { msg: format!("invalid bits per component {}", n)})
             };
             let pixel_data: &[u8] = &*pixel_data;
-            dbg!(&cs);
+            // dbg!(&cs);
             match cs {
                 Some(&ColorSpace::DeviceGray) => {
                     assert_eq!(pixel_data.len(), pixel_count);
                     pixel_data.iter().zip(alpha).map(|(&g, a)| ColorU { r: g, g: g, b: g, a }).collect()
                 }
                 Some(&ColorSpace::Indexed(ref base, hival, ref lookup)) => {
-                    match dbg!(resolve_cs(&**base, resources)) {
+                    match resolve_cs(&**base, resources) {
                         Some(ColorSpace::DeviceRGB) => {
                             let mut data = Vec::with_capacity(pixel_data.len());
                             for (&b, a) in pixel_data.iter().zip(alpha) {

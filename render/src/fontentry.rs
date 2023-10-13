@@ -50,7 +50,7 @@ impl FontEntry {
         let build_map = || {
             if let Some(ref to_unicode) = to_unicode {
                 let mut num1 = 0;
-                dbg!(font.encoding());
+                // dbg!(font.encoding());
                 let mut map: HashMap<_, _> = to_unicode.iter().map(|(cid, s)| {
                     let gid = font.gid_for_codepoint(cid as u32);
                     if gid.is_some() {

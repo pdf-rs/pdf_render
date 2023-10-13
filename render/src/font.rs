@@ -56,7 +56,7 @@ impl StandardCache {
         let data = std::fs::read_to_string(dir.join("fonts.json")).expect("can't read fonts.json");
         let fonts: HashMap<String, String> = serde_json::from_str(&data).expect("fonts.json is invalid");
 
-        let dump = match dbg!(std::env::var("DUMP_FONT").as_deref()) {
+        let dump = match std::env::var("DUMP_FONT").as_deref() {
             Err(_) => Dump::Never,
             Ok("always") => Dump::Always,
             Ok("error") => Dump::OnError,
