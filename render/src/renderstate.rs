@@ -332,7 +332,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 let stroke_mode = self.blend_mode_stroke();
                 self.text(|backend, text_state, graphics_state, span| {
                     text_state.draw_text(backend, graphics_state, &text.data, span, fill_mode, stroke_mode);
-                });
+                }, op_nr);
             },
             Op::TextDrawAdjusted { ref array } => {
                 let fill_mode = self.blend_mode_fill();
@@ -350,7 +350,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                             }
                         }
                     }
-                });
+                }, op_nr);
             },
             Op::XObject { ref name } => {
                 let &xobject_ref = self.resources.xobjects.get(name).ok_or(PdfError::NotFound { word: name.as_str().into()})?;
@@ -394,7 +394,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         }
     }
 
-    fn text(&mut self, inner: impl FnOnce(&mut B, &mut TextState, &mut GraphicsState<B>, &mut Span)) {
+    fn text(&mut self, inner: impl FnOnce(&mut B, &mut TextState, &mut GraphicsState<B>, &mut Span), op_nr: usize) {
         let mut span = Span::default();
         let tm = self.text_state.text_matrix;
         let origin = tm.translation();
@@ -419,6 +419,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             alpha: self.graphics_state.fill_color_alpha,
             mode: self.text_state.mode,
             transform,
+            op_nr
         }, clip);
     }
 

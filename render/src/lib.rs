@@ -153,6 +153,7 @@ pub struct TextSpan {
     // apply this transform to a text draw in at the origin with the given width and font-size
     pub transform: Transform2F,
     pub mode: TextMode,
+    pub op_nr: usize,
 }
 impl TextSpan {
     pub fn parts(&self) -> impl Iterator<Item=Part> + '_ {

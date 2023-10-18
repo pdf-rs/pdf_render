@@ -38,8 +38,14 @@ pub struct Tracer<'a> {
     op_nr: usize,
 }
 pub struct TraceCache {
-    fonts: Arc<SyncCache<usize, Option<Arc<FontEntry>>>>,
+    fonts: Arc<SyncCache<u64, Option<Arc<FontEntry>>>>,
     std: StandardCache,
+}
+fn font_key(font_ref: &MaybeRef<PdfFont>) -> u64 {
+    match font_ref {
+        MaybeRef::Direct(ref shared) => shared.as_ref() as *const PdfFont as _,
+        MaybeRef::Indirect(re) => re.get_ref().get_inner().id as _
+    }
 }
 impl TraceCache {
     pub fn new() -> Self {
@@ -52,7 +58,7 @@ impl TraceCache {
     }
     pub fn get_font(&self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
         let mut error = None;
-        let val = self.fonts.get(&**font_ref as *const PdfFont as usize, || 
+        let val = self.fonts.get(font_key(font_ref), || 
             match load_font(font_ref, resolve, &self.std) {
                 Ok(Some(f)) => Some(Arc::new(f)),
                 Ok(None) => None,
