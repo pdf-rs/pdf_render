@@ -29,7 +29,7 @@ mod font;
 
 pub use cache::{Cache};
 pub use fontentry::{FontEntry, TextEncoding};
-pub use backend::{DrawMode, Backend, BlendMode};
+pub use backend::{DrawMode, Backend, BlendMode, FillMode};
 pub use scene::SceneBackend;
 pub use crate::image::{load_image, ImageData};
 use custom_debug_derive::Debug;

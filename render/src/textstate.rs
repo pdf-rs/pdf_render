@@ -3,6 +3,8 @@ use pathfinder_geometry::{
     transform2d::Transform2F,
 };
 use font::GlyphId;
+use crate::{BlendMode, backend::{FillMode, Stroke}};
+
 use super::{
     BBox,
     fontentry::{FontEntry, TextEncoding},
@@ -64,7 +66,7 @@ impl TextState {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    pub fn draw_text(&mut self, backend: &mut impl Backend, gs: &GraphicsState, data: &[u8], span: &mut Span) {
+    pub fn draw_text<B: Backend>(&mut self, backend: &mut B, gs: &GraphicsState<B>, data: &[u8], span: &mut Span, fill_mode: BlendMode, stroke_mode: BlendMode) {
         let e = match self.font_entry {
             Some(ref e) => e,
             None => {
@@ -100,17 +102,17 @@ impl TextState {
             }
         });
 
+        let fill = FillMode { color: gs.fill_color, alpha: gs.fill_color_alpha, mode: fill_mode };
+        let stroke = FillMode { color: gs.stroke_color, alpha: gs.stroke_color_alpha, mode: stroke_mode };
+        let stroke_mode = gs.stroke();
+
         let draw_mode = match self.mode {
-            TextMode::Fill => Some(DrawMode::Fill(gs.fill_color, gs.fill_color_alpha)),
-            TextMode::FillAndClip => Some(DrawMode::Fill(gs.fill_color, gs.fill_color_alpha)),
-            TextMode::FillThenStroke => Some(DrawMode::FillStroke(
-                gs.fill_color, gs.fill_color_alpha,
-                gs.stroke_color, gs.stroke_color_alpha,
-                gs.stroke()
-            )),
+            TextMode::Fill => Some(DrawMode::Fill { fill }),
+            TextMode::FillAndClip => Some(DrawMode::Fill { fill }),
+            TextMode::FillThenStroke => Some(DrawMode::FillStroke { fill, stroke, stroke_mode }),
             TextMode::Invisible => None,
-            TextMode::Stroke => Some(DrawMode::Stroke(gs.stroke_color, gs.stroke_color_alpha, gs.stroke())),
-            TextMode::StrokeAndClip => Some(DrawMode::Stroke(gs.stroke_color, gs.stroke_color_alpha, gs.stroke())),
+            TextMode::Stroke => Some(DrawMode::Stroke { stroke, stroke_mode }),
+            TextMode::StrokeAndClip => Some(DrawMode::Stroke { stroke, stroke_mode }),
         };
         let e = self.font_entry.as_ref().expect("no font");
 
@@ -154,7 +156,7 @@ impl TextState {
                 if glyph.path.len() != 0 {
                     span.bbox.add(gs.transform * transform * glyph.path.bounds());
                     if let Some(ref draw_mode) = draw_mode {
-                        backend.draw_glyph(&glyph, draw_mode, transform);
+                        backend.draw_glyph(&glyph, draw_mode, transform, gs.clip_path_id);
                     }
                 }
             } else {

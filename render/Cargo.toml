@@ -33,6 +33,7 @@ globalcache = { git = "https://github.com/s3bk/cachelib", features = ["sync"] }
 istring = { git = "https://github.com/s3bk/istring" }
 once_cell = "*"
 serde_json = "*"
+glyphmatcher = { git = "https://github.com/s3bk/glyphmatcher" }
 
 [dev-dependencies]
 criterion = "0.3"

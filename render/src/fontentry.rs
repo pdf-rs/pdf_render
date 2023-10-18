@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use font::{self, GlyphId, TrueTypeFont, CffFont, Type1Font, OpenTypeFont};
+use glyphmatcher::FontDb;
 use pdf::encoding::BaseEncoding;
 use pdf::font::{Font as PdfFont, Widths, CidToGidMap};
 use pdf::object::{Resolve, MaybeRef};
@@ -22,28 +23,34 @@ pub struct FontEntry {
     pub is_cid: bool,
     pub name: String,
 }
+
+
 impl FontEntry {
-    pub fn build(font: FontRc, pdf_font: MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<FontEntry, PdfError> {
+    pub fn build(font: FontRc, pdf_font: MaybeRef<PdfFont>, font_db: Option<&FontDb>, resolve: &impl Resolve) -> Result<FontEntry, PdfError> {
         let mut is_cid = pdf_font.is_cid();
         let encoding = pdf_font.encoding().clone();
         let base_encoding = encoding.as_ref().map(|e| &e.base);
         
         let to_unicode = t!(pdf_font.to_unicode(resolve).transpose());
         let mut font_codepoints = None;
-        let glyph_unicode: HashMap<GlyphId, SmallString> = 
-        if let Some(type1) = font.downcast_ref::<Type1Font>() {
-            debug!("Font is Type1");
-            font_codepoints = Some(&type1.codepoints);
-            type1.unicode_names().map(|(gid, s)| (gid, s.into())).collect()
-        } else if let Some(cmap) = font.downcast_ref::<TrueTypeFont>().and_then(|ttf| ttf.cmap.as_ref())
-            .or_else(|| font.downcast_ref::<OpenTypeFont>().and_then(|otf| otf.cmap.as_ref())) {
-            cmap.items().filter_map(|(cp, gid)| std::char::from_u32(cp).map(|c| (gid, c.into()))).collect()
-        } else if let Some(cff) = font.downcast_ref::<CffFont>() {
-            cff.unicode_map.iter().map(|(&u, &gid)| (GlyphId(gid as u32), u.into())).collect()
-        } else {
-            (0..font.num_glyphs())
-                .filter_map(|gid| std::char::from_u32(gid).map(|c| (GlyphId(gid), c.into())))
-                .collect()
+
+        // dbg!(&pdf_font);
+
+        let glyph_unicode: HashMap<GlyphId, SmallString> = {
+            if let Some(type1) = font.downcast_ref::<Type1Font>() {
+                debug!("Font is Type1");
+                font_codepoints = Some(&type1.codepoints);
+                type1.unicode_names().map(|(gid, s)| (gid, s.into())).collect()
+            } else if let Some(cmap) = font.downcast_ref::<TrueTypeFont>().and_then(|ttf| ttf.cmap.as_ref())
+                .or_else(|| font.downcast_ref::<OpenTypeFont>().and_then(|otf| otf.cmap.as_ref())) {
+                cmap.items().filter_map(|(cp, gid)| std::char::from_u32(cp).map(|c| (gid, c.into()))).collect()
+            } else if let Some(cff) = font.downcast_ref::<CffFont>() {
+                cff.unicode_map.iter().map(|(&u, &gid)| (GlyphId(gid as u32), u.into())).collect()
+            } else {
+                (0..font.num_glyphs())
+                    .filter_map(|gid| std::char::from_u32(gid).map(|c| (GlyphId(gid), c.into())))
+                    .collect()
+            }
         };
         
         debug!("to_unicode: {:?}", to_unicode);
@@ -77,7 +84,7 @@ impl FontEntry {
             }
         };
         
-        let encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
+        let mut encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
             debug!("gid to cid map: {:?}", map);
             match map {
@@ -197,7 +204,6 @@ impl FontEntry {
                 }
             }
             
-            debug!("cmap: {:?}", &cmap);
 
             if cmap.len() == 0 {
                 TextEncoding::CID(build_map())
@@ -206,6 +212,71 @@ impl FontEntry {
             }
         };
         
+        debug!("cmap: {:?}", &encoding);
+
+        if let Some(font_db) = font_db {
+            if let Some(ps_name) = pdf_font.name.as_deref().and_then(|s| s.split("+").nth(1)) {
+                // println!("request font {ps_name}");
+                if let Some(map) = font_db.check_font(ps_name, &*font) {
+                    if map.len() > 0 {
+                        println!("Got good unicode map for {ps_name}");
+                    }
+                    match encoding {
+                        TextEncoding::CID(Some(ref mut cmap)) => {
+                            for gid in 0 .. font.num_glyphs() {
+                                use std::collections::hash_map::Entry;
+                                match cmap.entry(gid as u16) {
+                                    Entry::Occupied(mut e) => {
+                                        let (gid2, uni) = e.get_mut();
+                                        let gid = GlyphId(gid);
+                                        if let Some(new_uni) = map.get(&gid) {
+                                            if new_uni != uni {
+                                                println!("updating {gid:?} from {uni:?} to {new_uni:?}");
+                                                *gid2 = Some(gid);
+                                                *uni = new_uni.clone();
+                                            }
+                                        }
+                                    }
+                                    Entry::Vacant(e) => {
+                                        let gid = GlyphId(gid);
+                                        if let Some(uni) = map.get(&gid) {
+                                            e.insert((Some(gid), uni.clone()));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        TextEncoding::CID(ref mut opt) => {
+                            let cmap = (0 .. font.num_glyphs()).filter_map(|n| {
+                                let gid = GlyphId(n as u32);
+                                map.get(&gid).map(|uni| (n as u16, (Some(gid), uni.clone())))
+                            }).collect();
+                            *opt = Some(cmap);
+                        }
+                        TextEncoding::Cmap(ref mut cmap) => {
+                            for (cp, (gid, uni)) in cmap.iter_mut() {
+                                let good_uni = map.get(gid);
+                                // dbg!(&gid, &good_uni, &uni);
+                                match (uni.as_mut(), good_uni) {
+                                    (Some(uni), Some(good_uni)) if uni != good_uni => {
+                                        //println!("mismatching unicode for gid {gid:?}: {good_uni:?} != {uni:?}");
+                                        *uni = good_uni.clone();
+                                    }
+                                    (None, Some(good_uni)) => {
+                                        //println!("missing unicode for gid {gid:?} added {good_uni:?}");
+                                        *uni = Some(good_uni.clone());
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        println!("{:?} {:?}", pdf_font.name, encoding);
+
         let widths = pdf_font.widths(resolve)?;
         let name = pdf_font.name.as_ref().ok_or_else(|| PdfError::Other { msg: "font has no name".into() })?.as_str().into();
         Ok(FontEntry {

@@ -1,6 +1,7 @@
 use std::path::{PathBuf};
 use std::ops::Deref;
 use std::collections::HashMap;
+use glyphmatcher::FontDb;
 use pdf::object::*;
 use pdf::font::{Font as PdfFont};
 use pdf::error::{Result, PdfError};
@@ -50,6 +51,7 @@ pub struct StandardCache {
     dir: PathBuf,
     fonts: HashMap<String, String>,
     dump: Dump,
+    font_db: Option<FontDb>,
 }
 impl StandardCache {
     pub fn new(dir: PathBuf) -> Self {
@@ -62,12 +64,16 @@ impl StandardCache {
             Ok("error") => Dump::OnError,
             Ok(_) => Dump::Never
         };
+        let db_path = dir.join("db");
+        let font_db = db_path.is_dir().then(|| FontDb::new(db_path));
         dbg!(&dump);
+
         StandardCache {
             inner: SyncCache::new(),
             dir,
             fonts,
-            dump
+            dump,
+            font_db,    
         }
     }
 }
@@ -137,5 +143,5 @@ pub fn load_font(font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve, cache: &S
         }
     };
 
-    Ok(Some(FontEntry::build(font, pdf_font, resolve)?))
+    Ok(Some(FontEntry::build(font, pdf_font, cache.font_db.as_ref(), resolve)?))
 }

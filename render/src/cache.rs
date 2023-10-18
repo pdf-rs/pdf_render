@@ -13,6 +13,8 @@ use pathfinder_content::{
     pattern::{Image},
 };
 
+use crate::BlendMode;
+
 use super::{fontentry::FontEntry};
 use super::image::load_image;
 use super::font::{load_font, StandardCache};
@@ -32,7 +34,7 @@ impl ValueSize for ImageResult {
 pub struct Cache {
     // shared mapping of fontname -> font
     fonts: Arc<SyncCache<usize, Option<Arc<FontEntry>>>>,
-    images: Arc<SyncCache<Ref<XObject>, ImageResult>>,
+    images: Arc<SyncCache<(Ref<XObject>, BlendMode), ImageResult>>,
     std: StandardCache,
     missing_fonts: Vec<Name>,
 }
@@ -78,9 +80,9 @@ impl Cache {
         }
     }
 
-    pub fn get_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resources: &Resources, resolve: &impl Resolve) -> ImageResult {
-        self.images.get(xobject_ref, ||
-            ImageResult(Arc::new(load_image(im, resources, resolve).map(|image|
+    pub fn get_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resources: &Resources, resolve: &impl Resolve, mode: BlendMode) -> ImageResult {
+        self.images.get((xobject_ref, mode), ||
+            ImageResult(Arc::new(load_image(im, resources, resolve, mode).map(|image|
                 Image::new(Vector2I::new(im.width as i32, im.height as i32), Arc::new(image.into_data().into()))
             )))
         )

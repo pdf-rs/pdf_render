@@ -6,6 +6,8 @@ use std::borrow::Cow;
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::BlendMode;
+
 #[derive(Hash, PartialEq, Eq, Clone)]
 pub struct ImageData<'a> {
     data: Cow<'a, [ColorU]>,
@@ -104,7 +106,7 @@ fn resize_alpha(data: &[u8], src_width: u32, src_height: u32, dest_width: u32, d
     Some(dest.into_raw())
 }
 
-pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Resolve) -> Result<ImageData<'static>, PdfError> {
+pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Resolve, mode: BlendMode) -> Result<ImageData<'static>, PdfError> {
     let raw_data = image.image_data(resolve)?;
 
     let pixel_count = image.width as usize * image.height as usize;
@@ -182,6 +184,8 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
     let data_ratio = (raw_data.len() * 8) / pixel_count;
     // dbg!(data_ratio);
 
+    debug!("CS: {cs:?}");
+
     let data = match data_ratio {
         1 | 2 | 4 | 8 => {
             let pixel_data: Cow<[u8]> = match data_ratio {
@@ -205,7 +209,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
                             for (&b, a) in pixel_data.iter().zip(alpha) {
                                 let off = b as usize * 3;
                                 let c = lookup.get(off .. off + 3).ok_or(PdfError::Bounds { index: off, len: lookup.len() })?;
-                                data.push(ColorU { r: c[0], g: c[1], b: c[2], a });
+                                data.push(rgb2rgba(c, a, mode));
                             }
                             data
                         }
@@ -215,7 +219,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
                             for (&b, a) in pixel_data.iter().zip(alpha) {
                                 let off = b as usize * 4;
                                 let c = lookup.get(off .. off + 4).ok_or(PdfError::Bounds { index: off, len: lookup.len() })?;
-                                data.push(cmyk2color(c.try_into().unwrap(), a));
+                                data.push(cmyk2color(c.try_into().unwrap(), a, BlendMode::Darken));
                             }
                             data
                         }
@@ -231,7 +235,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
                                 let mut c = [0.; 3];
                                 func.apply(&[i as f32 / 255.], &mut c)?;
                                 let [r, g, b] = c;
-                                *rgb = [(r * 255.) as u8, (g * 255.) as u8, (b * 255.) as u8];
+                                *rgb = rgb2rgb(r, g, b, mode);
                             }
                         }
                         Some(ColorSpace::DeviceCMYK) => {
@@ -239,7 +243,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
                                 let mut c = [0.; 4];
                                 func.apply(&[i as f32 / 255.], &mut c)?;
                                 let [c, m, y, k] = c;
-                                *rgb = cmyk2rgb([(c * 255.) as u8, (m * 255.) as u8, (y * 255.) as u8, (k * 255.) as u8]);
+                                *rgb = cmyk2rgb([(c * 255.) as u8, (m * 255.) as u8, (y * 255.) as u8, (k * 255.) as u8], mode);
                             }
                         }
                         _ => unimplemented!("alt cs={:?}", alt),
@@ -261,13 +265,13 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
             if !matches!(cs, Some(ColorSpace::DeviceRGB)) {
                 info!("image has data/pixel ratio of 3, but colorspace is {:?}", cs);
             }
-            raw_data[..pixel_count * 3].chunks_exact(3).zip(alpha).map(|(c, a)| ColorU { r: c[0], g: c[1], b: c[2], a }).collect()
+            raw_data[..pixel_count * 3].chunks_exact(3).zip(alpha).map(|(c, a)| rgb2rgba(c, a, mode)).collect()
         }
         32 => {
             if !matches!(cs, Some(ColorSpace::DeviceCMYK)) {
                 info!("image has data/pixel ratio of 4, but colorspace is {:?}", cs);
             }
-            cmyk2color_arr(&raw_data[..pixel_count * 4], alpha)
+            cmyk2color_arr(&raw_data[..pixel_count * 4], alpha, mode)
         }
         _ => unimplemented!("data/pixel ratio {}", data_ratio),
     };
@@ -284,29 +288,65 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
         }
     }
 }
+
+fn rgb2rgba(c: &[u8], a: u8, mode: BlendMode) -> ColorU {
+    match mode {
+        BlendMode::Overlay => {
+            ColorU { r: c[0], g: c[1], b: c[2], a }
+        }
+        BlendMode::Darken => {
+            ColorU { r: 255 - c[0], g: 255 - c[1], b: 255 - c[2], a }
+        }
+    }
+    
+}
+fn rgb2rgb(r: f32, g: f32, b: f32, mode: BlendMode) -> [u8; 3] {
+    match mode {
+        BlendMode::Overlay => {
+            [ (255. * r) as u8, (255. * g) as u8, (255. * b) as u8 ]
+        }
+        BlendMode::Darken => {
+            [ 255 - (255. * r) as u8, 255 - (255. * g) as u8, 255 - (255. * b) as u8 ]
+        }
+    }
+    
+}
 /*
 red = 1.0 – min ( 1.0, cyan + black )
 green = 1.0 – min ( 1.0, magenta + black )
 blue = 1.0 – min ( 1.0, yellow + black )
 */
 
-fn cmyk2rgb([c, m, y, k]: [u8; 4]) -> [u8; 3] {
-    //let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
-    let r = 255 - c.saturating_add(k);
-    let g = 255 - m.saturating_add(k);
-    let b = 255 - y.saturating_add(k);
-    [r, g, b]
+#[inline]
+fn cmyk2rgb([c, m, y, k]: [u8; 4], mode: BlendMode) -> [u8; 3] {
+    match mode {
+        BlendMode::Darken => {
+            let r = 255 - c.saturating_add(k);
+            let g = 255 - m.saturating_add(k);
+            let b = 255 - y.saturating_add(k);
+            [r, g, b]
+        }
+        BlendMode::Overlay => {
+            let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
+            let r = 255 - c.saturating_add(k);
+            let g = 255 - m.saturating_add(k);
+            let b = 255 - y.saturating_add(k);
+            [r, g, b]
+        }
+    }
 }
-fn cmyk2color(cmyk: [u8; 4], a: u8) -> ColorU {
-    let [r, g, b] = cmyk2rgb(cmyk);
+
+#[inline]
+fn cmyk2color(cmyk: [u8; 4], a: u8, mode: BlendMode) -> ColorU {
+    let [r, g, b] = cmyk2rgb(cmyk, mode);
     ColorU::new(r, g, b, a)
 }
 
-fn cmyk2color_arr(data: &[u8], alpha: impl Iterator<Item=u8>) -> Vec<ColorU> {
+fn cmyk2color_arr(data: &[u8], alpha: impl Iterator<Item=u8>, mode: BlendMode) -> Vec<ColorU> {
     data.chunks_exact(4).zip(alpha).map(|(c, a)| {
         let mut buf = [0; 4];
         buf.copy_from_slice(c);
-        cmyk2color(buf, a)
+        cmyk2color(buf, a, mode)
     }).collect()
 }
 
