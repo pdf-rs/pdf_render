@@ -227,28 +227,30 @@ impl FontEntry {
             if let Some(name) = name {
                 let ps_name = name.split("+").nth(1).unwrap_or(name);
 
-                println!("request font {ps_name}");
+                println!("request font {ps_name} ({})", name.as_str());
                 if let Some(map) = font_db.check_font(ps_name, &*font) {
                     if map.len() > 0 {
                         println!("Got good unicode map for {ps_name}");
                     } else {
                         println!("font {ps_name} did not match");
                     }
-                            for (cp, (gid, uni)) in cmap.iter_mut() {
-                                let good_uni = map.get(gid);
-                                // dbg!(&gid, &good_uni, &uni);
-                                match (uni.as_mut(), good_uni) {
-                                    (Some(uni), Some(good_uni)) if uni != good_uni => {
-                                        //println!("mismatching unicode for gid {gid:?}: {good_uni:?} != {uni:?}");
-                                        *uni = good_uni.clone();
-                                    }
-                                    (None, Some(good_uni)) => {
-                                        //println!("missing unicode for gid {gid:?} added {good_uni:?}");
-                                        *uni = Some(good_uni.clone());
-                                    }
-                                    _ => {}
-                                }
+                    for (cp, (gid, uni)) in cmap.iter_mut() {
+                        let good_uni = map.get(gid);
+                        match (uni.as_mut(), good_uni) {
+                            (Some(uni), Some(good_uni)) if uni != good_uni => {
+                                //println!("mismatching unicode for gid {gid:?}: {good_uni:?} != {uni:?}");
+                                *uni = good_uni.clone();
                             }
+                            (None, Some(good_uni)) => {
+                                //println!("missing unicode for gid {gid:?} added {good_uni:?}");
+                                *uni = Some(good_uni.clone());
+                            }
+                            (Some(uni), None) => {
+                                debug!("glyph {} missing (has uni {:?})", gid.0, uni);
+                            }
+                            _ => {}
+                        }
+                    }
                 } else {
                     info!("missing {ps_name} font");
                 }
@@ -267,25 +269,10 @@ impl FontEntry {
         if reserved_in_used.len() > 0 {
             println!("gid in privated use area: {}", reserved_in_used.iter().format(", "));
         }
-        
-        for (gid, uni) in by_gid.iter_mut() {
-            if uni.is_none() {
-                *uni = Some(std::char::from_u32(next_code).unwrap().into());
-                
-                next_code += 1;
-                while reserved_in_used.contains(&next_code) {
-                    next_code += 1;
-                }
-            }
-        }
-        assert!(next_code <= 0xF800);
-        if next_code > 0xE000 {
-            println!("mapped {} glyphs in private use area", next_code - 0xE000);
-        }
 
         let mut rev_map = HashMap::new();
-        for (gid, uni) in by_gid.iter_mut() {
-            if let Some(uni) = uni {
+        for (gid, uni_o) in by_gid.iter_mut() {
+            if let Some(uni) = uni_o {
                 use std::collections::hash_map::Entry;
 
                 match rev_map.entry(uni.clone()) {
@@ -293,12 +280,32 @@ impl FontEntry {
                         e.insert(*gid);
                     }
                     Entry::Occupied(e) => {
-                        println!("Duplicate unicode {uni:?} at gid {gid:?} and {:?}", e.get());
-                        *gid = *e.get();
+                        println!("Duplicate unicode {uni:?} for {gid:?} and {:?}", e.get());
+                        *uni_o = None;
                     }
                 }
             }
         }
+
+        for (gid, uni) in by_gid.iter_mut() {
+            if uni.is_none() && !font.is_empty_glyph(*gid) {
+                *uni = Some(std::char::from_u32(next_code).unwrap().into());
+                
+                next_code += 1;
+                while reserved_in_used.contains(&next_code) {
+                    next_code += 1;
+                }
+
+                if next_code >= 0xF8000 {
+                    warn!("too many unmapped glpyhs in {:?}", font.name().postscript_name);
+                    break;
+                }
+            }
+        }
+        if next_code > 0xE000 {
+            println!("mapped {} glyphs in private use area", next_code - 0xE000);
+        }
+
 
         println!("DONE");
         

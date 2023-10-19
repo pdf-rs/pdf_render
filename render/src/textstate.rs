@@ -144,14 +144,12 @@ impl TextState {
             let offset = span.text.len();
             if let Some(s) = unicode {
                 span.text.push_str(&*s);
-            } else {
-                span.text.push(std::char::from_u32(0xf000 + gid.0).unwrap());
+                span.chars.push(TextChar {
+                    offset,
+                    pos: span.width,
+                    width
+                });
             }
-            span.chars.push(TextChar {
-                offset,
-                pos: span.width,
-                width
-            });
             span.width += advance;
         }
     }
