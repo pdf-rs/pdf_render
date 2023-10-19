@@ -7,7 +7,7 @@ use crate::{BlendMode, backend::{FillMode, Stroke}};
 
 use super::{
     BBox,
-    fontentry::{FontEntry, TextEncoding},
+    fontentry::{FontEntry},
     graphicsstate::{GraphicsState},
     DrawMode,
     Backend,
@@ -81,26 +81,8 @@ impl TextState {
             Either::Right(data.iter().map(|&b| b as u16))
         };
 
-        let glyphs = codepoints.map(|cid| {
-            match e.encoding {
-                TextEncoding::CID(None) => {
-                    let unicode = std::char::from_u32(cid as u32).map(|c| SmallString::from(c));
-                    (cid, Some(GlyphId(cid as u32)), unicode)
-                },
-                TextEncoding::CID(Some(ref to_unicode)) => {
-                    match to_unicode.get(&cid) {
-                        Some(&(gid, ref unicode)) => (cid, gid, Some(unicode.clone())),
-                        None => (cid, Some(GlyphId(cid as u32)), None)
-                    }
-                },
-                TextEncoding::Cmap(ref cmap) => {
-                    match cmap.get(&cid) {
-                        Some(&(gid, ref unicode)) => (cid, Some(gid), unicode.clone()),
-                        None => (cid, None, None)
-                    }
-                }
-            }
-        });
+        let glyphs = codepoints.flat_map(|cid|
+            e.cmap.get(&cid).map(|&(gid, ref uni)| (cid, gid, uni.clone())));
 
         let fill = FillMode { color: gs.fill_color, alpha: gs.fill_color_alpha, mode: fill_mode };
         let stroke = FillMode { color: gs.stroke_color, alpha: gs.stroke_color_alpha, mode: stroke_mode };
@@ -122,16 +104,10 @@ impl TextState {
         ) * e.font.font_matrix();
         
         for (cid, gid, unicode) in glyphs {
-            let is_space = matches!(e.encoding, TextEncoding::Cmap(_)) && unicode.as_deref() == Some(" ");
+            let is_space = !e.is_cid && unicode.as_deref() == Some(" ");
 
             //debug!("cid {} -> gid {:?} {:?}", cid, gid, unicode);
-            let gid = match gid {
-                Some(gid) => gid,
-                None => {
-                    debug!("no glyph for cid {}", cid);
-                    GlyphId(cid as _)
-                } // lets hope that works…
-            };
+            
             let glyph = e.font.glyph(gid);
             let width: f32 = e.widths.as_ref().map(|w| w.get(cid as usize) * 0.001 * self.horiz_scale * self.font_size)
                 .or_else(|| glyph.as_ref().map(|g| tr.m11() * g.metrics.advance))
@@ -168,12 +144,14 @@ impl TextState {
             let offset = span.text.len();
             if let Some(s) = unicode {
                 span.text.push_str(&*s);
-                span.chars.push(TextChar {
-                    offset,
-                    pos: span.width,
-                    width
-                });
+            } else {
+                span.text.push(std::char::from_u32(0xf000 + gid.0).unwrap());
             }
+            span.chars.push(TextChar {
+                offset,
+                pos: span.width,
+                width
+            });
             span.width += advance;
         }
     }

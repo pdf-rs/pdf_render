@@ -1,6 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use font::{self, GlyphId, TrueTypeFont, CffFont, Type1Font, OpenTypeFont};
 use glyphmatcher::FontDb;
+use itertools::Itertools;
 use pdf::encoding::BaseEncoding;
 use pdf::font::{Font as PdfFont, Widths, CidToGidMap};
 use pdf::object::{Resolve, MaybeRef};
@@ -9,16 +10,10 @@ use pdf_encoding::{Encoding, glyphname_to_unicode};
 use istring::SmallString;
 use crate::font::FontRc;
 
-#[derive(Debug)]
-pub enum TextEncoding {
-    CID(Option<HashMap<u16, (Option<GlyphId>, SmallString)>>),
-    Cmap(HashMap<u16, (GlyphId, Option<SmallString>)>)
-}
-
 pub struct FontEntry {
     pub font: FontRc,
     pub pdf_font: MaybeRef<PdfFont>,
-    pub encoding: TextEncoding,
+    pub cmap: HashMap<u16, (GlyphId, Option<SmallString>)>,
     pub widths: Option<Widths>,
     pub is_cid: bool,
     pub name: String,
@@ -60,7 +55,7 @@ impl FontEntry {
         };
         
         debug!("to_unicode: {:?}", to_unicode);
-        let build_map = || {
+        let build_map = || -> HashMap<u16, (GlyphId, Option<SmallString>)> {
             if let Some(ref to_unicode) = to_unicode {
                 let mut num1 = 0;
                 // dbg!(font.encoding());
@@ -69,7 +64,7 @@ impl FontEntry {
                     if gid.is_some() {
                         num1 += 1;
                     }
-                    (cid, (gid, s.into()))
+                    (cid, (gid.unwrap_or(GlyphId(cid as u32)), Some(s.into())))
                 }).collect();
                 if let Some(cff) = font.downcast_ref::<CffFont>() {
                     let mut num2 = 0;
@@ -78,56 +73,57 @@ impl FontEntry {
                         if gid.is_some() {
                             num2 += 1;
                         }
-                        (cid, (gid, s.into()))
+                        (cid, (gid.unwrap_or(GlyphId(cid as u32)), Some(s.into())))
                     }).collect();
                     if num2 > num1 {
                         map = map2;
                     }
                 }
-                Some(map)
+                map
             } else if let Some(cmap) = font_cmap {
-                Some(cmap.items().map(|(cid, gid)| (cid as u16, (Some(gid), char::from_u32(0xF000 + cid).unwrap().into()))).collect())
+                cmap.items().map(|(cid, gid)| (cid as u16, (gid, None))).collect()
             } else if let Some(cff) = font.downcast_ref::<CffFont>() {
                 if cff.cid {
-                    Some(cff.sid_map.iter().map(|(&sid, &gid)|  (sid as u16, (Some(GlyphId(gid as u32)), char::from_u32(0xF000 + sid as u32).unwrap().into()))).collect())
+                    cff.sid_map.iter().map(|(&sid, &gid)|  (sid as u16, (GlyphId(gid as u32), None))).collect()
                 } else {
-                    Some(cff.codepoint_map.iter().enumerate().filter(|&(_, &gid)| gid != 0).map(|(cid, &gid)| (cid as u16, (Some(GlyphId(gid as u32)), char::from_u32(0xF000 + gid as u32).unwrap().into()))).collect())
+                    cff.codepoint_map.iter().enumerate().filter(|&(_, &gid)| gid != 0).map(|(cid, &gid)| (cid as u16, (GlyphId(gid as u32), None))).collect()
                 }
             } else {
-                None
+                Default::default()
             }
         };
         
-        let mut encoding = if let Some(map) = pdf_font.cid_to_gid_map() {
+        let mut cmap = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
             debug!("gid to cid map: {:?}", map);
             match map {
                 CidToGidMap::Identity => {
+                    let mut map: HashMap<_, _> = (0 .. font.num_glyphs()).map(|n| (n as u16, (GlyphId(n as u32), None))).collect();
                     if let Some(ref to_unicode) = to_unicode {
-                        let map = to_unicode.iter().map(|(cid, s)| {
-                            (cid, (Some(GlyphId(cid as u32)), s.into()))
-                        }).collect();
-                        TextEncoding::CID(Some(map))
-                    } else {
-                        TextEncoding::CID(None)
+                        for (cid, s) in to_unicode.iter() {
+                            if let Some((gid, uni)) = map.get_mut(&cid) {
+                                *uni = Some(s.into());
+                            }
+                        }
                     }
+                    map
                 }
                 CidToGidMap::Table(ref data) => {
-                    let cmap = data.iter().enumerate().map(|(cid, &gid)| {
+                    data.iter().enumerate().map(|(cid, &gid)| {
                         let unicode = match to_unicode {
                             Some(ref u) => u.get(cid as u16).map(|s| s.into()),
                             None => glyph_unicode.get(&GlyphId(gid as u32)).cloned()
                         };
                         (cid as u16, (GlyphId(gid as u32), unicode))
-                    }).collect();
-                    TextEncoding::Cmap(cmap)
+                    }).collect()
                 }
             }
         } else if base_encoding == Some(&BaseEncoding::IdentityH) {
             is_cid = true;
-            TextEncoding::CID(build_map())
+            build_map()
         } else {
             let mut cmap = HashMap::<u16, (GlyphId, Option<SmallString>)>::new();
+            
             let source_encoding = match base_encoding {
                 Some(BaseEncoding::StandardEncoding) => Some(Encoding::AdobeStandard),
                 Some(BaseEncoding::SymbolEncoding) => Some(Encoding::AdobeSymbol),
@@ -220,60 +216,24 @@ impl FontEntry {
             
 
             if cmap.len() == 0 {
-                TextEncoding::CID(build_map())
+                is_cid = true;
+                build_map()
             } else {
-                TextEncoding::Cmap(cmap)
+                cmap
             }
         };
         
         if let Some(font_db) = font_db {
             if let Some(name) = name {
-                let name = name.split("+").nth(1).unwrap_or(name);
-                let ps_name = name.split("-").nth(0).unwrap();
+                let ps_name = name.split("+").nth(1).unwrap_or(name);
 
-                debug!("request font {ps_name}");
+                println!("request font {ps_name}");
                 if let Some(map) = font_db.check_font(ps_name, &*font) {
                     if map.len() > 0 {
-                        info!("Got good unicode map for {ps_name}");
+                        println!("Got good unicode map for {ps_name}");
                     } else {
-                        info!("font {ps_name} did not match");
+                        println!("font {ps_name} did not match");
                     }
-                    match encoding {
-                        TextEncoding::CID(Some(ref mut cmap)) => {
-                            for n in 0 .. font.num_glyphs() {
-                                use std::collections::hash_map::Entry;
-                                match cmap.entry(n as u16) {
-                                    Entry::Occupied(mut e) => {
-                                        let (gid2, uni) = e.get_mut();
-                                        let gid = GlyphId(n);
-                                        if let Some(new_uni) = map.get(&gid) {
-                                            if new_uni != uni {
-                                                debug!("updating {gid:?} from {uni:?} to {new_uni:?}");
-                                                *gid2 = Some(gid);
-                                                *uni = new_uni.clone();
-                                            }
-                                        }
-                                    }
-                                    Entry::Vacant(e) => {
-                                        let gid = GlyphId(n);
-                                        if let Some(uni) = map.get(&gid) {
-                                            e.insert((Some(gid), uni.clone()));
-                                        } else {
-                                            e.insert((Some(gid), std::char::from_u32(0xF000 + n).unwrap().into()));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        TextEncoding::CID(ref mut opt) => {
-                            let cmap = (0 .. font.num_glyphs()).map(|n| {
-                                let gid = GlyphId(n as u32);
-                                map.get(&gid).map(|uni| (n as u16, (Some(gid), uni.clone())))
-                                    .unwrap_or_else(|| (n as u16, (Some(gid), std::char::from_u32(0xF000 + n).unwrap().into())))
-                            }).collect();
-                            *opt = Some(cmap);
-                        }
-                        TextEncoding::Cmap(ref mut cmap) => {
                             for (cp, (gid, uni)) in cmap.iter_mut() {
                                 let good_uni = map.get(gid);
                                 // dbg!(&gid, &good_uni, &uni);
@@ -289,8 +249,6 @@ impl FontEntry {
                                     _ => {}
                                 }
                             }
-                        }
-                    }
                 } else {
                     info!("missing {ps_name} font");
                 }
@@ -299,10 +257,55 @@ impl FontEntry {
 
         let widths = pdf_font.widths(resolve)?;
         let name = pdf_font.name.as_ref().ok_or_else(|| PdfError::Other { msg: "font has no name".into() })?.as_str().into();
+
+        let mut next_code = 0xE000;
+        let mut by_gid: Vec<_> = cmap.values_mut().collect();
+        by_gid.sort_unstable_by_key(|t| t.0.0);
+
+        let reserved_in_used: HashSet<u32> = by_gid.iter().map(|(gid, _)| gid.0).filter(|gid| (0xE000 .. 0xF800).contains(gid)).collect();
+        
+        if reserved_in_used.len() > 0 {
+            println!("gid in privated use area: {}", reserved_in_used.iter().format(", "));
+        }
+        
+        for (gid, uni) in by_gid.iter_mut() {
+            if uni.is_none() {
+                *uni = Some(std::char::from_u32(next_code).unwrap().into());
+                
+                next_code += 1;
+                while reserved_in_used.contains(&next_code) {
+                    next_code += 1;
+                }
+            }
+        }
+        assert!(next_code <= 0xF800);
+        if next_code > 0xE000 {
+            println!("mapped {} glyphs in private use area", next_code - 0xE000);
+        }
+
+        let mut rev_map = HashMap::new();
+        for (gid, uni) in by_gid.iter_mut() {
+            if let Some(uni) = uni {
+                use std::collections::hash_map::Entry;
+
+                match rev_map.entry(uni.clone()) {
+                    Entry::Vacant(e) => {
+                        e.insert(*gid);
+                    }
+                    Entry::Occupied(e) => {
+                        println!("Duplicate unicode {uni:?} at gid {gid:?} and {:?}", e.get());
+                        *gid = *e.get();
+                    }
+                }
+            }
+        }
+
+        println!("DONE");
+        
         Ok(FontEntry {
             font,
             pdf_font,
-            encoding,
+            cmap,
             is_cid,
             widths,
             name,

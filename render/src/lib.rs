@@ -28,7 +28,7 @@ mod scene;
 mod font;
 
 pub use cache::{Cache};
-pub use fontentry::{FontEntry, TextEncoding};
+pub use fontentry::{FontEntry};
 pub use backend::{DrawMode, Backend, BlendMode, FillMode};
 pub use scene::SceneBackend;
 pub use crate::image::{load_image, ImageData};
@@ -161,6 +161,17 @@ impl TextSpan {
             .chain(std::iter::once(TextChar { offset: self.text.len(), pos: self.width, width: 0.0 }))
             .tuple_windows()
             .map(|(a, b)| Part {
+                text: &self.text[a.offset..b.offset],
+                pos: a.pos,
+                width: a.width,
+                offset: a.offset
+            })
+    }
+    pub fn rparts(&self) -> impl Iterator<Item=Part> + '_ {
+        self.chars.iter().cloned()
+            .chain(std::iter::once(TextChar { offset: self.text.len(), pos: self.width, width: 0.0 })).rev()
+            .tuple_windows()
+            .map(|(b, a)| Part {
                 text: &self.text[a.offset..b.offset],
                 pos: a.pos,
                 width: a.width,
