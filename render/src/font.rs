@@ -78,9 +78,8 @@ impl StandardCache {
             require_unique_unicode: false,
         }
     }
-    pub fn require_unique_unicode(mut self) -> Self {
-        self.require_unique_unicode = true;
-        self
+    pub fn require_unique_unicode(&mut self, r: bool) {
+        self.require_unique_unicode = r;
     }
 }
 

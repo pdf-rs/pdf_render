@@ -73,6 +73,9 @@ impl TraceCache {
             Some(e) => Err(e)
         }
     }
+    pub fn require_unique_unicode(&mut self, require_unique_unicode: bool) {
+        self.std.require_unique_unicode(require_unique_unicode);
+    }
 }
 impl<'a> Tracer<'a> {
     pub fn new(cache: &'a TraceCache, clip_paths: &'a mut Vec<ClipPath>) -> Self {
