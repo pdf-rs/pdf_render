@@ -52,6 +52,7 @@ pub struct StandardCache {
     fonts: HashMap<String, String>,
     dump: Dump,
     font_db: Option<FontDb>,
+    require_unique_unicode: bool,
 }
 impl StandardCache {
     pub fn new(dir: PathBuf) -> Self {
@@ -73,8 +74,13 @@ impl StandardCache {
             dir,
             fonts,
             dump,
-            font_db,    
+            font_db,
+            require_unique_unicode: false,
         }
+    }
+    pub fn require_unique_unicode(mut self) -> Self {
+        self.require_unique_unicode = true;
+        self
     }
 }
 
@@ -143,5 +149,5 @@ pub fn load_font(font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve, cache: &S
         }
     };
 
-    Ok(Some(FontEntry::build(font, pdf_font, cache.font_db.as_ref(), resolve)?))
+    Ok(Some(FontEntry::build(font, pdf_font, cache.font_db.as_ref(), resolve, cache.require_unique_unicode)?))
 }

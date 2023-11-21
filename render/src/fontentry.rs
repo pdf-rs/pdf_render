@@ -21,7 +21,7 @@ pub struct FontEntry {
 
 
 impl FontEntry {
-    pub fn build(font: FontRc, pdf_font: MaybeRef<PdfFont>, font_db: Option<&FontDb>, resolve: &impl Resolve) -> Result<FontEntry, PdfError> {
+    pub fn build(font: FontRc, pdf_font: MaybeRef<PdfFont>, font_db: Option<&FontDb>, resolve: &impl Resolve, require_unique_unicode: bool) -> Result<FontEntry, PdfError> {
         let mut is_cid = pdf_font.is_cid();
 
         let name = match pdf_font.data {
@@ -238,15 +238,15 @@ impl FontEntry {
                         let good_uni = map.get(gid);
                         match (uni.as_mut(), good_uni) {
                             (Some(uni), Some(good_uni)) if uni != good_uni => {
-                                //println!("mismatching unicode for gid {gid:?}: {good_uni:?} != {uni:?}");
+                                // println!("mismatching unicode for gid {gid:?}: {good_uni:?} != {uni:?}");
                                 *uni = good_uni.clone();
                             }
                             (None, Some(good_uni)) => {
-                                //println!("missing unicode for gid {gid:?} added {good_uni:?}");
+                                // println!("missing unicode for gid {gid:?} added {good_uni:?}");
                                 *uni = Some(good_uni.clone());
                             }
                             (Some(uni), None) => {
-                                debug!("glyph {} missing (has uni {:?})", gid.0, uni);
+                                // println!("glyph {} missing (has uni {:?})", gid.0, uni);
                             }
                             _ => {}
                         }
@@ -260,53 +260,54 @@ impl FontEntry {
         let widths = pdf_font.widths(resolve)?;
         let name = pdf_font.name.as_ref().ok_or_else(|| PdfError::Other { msg: "font has no name".into() })?.as_str().into();
 
-        let mut next_code = 0xE000;
-        let mut by_gid: Vec<_> = cmap.values_mut().collect();
-        by_gid.sort_unstable_by_key(|t| t.0.0);
+        if require_unique_unicode {
+            let mut next_code = 0xE000;
+            let mut by_gid: Vec<_> = cmap.values_mut().collect();
+            by_gid.sort_unstable_by_key(|t| t.0.0);
 
-        let reserved_in_used: HashSet<u32> = by_gid.iter().map(|(gid, _)| gid.0).filter(|gid| (0xE000 .. 0xF800).contains(gid)).collect();
-        
-        if reserved_in_used.len() > 0 {
-            println!("gid in privated use area: {}", reserved_in_used.iter().format(", "));
-        }
+            let reserved_in_used: HashSet<u32> = by_gid.iter().map(|(gid, _)| gid.0).filter(|gid| (0xE000 .. 0xF800).contains(gid)).collect();
+            
+            if reserved_in_used.len() > 0 {
+                println!("gid in privated use area: {}", reserved_in_used.iter().format(", "));
+            }
 
-        let mut rev_map = HashMap::new();
-        for (gid, uni_o) in by_gid.iter_mut() {
-            if let Some(uni) = uni_o {
-                use std::collections::hash_map::Entry;
+            let mut rev_map = HashMap::new();
+            for (gid, uni_o) in by_gid.iter_mut() {
+                if let Some(uni) = uni_o {
+                    use std::collections::hash_map::Entry;
 
-                match rev_map.entry(uni.clone()) {
-                    Entry::Vacant(e) => {
-                        e.insert(*gid);
-                    }
-                    Entry::Occupied(e) => {
-                        println!("Duplicate unicode {uni:?} for {gid:?} and {:?}", e.get());
-                        *uni_o = None;
+                    match rev_map.entry(uni.clone()) {
+                        Entry::Vacant(e) => {
+                            e.insert(*gid);
+                        }
+                        Entry::Occupied(e) => {
+                            println!("Duplicate unicode {uni:?} for {gid:?} and {:?}", e.get());
+                            *uni_o = None;
+                        }
                     }
                 }
             }
-        }
 
-        for (gid, uni) in by_gid.iter_mut() {
-            if uni.is_none() && !font.is_empty_glyph(*gid) {
-                *uni = Some(std::char::from_u32(next_code).unwrap().into());
-                
-                next_code += 1;
-                while reserved_in_used.contains(&next_code) {
+            for (gid, uni) in by_gid.iter_mut() {
+                if uni.is_none() && !font.is_empty_glyph(*gid) {
+                    *uni = Some(std::char::from_u32(next_code).unwrap().into());
+                    
                     next_code += 1;
-                }
+                    while reserved_in_used.contains(&next_code) {
+                        next_code += 1;
+                    }
 
-                if next_code >= 0xF8000 {
-                    warn!("too many unmapped glpyhs in {:?}", font.name().postscript_name);
-                    break;
+                    if next_code >= 0xF8000 {
+                        warn!("too many unmapped glpyhs in {:?}", font.name().postscript_name);
+                        break;
+                    }
                 }
             }
-        }
-        if next_code > 0xE000 {
-            println!("mapped {} glyphs in private use area", next_code - 0xE000);
-        }
+            if next_code > 0xE000 {
+                println!("mapped {} glyphs in private use area", next_code - 0xE000);
+            }
 
-
+        }
         println!("DONE");
         
         Ok(FontEntry {
