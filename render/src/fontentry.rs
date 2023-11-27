@@ -227,12 +227,12 @@ impl FontEntry {
             if let Some(name) = name {
                 let ps_name = name.split("+").nth(1).unwrap_or(name);
 
-                println!("request font {ps_name} ({})", name.as_str());
+                info!("request font {ps_name} ({})", name.as_str());
                 if let Some(map) = font_db.check_font(ps_name, &*font) {
                     if map.len() > 0 {
-                        println!("Got good unicode map for {ps_name}");
+                        info!("Got good unicode map for {ps_name}");
                     } else {
-                        println!("font {ps_name} did not match");
+                        info!("font {ps_name} did not match");
                     }
                     for (cp, (gid, uni)) in cmap.iter_mut() {
                         let good_uni = map.get(gid);
@@ -268,7 +268,7 @@ impl FontEntry {
             let reserved_in_used: HashSet<u32> = by_gid.iter().map(|(gid, _)| gid.0).filter(|gid| (0xE000 .. 0xF800).contains(gid)).collect();
             
             if reserved_in_used.len() > 0 {
-                println!("gid in privated use area: {}", reserved_in_used.iter().format(", "));
+                info!("gid in privated use area: {}", reserved_in_used.iter().format(", "));
             }
 
             let mut rev_map = HashMap::new();
@@ -281,7 +281,7 @@ impl FontEntry {
                             e.insert(*gid);
                         }
                         Entry::Occupied(e) => {
-                            println!("Duplicate unicode {uni:?} for {gid:?} and {:?}", e.get());
+                            info!("Duplicate unicode {uni:?} for {gid:?} and {:?}", e.get());
                             *uni_o = None;
                         }
                     }
@@ -304,11 +304,10 @@ impl FontEntry {
                 }
             }
             if next_code > 0xE000 {
-                println!("mapped {} glyphs in private use area", next_code - 0xE000);
+                info!("mapped {} glyphs in private use area", next_code - 0xE000);
             }
 
         }
-        println!("DONE");
         
         Ok(FontEntry {
             font,

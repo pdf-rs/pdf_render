@@ -116,8 +116,6 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
         info!("image: {:?}", image.inner.info.info);
         info!("filters: {:?}", image.inner.filters);
     }
-    info!("smask: {:?}", image.smask);
-
 
     enum Data<'a> {
         Arc(Arc<[u8]>),

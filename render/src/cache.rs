@@ -90,9 +90,9 @@ impl Cache {
 }
 impl Drop for Cache {
     fn drop(&mut self) {
-        println!("missing fonts:");
+        info!("missing fonts:");
         for name in self.missing_fonts.iter() {
-            println!("{}", name.as_str());
+            info!("{}", name.as_str());
         }
     }
 }
