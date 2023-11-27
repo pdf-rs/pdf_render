@@ -173,7 +173,17 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
     
     fn resolve_cs<'a>(cs: &'a ColorSpace, resources: &'a Resources) -> Option<&'a ColorSpace> {
         match cs {
-            ColorSpace::Icc(icc) => icc.info.info.alternate.as_ref().map(|b| &**b),
+            ColorSpace::Icc(icc) => {
+                match icc.info.alternate {
+                    Some(ref b) => Some(&**b),
+                    None => match icc.info.components {
+                        1 => Some(&ColorSpace::DeviceGray),
+                        3 => Some(&ColorSpace::DeviceRGB),
+                        4 => Some(&ColorSpace::DeviceCMYK),
+                        _ => None
+                    }
+                }
+            }
             ColorSpace::Named(ref name) => resources.color_spaces.get(name),
             _ => Some(cs),
         }

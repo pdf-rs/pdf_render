@@ -17,11 +17,23 @@ pathfinder_export = { git = "https://github.com/servo/pathfinder" }
 pathfinder_simd = { git = "https://github.com/servo/pathfinder" }
 
 
-#[patch."https://github.com/s3bk/pathfinder_view"]
-#pathfinder_view = { path = "../pathfinder_view", features = ["icon"] }
+[patch."https://github.com/s3bk/pathfinder_view"]
+pathfinder_view = { path = "../pathfinder_view", features=["icon"] }
 
-#[patch."https://github.com/pdf-rs/pdf"]
-#pdf = { path = "../pdf/pdf", default-features=false }
+[patch."https://github.com/pdf-rs/pdf"]
+pdf = { path = "../pdf/pdf", default-features=false }
 
 #[patch."https://github.com/pdf-rs/font"]
 #font = { path = "../font" }
+
+[patch."https://github.com/servo/pathfinder"]
+pathfinder_gl = { path = "../pathfinder/gl" }
+pathfinder_webgl = { path = "../pathfinder/webgl" }
+pathfinder_gpu = { path = "../pathfinder/gpu" }
+pathfinder_content = { path = "../pathfinder/content" }
+pathfinder_color = { path = "../pathfinder/color" }
+pathfinder_renderer = { path = "../pathfinder/renderer" }
+pathfinder_resources = { path = "../pathfinder/resources" }
+pathfinder_export = { path = "../pathfinder/export" }
+pathfinder_simd = { path = "../pathfinder/simd" }
+pathfinder_geometry = { path = "../pathfinder/geometry" }
