@@ -81,8 +81,9 @@ impl TextState {
             Either::Right(data.iter().map(|&b| b as u16))
         };
 
-        let glyphs = codepoints.flat_map(|cid|
-            e.cmap.get(&cid).map(|&(gid, ref uni)| (cid, gid, uni.clone())));
+        let glyphs = codepoints.map(|cid|
+            (cid, e.cmap.get(&cid).map(|&(gid, ref uni)| (gid, uni.clone())))
+        );
 
         let fill = FillMode { color: gs.fill_color, alpha: gs.fill_color_alpha, mode: fill_mode };
         let stroke = FillMode { color: gs.stroke_color, alpha: gs.stroke_color_alpha, mode: stroke_mode };
@@ -103,9 +104,14 @@ impl TextState {
             0., self.font_size, self.rise
         ) * e.font.font_matrix();
         
-        for (cid, gid, unicode) in glyphs {
-            let is_space = !e.is_cid && unicode.as_deref() == Some(" ");
-
+        for (cid, t) in glyphs {
+            let (gid, unicode, is_space) = match t {
+                Some((gid, unicode)) => {
+                    let is_space = !e.is_cid && unicode.as_deref() == Some(" ");
+                    (gid, unicode, is_space)
+                }
+                None => (GlyphId(0), None, cid == 0x20)
+            };
             //debug!("cid {} -> gid {:?} {:?}", cid, gid, unicode);
             
             let glyph = e.font.glyph(gid);
