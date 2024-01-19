@@ -67,7 +67,6 @@ impl StandardCache {
         };
         let db_path = dir.join("db");
         let font_db = db_path.is_dir().then(|| FontDb::new(db_path));
-        dbg!(&dump);
 
         StandardCache {
             inner: SyncCache::new(),
