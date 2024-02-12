@@ -24,7 +24,7 @@ pathfinder_resources = { git = "https://github.com/servo/pathfinder" }
 pathfinder_content = { git = "https://github.com/servo/pathfinder" }
 log = "0.4"
 font = { git = "https://github.com/pdf-rs/font" }
-pdf_encoding = "0.3"
+pdf_encoding = "0.4"
 itertools = "*"
 image = "0.24.2"
 instant = "*"
