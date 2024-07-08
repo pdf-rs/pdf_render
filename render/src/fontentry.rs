@@ -1,6 +1,9 @@
 use std::collections::{HashMap, HashSet};
-use font::{self, GlyphId, TrueTypeFont, CffFont, Type1Font, OpenTypeFont};
+use font::{Font, CffFont, Encoder, FontVariant, GlyphId, OpenTypeFont, TrueTypeFont, Type1Font};
+
+#[cfg(feature="glyphmatcher")]
 use glyphmatcher::FontDb;
+
 use itertools::Itertools;
 use pdf::encoding::BaseEncoding;
 use pdf::font::{Font as PdfFont, Widths, CidToGidMap};
@@ -10,8 +13,8 @@ use pdf_encoding::{Encoding, glyphname_to_unicode};
 use istring::SmallString;
 use crate::font::FontRc;
 
-pub struct FontEntry {
-    pub font: FontRc,
+pub struct FontEntry<E: Encoder> {
+    pub font: FontRc<E>,
     pub pdf_font: MaybeRef<PdfFont>,
     pub cmap: HashMap<u16, (GlyphId, Option<SmallString>)>,
     pub widths: Option<Widths>,
@@ -20,8 +23,10 @@ pub struct FontEntry {
 }
 
 
-impl FontEntry {
-    pub fn build(font: FontRc, pdf_font: MaybeRef<PdfFont>, font_db: Option<&FontDb>, resolve: &impl Resolve, require_unique_unicode: bool) -> Result<FontEntry, PdfError> {
+impl<E: Encoder + 'static> FontEntry<E> {
+    pub fn build(font: FontRc<E>, pdf_font: MaybeRef<PdfFont>, 
+        #[cfg(feature="glyphmatcher")]
+        font_db: Option<&FontDb>, resolve: &impl Resolve, require_unique_unicode: bool) -> Result<FontEntry<E>, PdfError> {
         let mut is_cid = pdf_font.is_cid();
 
         let name = match pdf_font.data {
@@ -35,17 +40,20 @@ impl FontEntry {
         let to_unicode = t!(pdf_font.to_unicode(resolve).transpose());
         let mut font_codepoints = None;
 
-        let font_cmap = font.downcast_ref::<TrueTypeFont>().and_then(|ttf| ttf.cmap.as_ref())
-        .or_else(|| font.downcast_ref::<OpenTypeFont>().and_then(|otf| otf.cmap.as_ref()));
+        let font_cmap = match *font {
+            FontVariant::TrueType(ref ttf) => ttf.cmap.as_ref(),
+            FontVariant::OpenType(ref otf) => otf.cmap.as_ref(),
+            _ => None
+        };
 
         let glyph_unicode: HashMap<GlyphId, SmallString> = {
-            if let Some(type1) = font.downcast_ref::<Type1Font>() {
+            if let FontVariant::Type1(ref type1) = *font {
                 debug!("Font is Type1");
                 font_codepoints = Some(&type1.codepoints);
                 type1.unicode_names().map(|(gid, s)| (gid, s.into())).collect()
             } else if let Some(cmap) = font_cmap {
                 cmap.items().filter_map(|(cp, gid)| std::char::from_u32(cp).map(|c| (gid, c.into()))).collect()
-            } else if let Some(cff) = font.downcast_ref::<CffFont>() {
+            } else if let FontVariant::Cff(ref cff) = *font {
                 cff.unicode_map.iter().map(|(&u, &gid)| (GlyphId(gid as u32), u.into())).collect()
             } else {
                 (0..font.num_glyphs())
@@ -66,7 +74,7 @@ impl FontEntry {
                     }
                     (cid, (gid.unwrap_or(GlyphId(cid as u32)), Some(s.into())))
                 }).collect();
-                if let Some(cff) = font.downcast_ref::<CffFont>() {
+                if let FontVariant::Cff(ref cff) = *font {
                     let mut num2 = 0;
                     let map2: HashMap<_, _> = to_unicode.iter().map(|(cid, s)| {
                         let gid = cff.sid_map.get(&cid).map(|&n| GlyphId(n as u32));
@@ -82,7 +90,7 @@ impl FontEntry {
                 map
             } else if let Some(cmap) = font_cmap {
                 cmap.items().map(|(cid, gid)| (cid as u16, (gid, None))).collect()
-            } else if let Some(cff) = font.downcast_ref::<CffFont>() {
+            } else if let FontVariant::Cff(ref cff) = *font {
                 if cff.cid {
                     cff.sid_map.iter().map(|(&sid, &gid)|  (sid as u16, (GlyphId(gid as u32), None))).collect()
                 } else {
@@ -163,7 +171,7 @@ impl FontEntry {
                     }
                 }
                 _ => {
-                    if let Some(cff) = font.downcast_ref::<CffFont>() {
+                    if let FontVariant::Cff(ref cff) = *font {
                         for (cp, &gid) in cff.codepoint_map.iter().enumerate() {
                             let gid = GlyphId(gid as u32);
                             let unicode = glyph_unicode.get(&gid).cloned();
@@ -223,6 +231,7 @@ impl FontEntry {
             }
         };
         
+        #[cfg(feature="glyphmatcher")]
         if let Some(font_db) = font_db {
             if let Some(name) = name {
                 let ps_name = name.split("+").nth(1).unwrap_or(name);
@@ -289,7 +298,7 @@ impl FontEntry {
             }
 
             for (gid, uni) in by_gid.iter_mut() {
-                if uni.is_none() && !font.is_empty_glyph(*gid) {
+                if uni.is_none() && !(*font).is_empty_glyph(*gid) {
                     *uni = Some(std::char::from_u32(next_code).unwrap().into());
                     
                     next_code += 1;
@@ -320,7 +329,7 @@ impl FontEntry {
     }
 }
 
-impl globalcache::ValueSize for FontEntry {
+impl<E: Encoder> globalcache::ValueSize for FontEntry<E> {
     fn size(&self) -> usize {
         1 // TODO
     }

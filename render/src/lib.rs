@@ -26,8 +26,10 @@ pub mod tracer;
 mod image;
 mod scene;
 mod font;
+pub mod vello;
 
 pub use cache::{Cache};
+use ::font::Encoder;
 pub use fontentry::{FontEntry};
 pub use backend::{DrawMode, Backend, BlendMode, FillMode};
 pub use scene::SceneBackend;
@@ -134,7 +136,7 @@ impl Fill {
 }
 
 #[derive(Debug)]
-pub struct TextSpan {
+pub struct TextSpan<E: Encoder> {
     // A rect with the origin at the baseline, a height of 1em and width that corresponds to the advance width.
     pub rect: RectF,
 
@@ -144,7 +146,7 @@ pub struct TextSpan {
     pub bbox: Option<RectF>,
     pub font_size: f32,
     #[debug(skip)]
-    pub font: Option<Arc<FontEntry>>,
+    pub font: Option<Arc<FontEntry<E>>>,
     pub text: String,
     pub chars: Vec<TextChar>,
     pub color: Fill,
@@ -155,7 +157,7 @@ pub struct TextSpan {
     pub mode: TextMode,
     pub op_nr: usize,
 }
-impl TextSpan {
+impl<E: Encoder> TextSpan<E> {
     pub fn parts(&self) -> impl Iterator<Item=Part> + '_ {
         self.chars.iter().cloned()
             .chain(std::iter::once(TextChar { offset: self.text.len(), pos: self.width, width: 0.0 }))

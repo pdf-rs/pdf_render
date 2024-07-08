@@ -1,10 +1,7 @@
+use font::{pathfinder_impl::PathBuilder, Encoder, Glyph};
 use pathfinder_color::{ColorF, ColorU};
 use pathfinder_content::{
-    fill::FillRule,
-    stroke::{OutlineStrokeToFill},
-    outline::Outline,
-    pattern::{Pattern},
-    dash::OutlineDash,
+    dash::OutlineDash, fill::FillRule, outline::{self, Outline}, pattern::Pattern, stroke::OutlineStrokeToFill
 };
 use pathfinder_renderer::{
     scene::{DrawPath, ClipPath, ClipPathId, Scene},
@@ -15,19 +12,34 @@ use pathfinder_geometry::{
     rect::RectF, transform2d::Transform2F,
 };
 use pdf::object::{Ref, XObject, ImageXObject, Resolve, Resources, MaybeRef};
-use crate::backend;
+use crate::{backend, font::{FontRc, GlyphData}};
 
 use super::{FontEntry, TextSpan, DrawMode, Backend, Fill, Cache};
 use pdf::font::Font as PdfFont;
 use pdf::error::PdfError;
 use std::sync::Arc;
 
+struct OutlineBuilder {
+    
+}
+impl Encoder for OutlineBuilder {
+    type Pen<'a> = PathBuilder;
+
+    type GlyphRef = Outline;
+
+    fn encode_shape<'f, O, E>(&mut self, mut f: impl for<'a> FnMut(&'a mut Self::Pen<'a>) -> Result<O, E> + 'f) -> Result<(O, Self::GlyphRef), E> {
+        let mut builder = PathBuilder::new();
+        let o = f(&mut builder)?;
+        Ok((o, builder.finish()))
+    }
+}
+
 pub struct SceneBackend<'a> {
     scene: Scene,
-    cache: &'a mut Cache,
+    cache: &'a mut Cache<OutlineBuilder>,
 }
 impl<'a> SceneBackend<'a> {
-    pub fn new(cache: &'a mut Cache) -> Self {
+    pub fn new(cache: &'a mut Cache<OutlineBuilder>) -> Self {
         let scene = Scene::new();
         SceneBackend {
             scene,
@@ -48,6 +60,8 @@ impl<'a> SceneBackend<'a> {
     }
 }
 impl<'a> Backend for SceneBackend<'a> {
+    type Encoder = OutlineBuilder;
+    
     type ClipPathId = ClipPathId;
     fn create_clip_path(&mut self, path: Outline, fill_rule: FillRule, parent: Option<Self::ClipPathId>) -> Self::ClipPathId {
         let mut clip = ClipPath::new(path);
@@ -63,41 +77,35 @@ impl<'a> Backend for SceneBackend<'a> {
 
     }
     fn draw(&mut self, outline: &Outline, mode: &DrawMode, fill_rule: FillRule, transform: Transform2F, clip: Option<ClipPathId>) {
-        match mode {
-            DrawMode::Fill { fill } | DrawMode::FillStroke {fill, .. } => {
-                let paint = self.paint(fill.color, fill.alpha);
-                let mut draw_path = DrawPath::new(outline.clone().transformed(&transform), paint);
-                draw_path.set_clip_path(clip);
-                draw_path.set_fill_rule(fill_rule);
-                draw_path.set_blend_mode(blend_mode(fill.mode));
-                self.scene.push_draw_path(draw_path);
-            }
-            _ => {}
+        if let Some(fill) = mode.fill() {
+            let paint = self.paint(fill.color, fill.alpha);
+            let mut draw_path = DrawPath::new(outline.clone().transformed(&transform), paint);
+            draw_path.set_clip_path(clip);
+            draw_path.set_fill_rule(fill_rule);
+            draw_path.set_blend_mode(blend_mode(fill.mode));
+            self.scene.push_draw_path(draw_path);
         }
-        match mode {
-            DrawMode::Stroke { stroke, stroke_mode }| DrawMode::FillStroke { stroke, stroke_mode, .. } => {
-                let paint = self.paint(stroke.color, stroke.alpha);
-                let contour = match stroke_mode.dash_pattern {
-                    Some((ref pat, phase)) => {
-                        let dashed = OutlineDash::new(outline, &*pat, phase).into_outline();
-                        let mut stroke = OutlineStrokeToFill::new(&dashed, stroke_mode.style);
-                        stroke.offset();
-                        stroke.into_outline()
-                    }
-                    None => {
-                        let mut stroke = OutlineStrokeToFill::new(outline, stroke_mode.style);
-                        stroke.offset();
-                        stroke.into_outline()
-                    }
-                };
-                let mut draw_path = DrawPath::new(contour.transformed(&transform), paint);
-                draw_path.set_clip_path(clip);
-                draw_path.set_fill_rule(fill_rule);
+        if let Some((stroke, stroke_mode)) = mode.stroke() {
+            let paint = self.paint(stroke.color, stroke.alpha);
+            let contour = match stroke_mode.dash_pattern {
+                Some((ref pat, phase)) => {
+                    let dashed = OutlineDash::new(outline, &*pat, phase).into_outline();
+                    let mut stroke = OutlineStrokeToFill::new(&dashed, stroke_mode.style);
+                    stroke.offset();
+                    stroke.into_outline()
+                }
+                None => {
+                    let mut stroke = OutlineStrokeToFill::new(outline, stroke_mode.style);
+                    stroke.offset();
+                    stroke.into_outline()
+                }
+            };
+            let mut draw_path = DrawPath::new(contour.transformed(&transform), paint);
+            draw_path.set_clip_path(clip);
+            draw_path.set_fill_rule(fill_rule);
 
             draw_path.set_blend_mode(blend_mode(stroke.mode));
-                self.scene.push_draw_path(draw_path);
-            }
-            _ => {}
+            self.scene.push_draw_path(draw_path);
         }
     }
     fn draw_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resources: &Resources, transform: Transform2F, mode: backend::BlendMode, clip: Option<ClipPathId>,  resolve: &impl Resolve) {
@@ -124,10 +132,31 @@ impl<'a> Backend for SceneBackend<'a> {
 
     }
 
-    fn get_font(&mut self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
+    fn get_font(&mut self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry<Self::Encoder>>>, PdfError> {
         self.cache.get_font(font_ref, resolve)
     }
-    fn add_text(&mut self, span: TextSpan, clip: Option<Self::ClipPathId>) {}
+    fn add_text(&mut self, span: TextSpan<Self::Encoder>, clip: Option<Self::ClipPathId>) {}
+    
+    fn draw_glyph(&mut self, font: &FontRc<Self::Encoder>, glyph: &font::Glyph<Self::Encoder>, mode: &DrawMode, transform: Transform2F, clip: Option<Self::ClipPathId>) {
+        use font::Shape;
+        match glyph.shape {
+            Shape::Empty => {}
+            Shape::Simple(ref outline) => {
+                self.draw(outline, mode, FillRule::Winding, transform, clip)
+            }
+            Shape::Compound(ref parts) => {
+                for &(id, tr) in parts.iter() {
+                    use font::Font;
+                    match font.glyph(id) {
+                        Some(Glyph { shape: Shape::Simple(ref outline), .. }) => {
+                            self.draw(outline, mode, FillRule::Winding, transform * tr, clip);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn blend_mode(mode: backend::BlendMode) -> pathfinder_content::effects::BlendMode {

@@ -17,6 +17,7 @@ path = "../render"
 
 [dependencies.pathfinder_view]
 git = "https://github.com/s3bk/pathfinder_view"
+#path = "../../pathfinder_view"
 features = ["icon"]
 
 [dependencies]
@@ -28,8 +29,6 @@ pathfinder_content = { git = "https://github.com/servo/pathfinder" }
 pathfinder_export = { git = "https://github.com/servo/pathfinder" }
 log = { version = "0.4" }
 structopt = "0.3"
-font = { git = "https://github.com/pdf-rs/font" }
-pdf_encoding = "0.1"
 itertools = "*"
 image = "0.24.2"
 

@@ -1,7 +1,7 @@
 #[macro_use] extern crate log;
 
 use std::sync::Arc;
-use pathfinder_view::{Config, Interactive, Context, Emitter, view::{ElementState, KeyCode, KeyEvent, ModifiersState}};
+use pathfinder_view::{view::{ElementState, Key, KeyEvent, ModifiersState, NamedKey}, Config, Context, Emitter, Interactive};
 use pathfinder_renderer::scene::Scene;
 use pathfinder_geometry::vector::Vector2F;
 
@@ -73,15 +73,15 @@ where
         }
         if state.shift_key() {
             let page = ctx.page_nr();
-            match event.physical_key {
-                KeyCode::ArrowRight => ctx.goto_page(page + 10),
-                KeyCode::ArrowLeft =>  ctx.goto_page(page.saturating_sub(10)),
+            match event.logical_key {
+                Key::Named(NamedKey::ArrowRight) => ctx.goto_page(page + 10),
+                Key::Named(NamedKey::ArrowLeft) =>  ctx.goto_page(page.saturating_sub(10)),
                 _ => return
             }
         }
-        match event.physical_key {
-            KeyCode::ArrowRight | KeyCode::PageDown => ctx.next_page(),
-            KeyCode::ArrowLeft | KeyCode::PageUp => ctx.prev_page(),
+        match event.logical_key {
+            Key::Named(NamedKey::ArrowRight) | Key::Named(NamedKey::PageDown) => ctx.next_page(),
+            Key::Named(NamedKey::ArrowLeft) | Key::Named(NamedKey::PageUp) => ctx.prev_page(),
             _ => return
         }
     }

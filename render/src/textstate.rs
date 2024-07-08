@@ -2,7 +2,7 @@ use pathfinder_geometry::{
     vector::Vector2F,
     transform2d::Transform2F,
 };
-use font::GlyphId;
+use font::{Encoder, GlyphId};
 use crate::{BlendMode, backend::{FillMode, Stroke}};
 
 use super::{
@@ -20,21 +20,21 @@ use itertools::Either;
 use istring::SmallString;
 
 #[derive(Clone)]
-pub struct TextState {
+pub struct TextState<E: Encoder> {
     pub text_matrix: Transform2F, // tracks current glyph
     pub line_matrix: Transform2F, // tracks current line
     pub char_space: f32, // Character spacing
     pub word_space: f32, // Word spacing
     pub horiz_scale: f32, // Horizontal scaling
     pub leading: f32, // Leading
-    pub font_entry: Option<Arc<FontEntry>>, // Text font
+    pub font_entry: Option<Arc<FontEntry<E>>>, // Text font
     pub font_size: f32, // Text font size
     pub mode: TextMode, // Text rendering mode
     pub rise: f32, // Text rise
     pub knockout: f32, //Text knockout
 }
-impl TextState {
-    pub fn new() -> TextState {
+impl<E: Encoder> TextState<E> {
+    pub fn new() -> TextState<E> {
         TextState {
             text_matrix: Transform2F::default(),
             line_matrix: Transform2F::default(),
@@ -67,6 +67,7 @@ impl TextState {
         self.line_matrix = m;
     }
     pub fn draw_text<B: Backend>(&mut self, backend: &mut B, gs: &GraphicsState<B>, data: &[u8], span: &mut Span, fill_mode: BlendMode, stroke_mode: BlendMode) {
+        use font::Font;
         let e = match self.font_entry {
             Some(ref e) => e,
             None => {
@@ -135,10 +136,13 @@ impl TextState {
             }
             if let Some(glyph) = glyph {
                 let transform = gs.transform * self.text_matrix * tr;
+                match glyph.shape {
+                    
+                }
                 if glyph.path.len() != 0 {
                     span.bbox.add(gs.transform * transform * glyph.path.bounds());
                     if let Some(ref draw_mode) = draw_mode {
-                        backend.draw_glyph(&glyph, draw_mode, transform, gs.clip_path_id);
+                        backend.draw_glyph(&e.font, &glyph, draw_mode, transform, gs.clip_path_id);
                     }
                 }
             } else {
