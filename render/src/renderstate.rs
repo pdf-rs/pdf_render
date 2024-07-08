@@ -163,7 +163,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 self.current_outline.clear();
             }
             Op::Stroke => {
-                self.draw(&DrawMode::Stroke { 
+                self.draw(&DrawMode::Stroke {
                     stroke: FillMode {
                         color: self.graphics_state.stroke_color,
                         alpha: self.graphics_state.stroke_color_alpha,
@@ -259,7 +259,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 }
                 self.graphics_state.set_fill_alpha(gs.fill_alpha.unwrap_or(1.0));
                 self.graphics_state.set_stroke_alpha(gs.stroke_alpha.unwrap_or(1.0));
-                
+
                 if let Some((font_ref, size)) = gs.font {
                     let font = self.resolve.get(font_ref)?;
                     if let Some(e) = self.backend.get_font(&MaybeRef::Indirect(font), self.resolve)? {
@@ -465,7 +465,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             backend: self.backend,
             resolve: self.resolve,
         };
-        
+
         let ops = t!(form.operations(self.resolve));
         for (i, op) in ops.iter().enumerate() {
             debug!(" form op {}: {:?}", i, op);
@@ -532,13 +532,13 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                     }
                 }
                 ColorSpace::Named(ref name) => {
-                    resources.color_spaces.get(name).ok_or_else(|| 
+                    resources.color_spaces.get(name).ok_or_else(||
                         PdfError::Other { msg: format!("named color space {} not found", name) }
                     )?
                 }
                 _ => &**cs
             };
-            
+
             match *cs {
                 ColorSpace::Icc(_) => return Err(PdfError::Other { msg: format!("nested ICC color space") }),
                 ColorSpace::DeviceGray | ColorSpace::CalGray(_) => {

@@ -36,7 +36,7 @@ impl<E: Encoder + 'static> FontEntry<E> {
 
         let encoding = pdf_font.encoding().clone();
         let base_encoding = encoding.as_ref().map(|e| &e.base);
-        
+
         let to_unicode = t!(pdf_font.to_unicode(resolve).transpose());
         let mut font_codepoints = None;
 
@@ -61,7 +61,7 @@ impl<E: Encoder + 'static> FontEntry<E> {
                     .collect()
             }
         };
-        
+
         debug!("to_unicode: {:?}", to_unicode);
         let build_map = || -> HashMap<u16, (GlyphId, Option<SmallString>)> {
             if let Some(ref to_unicode) = to_unicode {
@@ -100,7 +100,7 @@ impl<E: Encoder + 'static> FontEntry<E> {
                 Default::default()
             }
         };
-        
+
         let mut cmap = if let Some(map) = pdf_font.cid_to_gid_map() {
             is_cid = true;
             debug!("gid to cid map: {:?}", map);
@@ -131,7 +131,7 @@ impl<E: Encoder + 'static> FontEntry<E> {
             build_map()
         } else {
             let mut cmap = HashMap::<u16, (GlyphId, Option<SmallString>)>::new();
-            
+
             let source_encoding = match base_encoding {
                 Some(BaseEncoding::StandardEncoding) => Some(Encoding::AdobeStandard),
                 Some(BaseEncoding::SymbolEncoding) => Some(Encoding::AdobeSymbol),
@@ -181,8 +181,8 @@ impl<E: Encoder + 'static> FontEntry<E> {
                         warn!("can't translate from text encoding {:?} to font encoding {:?}", base_encoding, font_encoding);
                     }
                     // assuming same encoding
-                    
-                    
+
+
                 }
             }
             if let Some(encoding) = encoding {
@@ -193,10 +193,10 @@ impl<E: Encoder + 'static> FontEntry<E> {
                     ).or_else(||
                         font.gid_for_codepoint(cp)
                     ).unwrap_or(GlyphId(cp));
-                    
+
                     let unicode = uni.map(|s| s.into())
                         .or_else(|| std::char::from_u32(0xf000 + gid.0).map(SmallString::from));
-                    
+
                     debug!("{} -> gid {:?}, unicode {:?}", cp, gid, unicode);
                     cmap.insert(cp as u16, (gid, unicode));
                 }
@@ -221,7 +221,7 @@ impl<E: Encoder + 'static> FontEntry<E> {
                     }
                 }
             }
-            
+
 
             if cmap.len() == 0 {
                 is_cid = true;
@@ -275,7 +275,7 @@ impl<E: Encoder + 'static> FontEntry<E> {
             by_gid.sort_unstable_by_key(|t| t.0.0);
 
             let reserved_in_used: HashSet<u32> = by_gid.iter().map(|(gid, _)| gid.0).filter(|gid| (0xE000 .. 0xF800).contains(gid)).collect();
-            
+
             if reserved_in_used.len() > 0 {
                 info!("gid in privated use area: {}", reserved_in_used.iter().format(", "));
             }
@@ -300,7 +300,7 @@ impl<E: Encoder + 'static> FontEntry<E> {
             for (gid, uni) in by_gid.iter_mut() {
                 if uni.is_none() && !(*font).is_empty_glyph(*gid) {
                     *uni = Some(std::char::from_u32(next_code).unwrap().into());
-                    
+
                     next_code += 1;
                     while reserved_in_used.contains(&next_code) {
                         next_code += 1;
@@ -317,7 +317,7 @@ impl<E: Encoder + 'static> FontEntry<E> {
             }
 
         }
-        
+
         Ok(FontEntry {
             font,
             pdf_font,

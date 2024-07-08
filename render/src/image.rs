@@ -1,7 +1,7 @@
 use image::{RgbaImage, ImageBuffer, Rgba};
 use pdf::object::*;
 use pdf::error::PdfError;
-use pathfinder_color::ColorU;
+use vello::peniko::Color;
 use std::borrow::Cow;
 use std::path::Path;
 use std::sync::Arc;
@@ -10,12 +10,12 @@ use crate::BlendMode;
 
 #[derive(Hash, PartialEq, Eq, Clone)]
 pub struct ImageData<'a> {
-    data: Cow<'a, [ColorU]>,
+    data: Cow<'a, [Color]>,
     width: u32,
     height: u32,
 }
 impl<'a> ImageData<'a> {
-    pub fn new(data: impl Into<Cow<'a, [ColorU]>>, width: u32, height: u32) -> Option<Self> {
+    pub fn new(data: impl Into<Cow<'a, [Color]>>, width: u32, height: u32) -> Option<Self> {
         let data = data.into();
         if width as usize * height as usize != data.len() {
             return None;
@@ -28,14 +28,14 @@ impl<'a> ImageData<'a> {
     pub fn height(&self) -> u32 {
         self.height
     }
-    pub fn data(&self) -> &[ColorU] {
+    pub fn data(&self) -> &[Color] {
         &*self.data
     }
-    pub fn into_data(self) -> Cow<'a, [ColorU]> {
+    pub fn into_data(self) -> Cow<'a, [Color]> {
         self.data
     }
     pub fn rgba_data(&self) -> &[u8] {
-        let ptr: *const ColorU = self.data.as_ptr();
+        let ptr: *const Color = self.data.as_ptr();
         let len = self.data.len();
         unsafe {
             std::slice::from_raw_parts(ptr.cast(), 4 * len)
@@ -51,13 +51,13 @@ impl<'a> ImageData<'a> {
             },
             1 => {
                 let mut data = Vec::with_capacity(self.data.len());
-                
+
                 for y in 0 .. self.width as usize {
                     for x in (0 .. self.height as usize).rev() {
                         data.push(self.data[x * self.width as usize + y]);
                     }
                 }
-                
+
                 ImageData::new(
                     data,
                     self.height,
@@ -65,7 +65,7 @@ impl<'a> ImageData<'a> {
                 ).unwrap()
             }
             2 => {
-                let data: Vec<ColorU> = self.data.iter().rev().cloned().collect();
+                let data: Vec<Color> = self.data.iter().rev().cloned().collect();
                 ImageData::new(
                     data,
                     self.width,
@@ -74,13 +74,13 @@ impl<'a> ImageData<'a> {
             }
             3 => {
                 let mut data = Vec::with_capacity(self.data.len());
-                
+
                 for y in (0 .. self.width as usize).rev() {
                     for x in 0 .. self.height as usize {
                         data.push(self.data[x * self.width as usize + y]);
                     }
                 }
-                
+
                 ImageData::new(
                     data,
                     self.height,
@@ -168,7 +168,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
     fn ex(b: u8, bits: u8) -> u8 {
         b & ((1 << bits) - 1)
     }
-    
+
     fn resolve_cs<'a>(cs: &'a ColorSpace, resources: &'a Resources) -> Option<&'a ColorSpace> {
         match cs {
             ColorSpace::Icc(icc) => {
@@ -208,7 +208,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
             match cs {
                 Some(&ColorSpace::DeviceGray) => {
                     assert_eq!(pixel_data.len(), pixel_count);
-                    pixel_data.iter().zip(alpha).map(|(&g, a)| ColorU { r: g, g: g, b: g, a }).collect()
+                    pixel_data.iter().zip(alpha).map(|(&g, a)| Color { r: g, g: g, b: g, a }).collect()
                 }
                 Some(&ColorSpace::Indexed(ref base, hival, ref lookup)) => {
                     match resolve_cs(&**base, resources) {
@@ -258,13 +258,13 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
                     }
                     pixel_data.iter().zip(alpha).map(|(&b, a)| {
                         let [r, g, b] = lut[b as usize];
-                        ColorU { r, g, b, a }
+                        Color { r, g, b, a }
                     }).collect()
                 }
                 None => {
                     info!("image has data/pixel ratio of 1, but no colorspace");
                     assert_eq!(pixel_data.len(), pixel_count);
-                    pixel_data.iter().zip(alpha).map(|(&g, a)| ColorU { r: g, g: g, b: g, a }).collect()
+                    pixel_data.iter().zip(alpha).map(|(&g, a)| Color { r: g, g: g, b: g, a }).collect()
                 }
                 _ => unimplemented!("cs={:?}", cs),
             }
@@ -297,16 +297,16 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
     }
 }
 
-fn rgb2rgba(c: &[u8], a: u8, mode: BlendMode) -> ColorU {
+fn rgb2rgba(c: &[u8], a: u8, mode: BlendMode) -> Color {
     match mode {
         BlendMode::Overlay => {
-            ColorU { r: c[0], g: c[1], b: c[2], a }
+            Color { r: c[0], g: c[1], b: c[2], a }
         }
         BlendMode::Darken => {
-            ColorU { r: 255 - c[0], g: 255 - c[1], b: 255 - c[2], a }
+            Color { r: 255 - c[0], g: 255 - c[1], b: 255 - c[2], a }
         }
     }
-    
+
 }
 fn rgb2rgb(r: f32, g: f32, b: f32, mode: BlendMode) -> [u8; 3] {
     match mode {
@@ -317,7 +317,7 @@ fn rgb2rgb(r: f32, g: f32, b: f32, mode: BlendMode) -> [u8; 3] {
             [ 255 - (255. * r) as u8, 255 - (255. * g) as u8, 255 - (255. * b) as u8 ]
         }
     }
-    
+
 }
 /*
 red = 1.0 – min ( 1.0, cyan + black )
@@ -345,12 +345,12 @@ fn cmyk2rgb([c, m, y, k]: [u8; 4], mode: BlendMode) -> [u8; 3] {
 }
 
 #[inline]
-fn cmyk2color(cmyk: [u8; 4], a: u8, mode: BlendMode) -> ColorU {
+fn cmyk2color(cmyk: [u8; 4], a: u8, mode: BlendMode) -> Color {
     let [r, g, b] = cmyk2rgb(cmyk, mode);
-    ColorU::new(r, g, b, a)
+    Color::new(r, g, b, a)
 }
 
-fn cmyk2color_arr(data: &[u8], alpha: impl Iterator<Item=u8>, mode: BlendMode) -> Vec<ColorU> {
+fn cmyk2color_arr(data: &[u8], alpha: impl Iterator<Item=u8>, mode: BlendMode) -> Vec<Color> {
     data.chunks_exact(4).zip(alpha).map(|(c, a)| {
         let mut buf = [0; 4];
         buf.copy_from_slice(c);

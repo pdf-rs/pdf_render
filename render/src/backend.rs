@@ -1,14 +1,11 @@
-use pathfinder_geometry::{
-    transform2d::Transform2F,
-    rect::RectF,
-};
+use vello::kurbo::{Affine, Vec2 as Vector2F, Rect as RectF};
+
 use pathfinder_content::{
-    fill::FillRule,
-    stroke::{StrokeStyle},
     outline::Outline,
 };
 
-use pdf::{content::{Op, Point, ViewRect}, object::{ImageXObject, MaybeRef, Ref, Resolve, Resources, XObject}};
+use vello::peniko::{Fill as FillRule, Style as StrokeStyle};
+use pdf::{object::{Ref, XObject, ImageXObject, Resolve, Resources, MaybeRef}, content::Op};
 use pdf::error::PdfError;
 use font::{Encoder, Glyph};
 use crate::font::FontRc;
@@ -28,14 +25,13 @@ pub trait Backend {
     type ClipPathId: Copy;
 
     fn create_clip_path(&mut self, path: Outline, fill_rule: FillRule, parent: Option<Self::ClipPathId>) -> Self::ClipPathId;
-    fn draw(&mut self, outline: &Outline, mode: &DrawMode, fill_rule: FillRule, transform: Transform2F, clip: Option<Self::ClipPathId>);
+    fn draw(&mut self, outline: &Outline, mode: &DrawMode, fill_rule: FillRule, transform: Affine, clip: Option<Self::ClipPathId>);
     fn set_view_box(&mut self, r: RectF);
-    fn draw_image(&mut self, xref: Ref<XObject>, im: &ImageXObject, resources: &Resources, transform: Transform2F, mode: BlendMode, clip: Option<Self::ClipPathId>, resolve: &impl Resolve);
-    fn draw_inline_image(&mut self, im: &Arc<ImageXObject>, resources: &Resources, transform: Transform2F, mode: BlendMode, clip: Option<Self::ClipPathId>, resolve: &impl Resolve);
-    fn draw_glyph(&mut self, font: &FontRc<Self::Encoder>, glyph: &Glyph<Self::Encoder>, mode: &DrawMode, transform: Transform2F, clip: Option<Self::ClipPathId>);
+    fn draw_image(&mut self, xref: Ref<XObject>, im: &ImageXObject, resources: &Resources, transform: Affine, mode: BlendMode, clip: Option<Self::ClipPathId>, resolve: &impl Resolve);
+    fn draw_inline_image(&mut self, im: &Arc<ImageXObject>, resources: &Resources, transform: Affine, mode: BlendMode, clip: Option<Self::ClipPathId>, resolve: &impl Resolve);
+    fn draw_glyph(&mut self, font: &FontRc<Self::Encoder>, glyph: &Glyph<Self::Encoder>, mode: &DrawMode, transform: Affine, clip: Option<Self::ClipPathId>);
     fn get_font(&mut self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry<Self::Encoder>>>, PdfError>;
     fn add_text(&mut self, span: TextSpan<Self::Encoder>, clip: Option<Self::ClipPathId>);
-
     /// The following functions are for debugging PDF files and not relevant for rendering them.
     fn bug_text_no_font(&mut self, data: &[u8]) {}
     fn bug_text_invisible(&mut self, text: &str) {}

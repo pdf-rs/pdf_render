@@ -6,7 +6,7 @@ macro_rules! assert_eq {
         if $a != $b {
             return Err(pdf::error::PdfError::Other { msg: format!("{} ({}) != {} ({})", stringify!($a), $a, stringify!($b), $b)});
         }
-        
+
     };
 }
 
@@ -38,13 +38,11 @@ use custom_debug_derive::Debug;
 
 use pdf::{object::*, content::TextMode};
 use pdf::error::PdfError;
-use pathfinder_geometry::{
-    vector::{Vector2F},
-    rect::RectF, transform2d::Transform2F,
-};
+use vello::kurbo::{Affine, Vec2 as Vector2F, Rect as RectF};
 use renderstate::RenderState;
 use std::sync::Arc;
 use itertools::Itertools;
+
 const SCALE: f32 = 25.4 / 72.;
 
 
@@ -80,22 +78,26 @@ pub fn page_bounds(page: &Page) -> RectF {
     let Rect { left, right, top, bottom } = page.media_box().expect("no media box");
     RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top)) * SCALE
 }
-pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Page, transform: Transform2F) -> Result<Transform2F, PdfError> {
+pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Page, transform: Affine) -> Result<Affine, PdfError> {
     let bounds = page_bounds(page);
-    let rotate = Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
+    let rotate = Affine::rotate(page.rotate as f32 * std::f32::consts::PI / 180.);
     let br = rotate * RectF::new(Vector2F::zero(), bounds.size());
-    let translate = Transform2F::from_translation(Vector2F::new(
+    let translate = Affine::translate(Vector2F::new(
         -br.min_x().min(br.max_x()),
         -br.min_y().min(br.max_y()),
     ));
     let view_box = transform * translate * br;
     backend.set_view_box(view_box);
-    
+
+
     let root_transformation = transform
         * translate
         * rotate
-        * Transform2F::row_major(SCALE, 0.0, -bounds.min_x(), 0.0, -SCALE, bounds.max_y());
-    
+        * Affine::new([
+            SCALE,   0.0,   -bounds.min_x(),
+            0.0,    -SCALE, bounds.max_y(),
+        ]);
+
     let resources = t!(page.resources());
 
     let contents = try_opt!(page.contents.as_ref());
@@ -112,7 +114,7 @@ pub fn render_pattern(backend: &mut impl Backend, pattern: &Pattern, resolve: &i
     match pattern {
         Pattern::Stream(ref dict, ref ops) => {
             let resources = resolve.get(dict.resources)?;
-            let mut renderstate = RenderState::new(backend, resolve, &*resources, Transform2F::default());
+            let mut renderstate = RenderState::new(backend, resolve, &*resources, Affine::default());
             for (i, op) in ops.iter().enumerate() {
                 debug!("op {}: {:?}", i, op);
                 renderstate.draw_op(op, i)?;
@@ -153,7 +155,7 @@ pub struct TextSpan<E: Encoder> {
     pub alpha: f32,
 
     // apply this transform to a text draw in at the origin with the given width and font-size
-    pub transform: Transform2F,
+    pub transform: Affine,
     pub mode: TextMode,
     pub op_nr: usize,
 }

@@ -7,12 +7,7 @@ use pdf::primitive::Name;
 use pdf::font::{Font as PdfFont};
 use pdf::error::{Result};
 
-use pathfinder_geometry::{
-    vector::{Vector2I},
-};
-use pathfinder_content::{
-    pattern::{Image},
-};
+use vello::peniko::{Image, Format};
 
 use crate::font::GlyphData;
 use crate::BlendMode;
@@ -27,7 +22,7 @@ pub struct ImageResult(pub Arc<Result<Image>>);
 impl ValueSize for ImageResult {
     fn size(&self) -> usize {
         match *self.0 {
-            Ok(ref im) => im.pixels().len() * 4,
+            Ok(ref im) => im.format.size_in_bytes(im.width, im.height).unwrap(),
             Err(_) => 1,
         }
     }
@@ -63,8 +58,8 @@ impl<E: Encoder + 'static> Cache<E> where E::GlyphRef: Send + Sync {
     }
     pub fn get_font(&mut self, pdf_font: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry<E>>>> {
         let mut error = None;
-        let val = self.fonts.get(&**pdf_font as *const PdfFont as usize, || 
-            match load_font(&mut self.encoder, pdf_font, resolve, &self.std) {
+        let val = self.fonts.get(&**pdf_font as *const PdfFont as usize, ||
+            match load_font(&mut self.encoder, resolve, &mut self.std) {
                 Ok(Some(f)) => Some(Arc::new(f)),
                 Ok(None) => {
                     if let Some(ref name) = pdf_font.name {
@@ -87,7 +82,7 @@ impl<E: Encoder + 'static> Cache<E> where E::GlyphRef: Send + Sync {
     pub fn get_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resources: &Resources, resolve: &impl Resolve, mode: BlendMode) -> ImageResult {
         self.images.get((xobject_ref, mode), ||
             ImageResult(Arc::new(load_image(im, resources, resolve, mode).map(|image|
-                Image::new(Vector2I::new(im.width as i32, im.height as i32), Arc::new(image.into_data().into()))
+                Image::new( Arc::new(image.into_data().into()), Format::Rgba8, im.width as i32, im.height as i32)
             )))
         )
     }

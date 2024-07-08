@@ -1,32 +1,33 @@
-[workspace]
-resolver = "2"
+[package]
+name = "matetext_render"
+version = "0.0.1"
+edition = "2021"
 
-members = [
-    "render",
-    "view",
-    "vview",
-    "examples/pdf2image",
-]
-[patch.crates-io]
-pathfinder_gl = { git = "https://github.com/servo/pathfinder" }
-pathfinder_webgl = { git = "https://github.com/servo/pathfinder" }
-pathfinder_gpu = { git = "https://github.com/servo/pathfinder" }
-pathfinder_content = { git = "https://github.com/servo/pathfinder" }
-pathfinder_color = { git = "https://github.com/servo/pathfinder" }
-pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
-pathfinder_renderer = { git = "https://github.com/servo/pathfinder" }
-pathfinder_resources = { git = "https://github.com/servo/pathfinder" }
-pathfinder_export = { git = "https://github.com/servo/pathfinder" }
-pathfinder_simd = { git = "https://github.com/servo/pathfinder" }
+[features]
+unstable = []
 
-[patch."https://github.com/servo/pathfinder"]
-pathfinder_gl = { path = "../pathfinder/gl" }
-pathfinder_webgl = { path = "../pathfinder/webgl" }
-pathfinder_gpu = { path = "../pathfinder/gpu" }
-pathfinder_content = { path = "../pathfinder/content" }
-pathfinder_color = { path = "../pathfinder/color" }
-pathfinder_renderer = { path = "../pathfinder/renderer" }
-pathfinder_resources = { path = "../pathfinder/resources" }
-pathfinder_export = { path = "../pathfinder/export" }
-pathfinder_simd = { path = "../pathfinder/simd" }
-pathfinder_geometry = { path = "../pathfinder/geometry" }
+[dependencies.pdf]
+default-features=false
+features = ["cache", "dump"]
+version = "0.9.0"
+
+[dependencies]
+log = "0.4"
+font = { git = "https://github.com/pdf-rs/font" }
+pdf_encoding = "0.4"
+itertools = "*"
+image = "0.24.2"
+instant = "*"
+custom_debug_derive = "*"
+istring = { version = "0.3.4" }
+once_cell = "*"
+serde_json = "*"
+matetext_view = { path = "../view" }
+vello = "0.2.0"
+globalcache = "0.2.2"
+# Depends on pathfinder_geometry
+# glyphmatcher = { git = "https://github.com/s3bk/glyphmatcher" }
+
+[dev-dependencies]
+criterion = "0.3"
+env_logger = "*"
