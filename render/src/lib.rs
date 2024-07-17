@@ -24,7 +24,8 @@ mod textstate;
 mod backend;
 pub mod tracer;
 mod image;
-mod scene;
+// mod pathfinder_backend;
+mod vello_backend;
 mod font;
 pub mod vello;
 
@@ -32,7 +33,7 @@ pub use cache::{Cache};
 use ::font::Encoder;
 pub use fontentry::{FontEntry};
 pub use backend::{DrawMode, Backend, BlendMode, FillMode};
-pub use scene::SceneBackend;
+// pub use pathfinder_backend::SceneBackend;
 pub use crate::image::{load_image, ImageData};
 use custom_debug_derive::Debug;
 
@@ -44,7 +45,6 @@ use std::sync::Arc;
 use itertools::Itertools;
 
 const SCALE: f32 = 25.4 / 72.;
-
 
 #[derive(Copy, Clone, Default)]
 pub struct BBox(Option<RectF>);
@@ -73,11 +73,11 @@ impl From<RectF> for BBox {
     }
 }
 
-
 pub fn page_bounds(page: &Page) -> RectF {
     let Rect { left, right, top, bottom } = page.media_box().expect("no media box");
     RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top)) * SCALE
 }
+
 pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Page, transform: Affine) -> Result<Affine, PdfError> {
     let bounds = page_bounds(page);
     let rotate = Affine::rotate(page.rotate as f32 * std::f32::consts::PI / 180.);

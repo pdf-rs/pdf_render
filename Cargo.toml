@@ -1,33 +1,9 @@
-[package]
-name = "matetext_render"
-version = "0.0.1"
-edition = "2021"
+[workspace]
+resolver = "2"
 
-[features]
-unstable = []
-
-[dependencies.pdf]
-default-features=false
-features = ["cache", "dump"]
-version = "0.9.0"
-
-[dependencies]
-log = "0.4"
-font = { git = "https://github.com/pdf-rs/font" }
-pdf_encoding = "0.4"
-itertools = "*"
-image = "0.24.2"
-instant = "*"
-custom_debug_derive = "*"
-istring = { version = "0.3.4" }
-once_cell = "*"
-serde_json = "*"
-matetext_view = { path = "../view" }
-vello = "0.2.0"
-globalcache = "0.2.2"
-# Depends on pathfinder_geometry
-# glyphmatcher = { git = "https://github.com/s3bk/glyphmatcher" }
-
-[dev-dependencies]
-criterion = "0.3"
-env_logger = "*"
+members = [
+    "render",
+    # "view",
+    # "vview",
+    # "examples/pdf2image",
+]
