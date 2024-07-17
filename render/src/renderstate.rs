@@ -5,17 +5,16 @@ use pdf::primitive::{Primitive, Dictionary};
 use pdf::content::{Op, Matrix, Point, Rect, Color, Rgb, Cmyk, Winding, FormXObject};
 use pdf::error::{PdfError, Result};
 use pdf::content::TextDrawAdjusted;
-use crate::backend::{Backend, BlendMode, Stroke, FillMode};
+use crate::backend::{Backend, BlendMode, FillMode};
 
-use pathfinder_geometry::{
-    vector::Vector2F,
-    rect::RectF, transform2d::Transform2F,
-};
+use vello::kurbo::{Vec2 as Vector2F, Rect as RectF, Affine};
+
 use pathfinder_content::{
-    fill::FillRule,
-    stroke::{LineCap, LineJoin, StrokeStyle},
     outline::{Outline, Contour},
 };
+use vello::peniko::{Fill as FillRule, Style as StrokeStyle};
+use vello::kurbo::{Cap as LineCap, Stroke};
+
 use super::{
     graphicsstate::GraphicsState,
     textstate::{TextState, Span},
@@ -35,18 +34,18 @@ impl Cvt for Point {
     }
 }
 impl Cvt for Matrix {
-    type Out = Transform2F;
+    type Out = Affine;
     fn cvt(self) -> Self::Out {
         let Matrix { a, b, c, d, e, f } = self;
-        Transform2F::row_major(a, c, e, b, d, f)
+        Affine::new(vec![a, c, e, b, d, f])
     }
 }
 impl Cvt for Rect {
     type Out = RectF;
     fn cvt(self) -> Self::Out {
         RectF::new(
-            Vector2F::new(self.x, self.y),
-            Vector2F::new(self.width, self.height)
+            self.x, self.y,
+            self.x+ self.width, self.y + self.height
         )
     }
 }
@@ -86,7 +85,7 @@ pub struct RenderState<'a, R: Resolve, B: Backend> {
 }
 
 impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
-    pub fn new(backend: &'a mut B, resolve: &'a R, resources: &'a Resources, root_transformation: Transform2F) -> Self {
+    pub fn new(backend: &'a mut B, resolve: &'a R, resources: &'a Resources, root_transformation: Affine) -> Self {
         let graphics_state = GraphicsState {
             transform: root_transformation,
             fill_color: Fill::black(),
@@ -102,11 +101,11 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             clip_path_rect: None,
             fill_color_space: &ColorSpace::DeviceRGB,
             stroke_color_space: &ColorSpace::DeviceRGB,
-            stroke_style: StrokeStyle {
-                line_cap: LineCap::Butt,
-                line_join: LineJoin::Miter(1.0),
-                line_width: 1.0,
-            },
+            stroke_style: StrokeStyle::Stroke(
+                Stroke::new(1.0)
+                    .with_caps(LineCap::Butt)
+                    .with_join(LineJoin::Miter)
+            ) ,
             dash_pattern: None,
             overprint_fill: false,
             overprint_stroke: false,
@@ -164,12 +163,12 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             }
             Op::Stroke => {
                 self.draw(&DrawMode::Stroke {
-                    stroke: FillMode {
+                    fillMode: FillMode {
                         color: self.graphics_state.stroke_color,
                         alpha: self.graphics_state.stroke_color_alpha,
                         mode: self.blend_mode_stroke(),
                     },
-                    stroke_mode: self.graphics_state.stroke()},
+                    stroke: self.graphics_state.stroke()},
                     FillRule::Winding
                 );
             },
@@ -180,12 +179,12 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                         alpha: self.graphics_state.fill_color_alpha,
                         mode: self.blend_mode_fill(),
                     },
-                    stroke: FillMode {
+                    fillMode: FillMode {
                         color: self.graphics_state.stroke_color,
                         alpha: self.graphics_state.stroke_color_alpha,
                         mode: self.blend_mode_stroke()
                     },
-                    stroke_mode: self.graphics_state.stroke()
+                    stroke: self.graphics_state.stroke()
                 }, winding.cvt());
             }
             Op::Fill { winding } => {
@@ -401,9 +400,9 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
 
         inner(&mut self.backend, &mut self.text_state, &mut self.graphics_state, &mut span);
 
-        let transform = self.graphics_state.transform * tm * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
+        let transform = self.graphics_state.transform * tm * Affine::scale_non_uniform(1.0, -1.0);
         let p1 = origin;
-        let p2 = (tm * Transform2F::from_translation(Vector2F::new(span.width, self.text_state.font_size))).translation();
+        let p2 = (tm * Affine::translate(Vector2F::new(span.width, self.text_state.font_size))).translation();
         let clip = self.graphics_state.clip_path_id;
 
         debug!("text {}", span.text);

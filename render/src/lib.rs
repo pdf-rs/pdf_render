@@ -27,7 +27,7 @@ mod image;
 // mod pathfinder_backend;
 mod vello_backend;
 mod font;
-pub mod vello;
+pub mod vello_backend;
 
 pub use cache::{Cache};
 use ::font::Encoder;
@@ -39,7 +39,7 @@ use custom_debug_derive::Debug;
 
 use pdf::{object::*, content::TextMode};
 use pdf::error::PdfError;
-use vello::kurbo::{Affine, Vec2 as Vector2F, Rect as RectF};
+use vello_backend::kurbo::{Affine, Vec2 as Vector2F, Rect as RectF};
 use renderstate::RenderState;
 use std::sync::Arc;
 use itertools::Itertools;

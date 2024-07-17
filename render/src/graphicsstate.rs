@@ -1,12 +1,13 @@
-use pathfinder_content::stroke::StrokeStyle;
 use pathfinder_renderer::{paint::PaintId, scene::ClipPath};
 use pdf::object::ColorSpace;
 
-use pathfinder_geometry::{transform2d::Transform2F, rect::RectF};
-use crate::{Fill, backend::Stroke, Backend};
+use crate::{Fill, Backend};
+use vello::kurbo::{Rect as RectF, Affine};
+use vello::kurbo::Stroke;
+use vello::peniko::Style as StrokeStyle;
 
 pub struct GraphicsState<'a, B: Backend> {
-    pub transform: Transform2F,
+    pub transform: Affine,
     pub stroke_style: StrokeStyle,
 
     pub fill_color: Fill,
@@ -68,9 +69,10 @@ impl<'a, B: Backend> GraphicsState<'a, B> {
         }
     }
     pub fn stroke(&self) -> Stroke {
-        Stroke {
-            style: self.stroke_style,
-            dash_pattern: self.dash_pattern.map(|(a, p)| (a.into(), p))
+        if let Some((pattern, offset)) = self.dash_pattern {
+            self.stroke.with_dashes(offset, pattern);
         }
+
+        return self.stroke.clone();
     }
 }

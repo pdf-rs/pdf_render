@@ -1,14 +1,13 @@
 use vello::kurbo::{Affine, Rect as RectF, Stroke};
 
 use pathfinder_content::{
-    outline::Outline,
+    outline::Outline
 };
 
-use vello::peniko::{Fill as FillRule, Style as StrokeStyle};
+use vello::peniko::{Fill as FillRule};
 use pdf::{object::{Ref, XObject, ImageXObject, Resolve, Resources, MaybeRef}, content::Op};
 use pdf::error::PdfError;
-use font::{Encoder, Glyph};
-use crate::font::FontRc;
+use font::Glyph;
 
 use super::{FontEntry, TextSpan, Fill};
 use pdf::font::Font as PdfFont;
@@ -21,7 +20,7 @@ pub enum BlendMode {
 }
 
 pub trait Backend {
-    type Encoder: Encoder;
+    // type Encoder: Encoder;
     type ClipPathId: Copy;
 
     fn create_clip_path(&mut self, path: Outline, fill_rule: FillRule, parent: Option<Self::ClipPathId>) -> Self::ClipPathId;
@@ -51,8 +50,8 @@ pub struct FillMode {
 }
 pub enum DrawMode {
     Fill { fill: FillMode },
-    Stroke { fillMode: FillMode, stoke: Stroke },
-    FillStroke { fill: FillMode, fillMode: FillMode, stoke: Stroke },
+    Stroke { fillMode: FillMode, stroke: Stroke },
+    FillStroke { fill: FillMode, fillMode: FillMode, stroke: Stroke },
 }
 
 impl DrawMode {
@@ -64,7 +63,7 @@ impl DrawMode {
     }
     pub fn stroke(&self) -> Option<(&FillMode, &Stroke)> {
         match self {
-            DrawMode::FillStroke { fillMode, stoke, .. } | DrawMode::Stroke { fillMode, stoke } => Some((fillMode, stoke)),
+            DrawMode::FillStroke { fillMode, stroke, .. } | DrawMode::Stroke { fillMode, stroke } => Some((fillMode, stroke)),
             _ => None
         }
     }
