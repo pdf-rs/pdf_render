@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use font::{Font, CffFont, Encoder, FontVariant, GlyphId, OpenTypeFont, TrueTypeFont, Type1Font};
+use font::{Font, CffFont, Encoder, FontVariant, GlyphId};
 
 #[cfg(feature="glyphmatcher")]
 use glyphmatcher::FontDb;

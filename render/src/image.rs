@@ -34,13 +34,15 @@ impl<'a> ImageData<'a> {
     pub fn into_data(self) -> Cow<'a, [Color]> {
         self.data
     }
-    pub fn rgba_data(&self) -> &[u8] {
+    
+    pub fn rgba_data(&self) -> Vec<u8> {
         let ptr: *const Color = self.data.as_ptr();
         let len = self.data.len();
         unsafe {
-            std::slice::from_raw_parts(ptr.cast(), 4 * len)
+            std::slice::from_raw_parts(ptr.cast(), 4 * len).to_vec()
         }
     }
+
     /// angle must be in range 0 .. 4
     pub fn rotate(&self, angle: u8) -> ImageData<'_> {
         match angle {
@@ -285,7 +287,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
     };
 
     let data_len = data.len();
-    match ImageData::new(data, image.width as u32, image.height as u32) {
+    match ImageData::new(data, image.width, image.height) {
         Some(data) => Ok(data),
         None => {
             warn!("image width: {}", image.width);
@@ -347,7 +349,7 @@ fn cmyk2rgb([c, m, y, k]: [u8; 4], mode: BlendMode) -> [u8; 3] {
 #[inline]
 fn cmyk2color(cmyk: [u8; 4], a: u8, mode: BlendMode) -> Color {
     let [r, g, b] = cmyk2rgb(cmyk, mode);
-    Color::new(r, g, b, a)
+    Color::rgba8(r, g, b, a)
 }
 
 fn cmyk2color_arr(data: &[u8], alpha: impl Iterator<Item=u8>, mode: BlendMode) -> Vec<Color> {

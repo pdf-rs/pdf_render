@@ -1,3 +1,4 @@
+use font::Encoder;
 use pathfinder_content::outline::ContourIterFlags;
 use pathfinder_renderer::scene::ClipPath;
 use pdf::object::*;
@@ -12,8 +13,8 @@ use vello::kurbo::{Vec2 as Vector2F, Rect as RectF, Affine};
 use pathfinder_content::{
     outline::{Outline, Contour},
 };
-use vello::peniko::{Fill as FillRule, Style as StrokeStyle};
-use vello::kurbo::{Cap as LineCap, Stroke};
+use vello::peniko::{Fill as FillRule};
+use crate::backend::{StrokeStyle, LineCap, LineJoin};
 
 use super::{
     graphicsstate::GraphicsState,
@@ -53,7 +54,7 @@ impl Cvt for Winding {
     type Out = FillRule;
     fn cvt(self) -> Self::Out {
         match self {
-            Winding::NonZero => FillRule::Winding,
+            Winding::NonZero => FillRule::NonZero,
             Winding::EvenOdd => FillRule::EvenOdd
         }
     }
@@ -73,10 +74,10 @@ impl Cvt for Cmyk {
     }
 }
 
-pub struct RenderState<'a, R: Resolve, B: Backend> {
+pub struct RenderState<'a, R: Resolve, B: Backend, E: Encoder> {
     graphics_state: GraphicsState<'a, B>,
-    text_state: TextState,
-    stack: Vec<(GraphicsState<'a, B>, TextState)>,
+    text_state: TextState<E>,
+    stack: Vec<(GraphicsState<'a, B>, TextState<E>)>,
     current_outline: Outline,
     current_contour: Contour,
     resolve: &'a R,
@@ -84,7 +85,7 @@ pub struct RenderState<'a, R: Resolve, B: Backend> {
     backend: &'a mut B,
 }
 
-impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
+impl<'a, R: Resolve, B: Backend, E: Encoder> RenderState<'a, R, B, E> {
     pub fn new(backend: &'a mut B, resolve: &'a R, resources: &'a Resources, root_transformation: Affine) -> Self {
         let graphics_state = GraphicsState {
             transform: root_transformation,
@@ -101,11 +102,12 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             clip_path_rect: None,
             fill_color_space: &ColorSpace::DeviceRGB,
             stroke_color_space: &ColorSpace::DeviceRGB,
-            stroke_style: StrokeStyle::Stroke(
-                Stroke::new(1.0)
-                    .with_caps(LineCap::Butt)
-                    .with_join(LineJoin::Miter)
-            ) ,
+            stroke_style: StrokeStyle {
+                line_width: 1.0,
+                line_cap: LineCap::Butt,
+                line_join: LineJoin::Miter(1.0),
+                dash_pattern: None,
+            },
             dash_pattern: None,
             overprint_fill: false,
             overprint_stroke: false,
@@ -163,33 +165,34 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             }
             Op::Stroke => {
                 self.draw(&DrawMode::Stroke {
-                    fillMode: FillMode {
-                        color: self.graphics_state.stroke_color,
-                        alpha: self.graphics_state.stroke_color_alpha,
-                        mode: self.blend_mode_stroke(),
+                        fill_mode: FillMode {
+                            color: self.graphics_state.stroke_color,
+                            alpha: self.graphics_state.stroke_color_alpha,
+                            mode: self.blend_mode_stroke(),
+                        },
+                        stroke_style: self.graphics_state.stroke()
                     },
-                    stroke: self.graphics_state.stroke()},
-                    FillRule::Winding
+                    FillRule::NonZero
                 );
             },
             Op::FillAndStroke { winding } => {
                 self.draw(&DrawMode::FillStroke {
-                    fill: FillMode {
+                    fill_mode: FillMode {
                         color: self.graphics_state.fill_color,
                         alpha: self.graphics_state.fill_color_alpha,
                         mode: self.blend_mode_fill(),
                     },
-                    fillMode: FillMode {
+                    stroke_mode: FillMode {
                         color: self.graphics_state.stroke_color,
                         alpha: self.graphics_state.stroke_color_alpha,
                         mode: self.blend_mode_stroke()
                     },
-                    stroke: self.graphics_state.stroke()
+                    stroke_style: self.graphics_state.stroke()
                 }, winding.cvt());
             }
             Op::Fill { winding } => {
                 self.draw(&DrawMode::Fill {
-                    fill: FillMode {
+                    fill_mode: FillMode {
                         color: self.graphics_state.fill_color,
                         alpha: self.graphics_state.fill_color_alpha,
                         mode: self.blend_mode_fill(),

@@ -1,7 +1,5 @@
-use pathfinder_geometry::{
-    vector::Vector2F,
-    transform2d::Transform2F,
-};
+use vello::kurbo::{Vec2 as Vector2F,  Affine as Transform2F};
+
 use font::{Encoder, GlyphId};
 use crate::{BlendMode, backend::{FillMode, Stroke}};
 
@@ -53,13 +51,13 @@ impl<E: Encoder> TextState<E> {
         self.set_matrix(Transform2F::default());
     }
     pub fn translate(&mut self, v: Vector2F) {
-        let m = self.line_matrix * Transform2F::from_translation(v);
+        let m = self.line_matrix * Transform2F::translate(v);
         self.set_matrix(m);
     }
     
     // move to the next line
     pub fn next_line(&mut self) {
-        self.translate(Vector2F::new(0., -self.leading));
+        self.translate(Vector2F::new(0., -self.leading as f64));
     }
     // set text and line matrix
     pub fn set_matrix(&mut self, m: Transform2F) {
@@ -86,23 +84,23 @@ impl<E: Encoder> TextState<E> {
             (cid, e.cmap.get(&cid).map(|&(gid, ref uni)| (gid, uni.clone())))
         );
 
-        let fill = FillMode { color: gs.fill_color, alpha: gs.fill_color_alpha, mode: fill_mode };
-        let stroke = FillMode { color: gs.stroke_color, alpha: gs.stroke_color_alpha, mode: stroke_mode };
-        let stroke_mode = gs.stroke();
+        let fill_mode = FillMode { color: gs.fill_color, alpha: gs.fill_color_alpha, mode: fill_mode };
+        let stroke_mode = FillMode { color: gs.stroke_color, alpha: gs.stroke_color_alpha, mode: stroke_mode };
+        let stroke_style = gs.stroke();
 
         let draw_mode = match self.mode {
-            TextMode::Fill => Some(DrawMode::Fill { fill }),
-            TextMode::FillAndClip => Some(DrawMode::Fill { fill }),
-            TextMode::FillThenStroke => Some(DrawMode::FillStroke { fill, stroke, stroke_mode }),
+            TextMode::Fill => Some(DrawMode::Fill { fill_mode }),
+            TextMode::FillAndClip => Some(DrawMode::Fill { fill_mode }),
+            TextMode::FillThenStroke => Some(DrawMode::FillStroke { fill_mode, stroke_style, stroke_mode }),
             TextMode::Invisible => None,
-            TextMode::Stroke => Some(DrawMode::Stroke { stroke, stroke_mode }),
-            TextMode::StrokeAndClip => Some(DrawMode::Stroke { stroke, stroke_mode }),
+            TextMode::Stroke => Some(DrawMode::Stroke { fill_mode, stroke_style}),
+            TextMode::StrokeAndClip => Some(DrawMode::Stroke { fill_mode, stroke_style }),
         };
         let e = self.font_entry.as_ref().expect("no font");
 
-        let tr = Transform2F::row_major(
-            self.horiz_scale * self.font_size, 0., 0.,
-            0., self.font_size, self.rise
+        let tr = Transform2F::new(
+            vec![self.horiz_scale * self.font_size, 0., 0.,
+            0., self.font_size, self.rise]
         ) * e.font.font_matrix();
         
         for (cid, t) in glyphs {
@@ -122,7 +120,7 @@ impl<E: Encoder> TextState<E> {
             
             if is_space {
                 let advance = (self.char_space + self.word_space) * self.horiz_scale + width;
-                self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
+                self.text_matrix = self.text_matrix * Transform2F::translate(Vector2F::new(advance, 0.));
 
                 let offset = span.text.len();
                 span.text.push(' ');
@@ -149,7 +147,7 @@ impl<E: Encoder> TextState<E> {
                 debug!("no glyph for gid {:?}", gid);
             }
             let advance = self.char_space * self.horiz_scale + width;
-            self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
+            self.text_matrix = self.text_matrix * Transform2F::translate(Vector2F::new(advance, 0.));
             
             let offset = span.text.len();
             if let Some(s) = unicode {
@@ -166,7 +164,7 @@ impl<E: Encoder> TextState<E> {
     pub fn advance(&mut self, delta: f32) -> f32 {
         //debug!("advance by {}", delta);
         let advance = delta * self.font_size * self.horiz_scale;
-        self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
+        self.text_matrix = self.text_matrix * Transform2F::translate(Vector2F::new(advance, 0.));
         advance
     }
 }

@@ -7,7 +7,7 @@ use pdf::primitive::Name;
 use pdf::font::{Font as PdfFont};
 use pdf::error::{Result};
 
-use vello::peniko::{Image, Format};
+use vello::peniko::{Blob, Format, Image};
 
 use crate::font::GlyphData;
 use crate::BlendMode;
@@ -59,7 +59,7 @@ impl<E: Encoder + 'static> Cache<E> where E::GlyphRef: Send + Sync {
     pub fn get_font(&mut self, pdf_font: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry<E>>>> {
         let mut error = None;
         let val = self.fonts.get(&**pdf_font as *const PdfFont as usize, ||
-            match load_font(&mut self.encoder, resolve, &mut self.std) {
+            match load_font(&mut self.encoder,pdf_font, resolve, &mut self.std) {
                 Ok(Some(f)) => Some(Arc::new(f)),
                 Ok(None) => {
                     if let Some(ref name) = pdf_font.name {
@@ -82,7 +82,7 @@ impl<E: Encoder + 'static> Cache<E> where E::GlyphRef: Send + Sync {
     pub fn get_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resources: &Resources, resolve: &impl Resolve, mode: BlendMode) -> ImageResult {
         self.images.get((xobject_ref, mode), ||
             ImageResult(Arc::new(load_image(im, resources, resolve, mode).map(|image|
-                Image::new( Arc::new(image.into_data().into()), Format::Rgba8, im.width as i32, im.height as i32)
+                Image::new(Blob::new( Arc::new(image.rgba_data())), Format::Rgba8, im.width, im.height)
             )))
         )
     }

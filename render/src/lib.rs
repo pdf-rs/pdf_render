@@ -25,9 +25,8 @@ mod backend;
 pub mod tracer;
 mod image;
 // mod pathfinder_backend;
-mod vello_backend;
-mod font;
 pub mod vello_backend;
+mod font;
 
 pub use cache::{Cache};
 use ::font::Encoder;
@@ -39,7 +38,7 @@ use custom_debug_derive::Debug;
 
 use pdf::{object::*, content::TextMode};
 use pdf::error::PdfError;
-use vello_backend::kurbo::{Affine, Vec2 as Vector2F, Rect as RectF};
+use vello::kurbo::{Affine, Vec2 as Vector2F, Rect as RectF};
 use renderstate::RenderState;
 use std::sync::Arc;
 use itertools::Itertools;
@@ -54,7 +53,7 @@ impl BBox {
     }
     pub fn add(&mut self, r2: RectF) {
         self.0 = Some(match self.0 {
-            Some(r1) => r1.union_rect(r2),
+            Some(r1) => r1.union(r2),
             None => r2
         });
     }
@@ -75,18 +74,19 @@ impl From<RectF> for BBox {
 
 pub fn page_bounds(page: &Page) -> RectF {
     let Rect { left, right, top, bottom } = page.media_box().expect("no media box");
-    RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top)) * SCALE
+    RectF::from_points((left as f64, bottom as f64), (right as f64, top as f64))
+        .scale_from_origin(SCALE as f64)
 }
 
 pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Page, transform: Affine) -> Result<Affine, PdfError> {
     let bounds = page_bounds(page);
-    let rotate = Affine::rotate(page.rotate as f32 * std::f32::consts::PI / 180.);
-    let br = rotate * RectF::new(Vector2F::zero(), bounds.size());
+    let rotate = Affine::rotate(page.rotate as f64 * std::f64::consts::PI / 180.);
+    let br = bounds.with_origin((0,0).into());
     let translate = Affine::translate(Vector2F::new(
         -br.min_x().min(br.max_x()),
         -br.min_y().min(br.max_y()),
     ));
-    let view_box = transform * translate * br;
+    let view_box = transform * translate * rotate;
     backend.set_view_box(view_box);
 
 
@@ -94,8 +94,8 @@ pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Pa
         * translate
         * rotate
         * Affine::new([
-            SCALE,   0.0,   -bounds.min_x(),
-            0.0,    -SCALE, bounds.max_y(),
+            SCALE as f64,   0.0,   -bounds.min_x(),
+            0.0,    -SCALE as f64, bounds.max_y(),
         ]);
 
     let resources = t!(page.resources());

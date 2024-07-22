@@ -94,7 +94,7 @@ impl<'a> Backend for VelloBackend<'a> {
         self.clip_paths.push((outline_to_bez(&path), style));
         id
     }
-    fn draw(&mut self, outline: &pathfinder_content::outline::Outline, mode: &crate::DrawMode, style: FillRule, transform: Affine, clip: Option<Self::ClipPathId>) {
+    fn draw(&mut self, outline: &pathfinder_content::outline::Outline, mode: &DrawMode, style: FillRule, transform: Affine, clip: Option<Self::ClipPathId>) {
         self.set_clip_path(clip);
 
         if let Some(fill) = mode.fill() {
