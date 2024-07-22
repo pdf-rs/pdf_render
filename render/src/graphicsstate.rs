@@ -3,7 +3,6 @@ use pdf::object::ColorSpace;
 
 use crate::{Fill, Backend, backend::StrokeStyle};
 use vello::kurbo::{Rect as RectF, Affine};
-use vello::kurbo::Stroke;
 
 pub struct GraphicsState<'a, B: Backend> {
     pub transform: Affine,

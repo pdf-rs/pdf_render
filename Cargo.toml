@@ -4,6 +4,6 @@ resolver = "2"
 members = [
     "render",
     # "view",
-    # "vview",
+    "vview",
     # "examples/pdf2image",
 ]

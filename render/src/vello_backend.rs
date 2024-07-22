@@ -1,18 +1,21 @@
+use font::Encoder;
 use pathfinder_content::{outline::{ContourIterFlags, Outline}, segment::{Segment, SegmentKind}};
-use vello::kurbo::{Vec2 as Vector2F, Rect as RectF, Affine, BezPath};
+use vello::kurbo::{Rect as RectF, Affine, BezPath};
+use pathfinder_geometry::vector::Vector2F;
+
 use vello::peniko::{Fill as FillRule};
 use vello::{glyph::skrifa::color::Brush, peniko::{BrushRef, Color, Mix}, Scene};
 use crate::{backend::Backend, Cache, DrawMode, FillMode};
 
-pub struct VelloBackend<'a> {
+pub struct VelloBackend<'a, E: Encoder> {
     scene: Scene,
     clip_paths: Vec<(BezPath, FillRule)>,
-    cache: &'a mut Cache,
+    cache: &'a mut Cache<E>,
     current_clip_path: Option<usize>
 }
 
-impl<'a> VelloBackend<'a> {
-    pub fn new(cache: &'a mut Cache) -> Self {
+impl<'a, E: Encoder> VelloBackend<'a, E> {
+    pub fn new(cache: &'a mut Cache<E>) -> Self {
         VelloBackend {
             scene: Scene::new(),
             clip_paths: vec![],
@@ -40,7 +43,7 @@ impl<'a> VelloBackend<'a> {
 fn outline_to_bez(outline: &Outline) -> BezPath {
     use vello::kurbo::Point;
     fn point(v: Vector2F) -> Point {
-        Point::new(v.x, v.y)
+        Point::new(v.x() as f64, v.y() as f64)
     }
 
     let mut bez = BezPath::new();
@@ -87,7 +90,7 @@ fn convert_fill(fill: &FillMode) -> BrushRef<'static> {
     }
 }
 
-impl<'a> Backend for VelloBackend<'a> {
+impl<'a, E: Encoder> Backend for VelloBackend<'a, E> {
     type ClipPathId = usize;
     fn create_clip_path(&mut self, path: Outline, style: FillRule, parent: Option<Self::ClipPathId>) -> Self::ClipPathId {
         let id = self.clip_paths.len();
@@ -105,10 +108,11 @@ impl<'a> Backend for VelloBackend<'a> {
         if let Some((fillMode, stroke)) = mode.stroke() {
             let brush = convert_fill(fillMode);
             let shape = outline_to_bez(outline);
+            //TODO: map the stoke to Vello's stroke
             self.scene.stroke(stroke, transform, brush, None, &shape);
         }
     }
-    fn add_text(&mut self, span: crate::TextSpan, clip: Option<Self::ClipPathId>) {
+    fn add_text(&mut self, span: crate::TextSpan<E>, clip: Option<Self::ClipPathId>) {
     }
 
     fn set_view_box(&mut self, r: RectF) {
@@ -120,7 +124,7 @@ impl<'a> Backend for VelloBackend<'a> {
     fn draw_inline_image(&mut self, im: &std::sync::Arc<pdf::object::ImageXObject>, resources: &pdf::object::Resources, transform: Affine, mode: crate::BlendMode, clip: Option<Self::ClipPathId>, resolve: &impl pdf::object::Resolve) {
 
     }
-    fn get_font(&mut self, font_ref: &pdf::object::MaybeRef<pdf::font::Font>, resolve: &impl pdf::object::Resolve) -> Result<Option<std::sync::Arc<crate::FontEntry>>, pdf::PdfError> {
+    fn get_font(&mut self, font_ref: &pdf::object::MaybeRef<pdf::font::Font>, resolve: &impl pdf::object::Resolve) -> Result<Option<std::sync::Arc<crate::FontEntry<E>>>, pdf::PdfError> {
         self.cache.get_font(font_ref, resolve)
     }
 }

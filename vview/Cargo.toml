@@ -2,7 +2,7 @@
 name = "pdf_vview"
 version = "0.1.0"
 authors = ["Sebastian Köln <s3bk@protonmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [features]
 unstable = []
@@ -18,10 +18,10 @@ path = "../render"
 [dependencies]
 log = { version = "0.4" }
 structopt = "0.3"
-font = { git = "https://github.com/pdf-rs/font" }
+font = { git = "https://github.com/pdf-rs/font", branch = "vello"}
 itertools = "*"
 image = "0.24.2"
-vello = { path = "../../vello" }
+vello = { version = "0.2.0" }
 winit = "0.29.10"
 env_logger = "0.10.0"
 
@@ -30,3 +30,7 @@ criterion = "0.3"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "pdf_vview"
+path = "src/main.rs"

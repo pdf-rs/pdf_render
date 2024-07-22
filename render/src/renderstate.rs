@@ -38,7 +38,7 @@ impl Cvt for Matrix {
     type Out = Affine;
     fn cvt(self) -> Self::Out {
         let Matrix { a, b, c, d, e, f } = self;
-        Affine::new(vec![a, c, e, b, d, f])
+        Affine::new([a, c, e, b, d, f])
     }
 }
 impl Cvt for Rect {

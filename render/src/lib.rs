@@ -81,12 +81,12 @@ pub fn page_bounds(page: &Page) -> RectF {
 pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Page, transform: Affine) -> Result<Affine, PdfError> {
     let bounds = page_bounds(page);
     let rotate = Affine::rotate(page.rotate as f64 * std::f64::consts::PI / 180.);
-    let br = bounds.with_origin((0,0).into());
+    let br: RectF = bounds.with_origin((0,0).into());
     let translate = Affine::translate(Vector2F::new(
         -br.min_x().min(br.max_x()),
         -br.min_y().min(br.max_y()),
     ));
-    let view_box = transform * translate * rotate;
+    let view_box = transform * translate * br;
     backend.set_view_box(view_box);
 
 
