@@ -1,4 +1,3 @@
-use font::Encoder;
 use pathfinder_content::outline::ContourIterFlags;
 use pathfinder_renderer::scene::ClipPath;
 use pdf::object::*;
@@ -6,16 +5,17 @@ use pdf::primitive::{Primitive, Dictionary};
 use pdf::content::{Op, Matrix, Point, Rect, Color, Rgb, Cmyk, Winding, FormXObject};
 use pdf::error::{PdfError, Result};
 use pdf::content::TextDrawAdjusted;
-use crate::backend::{Backend, BlendMode, FillMode};
+use crate::backend::{Backend, BlendMode, Stroke, FillMode};
 
-use vello::kurbo::{Vec2 as Vector2F, Rect as RectF, Affine};
-
+use pathfinder_geometry::{
+    vector::Vector2F,
+    rect::RectF, transform2d::Transform2F,
+};
 use pathfinder_content::{
+    fill::FillRule,
+    stroke::{LineCap, LineJoin, StrokeStyle},
     outline::{Outline, Contour},
 };
-use vello::peniko::{Fill as FillRule};
-use crate::backend::{StrokeStyle, LineCap, LineJoin};
-
 use super::{
     graphicsstate::GraphicsState,
     textstate::{TextState, Span},
@@ -35,18 +35,18 @@ impl Cvt for Point {
     }
 }
 impl Cvt for Matrix {
-    type Out = Affine;
+    type Out = Transform2F;
     fn cvt(self) -> Self::Out {
         let Matrix { a, b, c, d, e, f } = self;
-        Affine::new([a, c, e, b, d, f])
+        Transform2F::row_major(a, c, e, b, d, f)
     }
 }
 impl Cvt for Rect {
     type Out = RectF;
     fn cvt(self) -> Self::Out {
         RectF::new(
-            self.x, self.y,
-            self.x+ self.width, self.y + self.height
+            Vector2F::new(self.x, self.y),
+            Vector2F::new(self.width, self.height)
         )
     }
 }
@@ -54,7 +54,7 @@ impl Cvt for Winding {
     type Out = FillRule;
     fn cvt(self) -> Self::Out {
         match self {
-            Winding::NonZero => FillRule::NonZero,
+            Winding::NonZero => FillRule::Winding,
             Winding::EvenOdd => FillRule::EvenOdd
         }
     }
@@ -74,10 +74,10 @@ impl Cvt for Cmyk {
     }
 }
 
-pub struct RenderState<'a, R: Resolve, B: Backend, E: Encoder> {
+pub struct RenderState<'a, R: Resolve, B: Backend> {
     graphics_state: GraphicsState<'a, B>,
-    text_state: TextState<E>,
-    stack: Vec<(GraphicsState<'a, B>, TextState<E>)>,
+    text_state: TextState,
+    stack: Vec<(GraphicsState<'a, B>, TextState)>,
     current_outline: Outline,
     current_contour: Contour,
     resolve: &'a R,
@@ -85,8 +85,8 @@ pub struct RenderState<'a, R: Resolve, B: Backend, E: Encoder> {
     backend: &'a mut B,
 }
 
-impl<'a, R: Resolve, B: Backend, E: Encoder> RenderState<'a, R, B, E> {
-    pub fn new(backend: &'a mut B, resolve: &'a R, resources: &'a Resources, root_transformation: Affine) -> Self {
+impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
+    pub fn new(backend: &'a mut B, resolve: &'a R, resources: &'a Resources, root_transformation: Transform2F) -> Self {
         let graphics_state = GraphicsState {
             transform: root_transformation,
             fill_color: Fill::black(),
@@ -103,10 +103,9 @@ impl<'a, R: Resolve, B: Backend, E: Encoder> RenderState<'a, R, B, E> {
             fill_color_space: &ColorSpace::DeviceRGB,
             stroke_color_space: &ColorSpace::DeviceRGB,
             stroke_style: StrokeStyle {
-                line_width: 1.0,
                 line_cap: LineCap::Butt,
                 line_join: LineJoin::Miter(1.0),
-                dash_pattern: None,
+                line_width: 1.0,
             },
             dash_pattern: None,
             overprint_fill: false,
@@ -164,35 +163,34 @@ impl<'a, R: Resolve, B: Backend, E: Encoder> RenderState<'a, R, B, E> {
                 self.current_outline.clear();
             }
             Op::Stroke => {
-                self.draw(&DrawMode::Stroke {
-                        fill_mode: FillMode {
-                            color: self.graphics_state.stroke_color,
-                            alpha: self.graphics_state.stroke_color_alpha,
-                            mode: self.blend_mode_stroke(),
-                        },
-                        stroke_style: self.graphics_state.stroke()
+                self.draw(&DrawMode::Stroke { 
+                    stroke: FillMode {
+                        color: self.graphics_state.stroke_color,
+                        alpha: self.graphics_state.stroke_color_alpha,
+                        mode: self.blend_mode_stroke(),
                     },
-                    FillRule::NonZero
+                    stroke_mode: self.graphics_state.stroke()},
+                    FillRule::Winding
                 );
             },
             Op::FillAndStroke { winding } => {
                 self.draw(&DrawMode::FillStroke {
-                    fill_mode: FillMode {
+                    fill: FillMode {
                         color: self.graphics_state.fill_color,
                         alpha: self.graphics_state.fill_color_alpha,
                         mode: self.blend_mode_fill(),
                     },
-                    stroke_mode: FillMode {
+                    stroke: FillMode {
                         color: self.graphics_state.stroke_color,
                         alpha: self.graphics_state.stroke_color_alpha,
                         mode: self.blend_mode_stroke()
                     },
-                    stroke_style: self.graphics_state.stroke()
+                    stroke_mode: self.graphics_state.stroke()
                 }, winding.cvt());
             }
             Op::Fill { winding } => {
                 self.draw(&DrawMode::Fill {
-                    fill_mode: FillMode {
+                    fill: FillMode {
                         color: self.graphics_state.fill_color,
                         alpha: self.graphics_state.fill_color_alpha,
                         mode: self.blend_mode_fill(),
@@ -261,7 +259,7 @@ impl<'a, R: Resolve, B: Backend, E: Encoder> RenderState<'a, R, B, E> {
                 }
                 self.graphics_state.set_fill_alpha(gs.fill_alpha.unwrap_or(1.0));
                 self.graphics_state.set_stroke_alpha(gs.stroke_alpha.unwrap_or(1.0));
-
+                
                 if let Some((font_ref, size)) = gs.font {
                     let font = self.resolve.get(font_ref)?;
                     if let Some(e) = self.backend.get_font(&MaybeRef::Indirect(font), self.resolve)? {
@@ -403,9 +401,9 @@ impl<'a, R: Resolve, B: Backend, E: Encoder> RenderState<'a, R, B, E> {
 
         inner(&mut self.backend, &mut self.text_state, &mut self.graphics_state, &mut span);
 
-        let transform = self.graphics_state.transform * tm * Affine::scale_non_uniform(1.0, -1.0);
+        let transform = self.graphics_state.transform * tm * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
         let p1 = origin;
-        let p2 = (tm * Affine::translate(Vector2F::new(span.width, self.text_state.font_size))).translation();
+        let p2 = (tm * Transform2F::from_translation(Vector2F::new(span.width, self.text_state.font_size))).translation();
         let clip = self.graphics_state.clip_path_id;
 
         debug!("text {}", span.text);
@@ -467,7 +465,7 @@ impl<'a, R: Resolve, B: Backend, E: Encoder> RenderState<'a, R, B, E> {
             backend: self.backend,
             resolve: self.resolve,
         };
-
+        
         let ops = t!(form.operations(self.resolve));
         for (i, op) in ops.iter().enumerate() {
             debug!(" form op {}: {:?}", i, op);
@@ -534,13 +532,13 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                     }
                 }
                 ColorSpace::Named(ref name) => {
-                    resources.color_spaces.get(name).ok_or_else(||
+                    resources.color_spaces.get(name).ok_or_else(|| 
                         PdfError::Other { msg: format!("named color space {} not found", name) }
                     )?
                 }
                 _ => &**cs
             };
-
+            
             match *cs {
                 ColorSpace::Icc(_) => return Err(PdfError::Other { msg: format!("nested ICC color space") }),
                 ColorSpace::DeviceGray | ColorSpace::CalGray(_) => {
