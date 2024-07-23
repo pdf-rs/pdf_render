@@ -20,7 +20,7 @@ use itertools::Either;
 use istring::SmallString;
 
 #[derive(Clone)]
-pub struct TextState<E: Encoder> {
+pub struct TextState<E: Encoder + Clone> {
     pub text_matrix: Transform2F, // tracks current glyph
     pub line_matrix: Transform2F, // tracks current line
     pub char_space: f32, // Character spacing
@@ -33,7 +33,7 @@ pub struct TextState<E: Encoder> {
     pub rise: f32, // Text rise
     pub knockout: f32, //Text knockout
 }
-impl<E: Encoder> TextState<E> {
+impl<E: Encoder + Clone> TextState<E> {
     pub fn new() -> TextState<E> {
         TextState {
             text_matrix: Transform2F::default(),
@@ -100,7 +100,7 @@ impl<E: Encoder> TextState<E> {
         };
         let e = self.font_entry.as_ref().expect("no font");
 
-        let tr = Transform2F::row_major(
+          let tr = Transform2F::row_major(
             self.horiz_scale * self.font_size, 0., 0.,
             0., self.font_size, self.rise
         ) * e.font.font_matrix();
@@ -136,15 +136,16 @@ impl<E: Encoder> TextState<E> {
             }
             if let Some(glyph) = glyph {
                 let transform = gs.transform * self.text_matrix * tr;
-                match glyph.shape {
+                //TODO: Draw glyph using new interface
+                // match glyph.shape {
                     
-                }
-                if glyph.path.len() != 0 {
-                    span.bbox.add(gs.transform * transform * glyph.path.bounds());
-                    if let Some(ref draw_mode) = draw_mode {
-                        backend.draw_glyph(&e.font, &glyph, draw_mode, transform, gs.clip_path_id);
-                    }
-                }
+                // }
+                // if glyph.path.len() != 0 {
+                //     span.bbox.add(gs.transform * transform * glyph.path.bounds());
+                //     if let Some(ref draw_mode) = draw_mode {
+                //         backend.draw_glyph(&e.font, &glyph, draw_mode, transform, gs.clip_path_id);
+                //     }
+                // }
             } else {
                 debug!("no glyph for gid {:?}", gid);
             }

@@ -1,13 +1,18 @@
 use pdf::object::ColorSpace;
-use pathfinder_content::{fill::FillRule, stroke::StrokeStyle};
-use vello::kurbo::BezPath;
+use pathfinder_content::{fill::FillRule, outline::Outline, stroke::StrokeStyle};
 use crate::{Fill, Backend, backend::Stroke};
 use pathfinder_geometry::{
     transform2d::Transform2F,
     rect::RectF,
 };
 
-type ClipPath = (BezPath, FillRule);
+
+/// Describes a path that can be used to clip other paths.
+#[derive(Clone, Debug)]
+pub struct ClipPath {
+    pub outline: Outline,
+    pub fill_rule: FillRule,
+}
 
 pub struct GraphicsState<'a, B: Backend> {
     pub transform: Transform2F,

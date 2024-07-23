@@ -1,13 +1,11 @@
-use font::Encoder;
 use pathfinder_content::outline::ContourIterFlags;
 use pdf::object::*;
 use pdf::primitive::{Primitive, Dictionary};
 use pdf::content::{Op, Matrix, Point, Rect, Color, Rgb, Cmyk, Winding, FormXObject};
 use pdf::error::{PdfError, Result};
 use pdf::content::TextDrawAdjusted;
-use vello::kurbo::BezPath;
 use crate::backend::{Backend, BlendMode, Stroke, FillMode};
-use crate::vello_backend::outline_to_bez;
+use crate::graphicsstate::ClipPath;
 
 use pathfinder_geometry::{
     vector::Vector2F,
@@ -76,10 +74,11 @@ impl Cvt for Cmyk {
     }
 }
 
-pub struct RenderState<'a, R: Resolve, B: Backend, E: Encoder> {
+pub struct RenderState<'a, R: Resolve, B: Backend>
+ {
     graphics_state: GraphicsState<'a, B>,
-    text_state: TextState<E>,
-    stack: Vec<(GraphicsState<'a, B>, TextState<E>)>,
+    text_state: TextState<B::Encoder>,
+    stack: Vec<(GraphicsState<'a, B>, TextState<B::Encoder>)>,
     current_outline: Outline,
     current_contour: Contour,
     resolve: &'a R,
@@ -87,7 +86,7 @@ pub struct RenderState<'a, R: Resolve, B: Backend, E: Encoder> {
     backend: &'a mut B,
 }
 
-impl<'a, R: Resolve, B: Backend, E: Encoder> RenderState<'a, R, B, E> {
+impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
     pub fn new(backend: &'a mut B, resolve: &'a R, resources: &'a Resources, root_transformation: Transform2F) -> Self {
         let graphics_state = GraphicsState {
             transform: root_transformation,
@@ -202,10 +201,11 @@ impl<'a, R: Resolve, B: Backend, E: Encoder> RenderState<'a, R, B, E> {
             Op::Shade { ref name } => {},
             Op::Clip { winding } => {
                 self.flush();
-                let mut path = self.current_outline.clone().transformed(&self.graphics_state.transform);
+                let mut path: Outline = self.current_outline.clone().transformed(&self.graphics_state.transform);
                 let clip_path_rect = to_rect(&path);
 
-                let (path, r, parent) = match (self.graphics_state.clip_path_rect, clip_path_rect, self.graphics_state.clip_path_id) {
+                let (path, r, parent) = 
+                match (self.graphics_state.clip_path_rect, clip_path_rect, self.graphics_state.clip_path_id) {
                     (Some(r1), Some(r2), Some(p)) => {
                         let r = r1.intersection(r2).unwrap_or_default();
                         (Outline::from_rect(r), Some(r), None)
@@ -229,8 +229,7 @@ impl<'a, R: Resolve, B: Backend, E: Encoder> RenderState<'a, R, B, E> {
 
                 let id = self.backend.create_clip_path(path.clone(), winding.cvt(), parent);
                 self.graphics_state.clip_path_id = Some(id);
-                let  clip = outline_to_bez(&path);
-                self.graphics_state.clip_path = Some((clip, winding.cvt()));
+                self.graphics_state.clip_path = Some(ClipPath { outline: path, fill_rule: winding.cvt()});
                 self.graphics_state.clip_path_rect = r;
             },
 
@@ -395,7 +394,7 @@ impl<'a, R: Resolve, B: Backend, E: Encoder> RenderState<'a, R, B, E> {
         }
     }
 
-    fn text(&mut self, inner: impl FnOnce(&mut B, &mut TextState<E>, &mut GraphicsState<B>, &mut Span), op_nr: usize) {
+    fn text(&mut self, inner: impl FnOnce(&mut B, &mut TextState<B::Encoder>, &mut GraphicsState<B>, &mut Span), op_nr: usize) {
         let mut span = Span::default();
         let tm = self.text_state.text_matrix;
         let origin = tm.translation();

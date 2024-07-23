@@ -6,15 +6,15 @@ use vello::{glyph::skrifa::color::Brush, kurbo::{Affine, BezPath, Cap}, peniko::
 
 use crate::{font::FontRc, Backend, Cache, DrawMode, FillMode};
 
-pub struct VelloBackend<'a, E: Encoder> {
+pub struct VelloBackend<'a> {
     scene: Scene,
     clip_paths: Vec<(BezPath, FillRule)>,
-    cache: &'a mut Cache<E>,
+    cache: &'a mut Cache<OutlineBuilder>,
     current_clip_path: Option<usize>
 }
 
-impl<'a, E:Encoder> VelloBackend<'a, E> {
-    pub fn new(cache: &'a mut Cache<E>) -> Self {
+impl<'a> VelloBackend<'a> {
+    pub fn new(cache: &'a mut Cache<OutlineBuilder>) -> Self {
         VelloBackend {
             scene: Scene::new(),
             clip_paths: vec![],
@@ -127,8 +127,13 @@ impl Encoder for OutlineBuilder {
     }
 }
 
+impl Clone for OutlineBuilder {
+    fn clone(&self) -> Self {
+        OutlineBuilder {}
+    }
+}
 
-impl<'a, E: Encoder> Backend for VelloBackend<'a, E> {
+impl<'a> Backend for VelloBackend<'a> {
     type Encoder = OutlineBuilder;
     type ClipPathId = usize;
 
