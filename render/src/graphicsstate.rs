@@ -1,21 +1,24 @@
-use pathfinder_renderer::{paint::PaintId, scene::ClipPath};
 use pdf::object::ColorSpace;
-use pathfinder_content::stroke::StrokeStyle;
+use pathfinder_content::{fill::FillRule, stroke::StrokeStyle};
+use vello::kurbo::BezPath;
 use crate::{Fill, Backend, backend::Stroke};
 use pathfinder_geometry::{
     transform2d::Transform2F,
     rect::RectF,
 };
+
+type ClipPath = (BezPath, FillRule);
+
 pub struct GraphicsState<'a, B: Backend> {
     pub transform: Transform2F,
     pub stroke_style: StrokeStyle,
 
     pub fill_color: Fill,
     pub fill_color_alpha: f32,
-    pub fill_paint: Option<PaintId>,
+    pub fill_paint: Option<usize>,
     pub stroke_color: Fill,
     pub stroke_color_alpha: f32,
-    pub stroke_paint: Option<PaintId>,
+    pub stroke_paint: Option<usize>,
     pub clip_path_id: Option<B::ClipPathId>,
     pub clip_path: Option<ClipPath>,
     pub clip_path_rect: Option<RectF>,

@@ -57,7 +57,7 @@ impl BBox {
     }
     pub fn add(&mut self, r2: RectF) {
         self.0 = Some(match self.0 {
-            Some(r1) => r1.union(r2),
+            Some(r1) => r1.union_rect(r2),
             None => r2
         });
     }

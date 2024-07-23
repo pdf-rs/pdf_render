@@ -1,4 +1,4 @@
-use font::{Encoder, Glyph};
+use font::{pathfinder_impl::PathBuilder, Encoder, Glyph};
 use pathfinder_color::{ColorF, ColorU};
 use pathfinder_content::{fill::FillRule, outline::{ContourIterFlags, Outline}, segment::{Segment, SegmentKind}};
 use pathfinder_geometry::vector::Vector2F;
@@ -39,7 +39,7 @@ impl<'a, E:Encoder> VelloBackend<'a, E> {
     }
 }
 
-fn outline_to_bez(outline: &Outline) -> BezPath {
+pub fn outline_to_bez(outline: &Outline) -> BezPath {
     use vello::kurbo::Point;
     fn point(v: Vector2F) -> Point {
         Point::new(v.x() as f64, v.y() as f64)
@@ -111,8 +111,27 @@ fn convert_stroke(stroke: &crate::backend::Stroke) -> vello::kurbo::Stroke {
     }
 }
 
+
+struct OutlineBuilder {
+}
+
+impl Encoder for OutlineBuilder {
+    type Pen<'a> = PathBuilder;
+
+    type GlyphRef = Outline;
+
+    fn encode_shape<'f, O, E>(&mut self, mut f: impl for<'a> FnMut(&'a mut Self::Pen<'a>) -> Result<O, E> + 'f) -> Result<(O, Self::GlyphRef), E> {
+        let mut builder = PathBuilder::new();
+        let o = f(&mut builder)?;
+        Ok((o, builder.finish()))
+    }
+}
+
+
 impl<'a, E: Encoder> Backend for VelloBackend<'a, E> {
+    type Encoder = OutlineBuilder;
     type ClipPathId = usize;
+
     fn create_clip_path(&mut self, path: Outline, fill_rule: FillRule, parent: Option<Self::ClipPathId>) -> Self::ClipPathId {
         let id = self.clip_paths.len();
         self.clip_paths.push((outline_to_bez(&path), fill_rule));
@@ -146,7 +165,7 @@ impl<'a, E: Encoder> Backend for VelloBackend<'a, E> {
             self.scene.stroke(&stroke, transform, brush, None, &shape);
         }
     }
-    fn add_text(&mut self, span: crate::TextSpan<E>, clip: Option<Self::ClipPathId>) {
+    fn add_text(&mut self, span: crate::TextSpan<OutlineBuilder>, clip: Option<Self::ClipPathId>) {
     }
 
     fn set_view_box(&mut self, r: pathfinder_geometry::rect::RectF) {
@@ -158,7 +177,7 @@ impl<'a, E: Encoder> Backend for VelloBackend<'a, E> {
     fn draw_inline_image(&mut self, im: &std::sync::Arc<pdf::object::ImageXObject>, resources: &pdf::object::Resources, transform: pathfinder_geometry::transform2d::Transform2F, mode: crate::BlendMode, clip: Option<Self::ClipPathId>, resolve: &impl pdf::object::Resolve) {
         
     }
-    fn get_font(&mut self, font_ref: &pdf::object::MaybeRef<pdf::font::Font>, resolve: &impl pdf::object::Resolve) -> Result<Option<std::sync::Arc<crate::FontEntry<E>>>, pdf::PdfError> {
+    fn get_font(&mut self, font_ref: &pdf::object::MaybeRef<pdf::font::Font>, resolve: &impl pdf::object::Resolve) -> Result<Option<std::sync::Arc<crate::FontEntry<OutlineBuilder>>>, pdf::PdfError> {
         self.cache.get_font(font_ref, resolve)
     }
     fn draw_glyph(&mut self, font: &FontRc<Self::Encoder>, glyph: &font::Glyph<Self::Encoder>, mode: &DrawMode, transform: pathfinder_geometry::transform2d::Transform2F, clip: Option<Self::ClipPathId>) {

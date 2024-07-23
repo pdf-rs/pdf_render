@@ -7,7 +7,7 @@ use pdf::any::AnySync;
 use pdf::object::PageRc;
 use pdf::PdfError;
 use pdf::backend::Backend;
-use pdf_render::vello::VelloBackend;
+use pdf_render::vello_backend::VelloBackend;
 use pdf_render::{Cache, SceneBackend, page_bounds, render_page};
 
 use vello::kurbo::Affine;
