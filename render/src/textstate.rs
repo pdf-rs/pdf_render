@@ -20,7 +20,7 @@ use itertools::Either;
 use istring::SmallString;
 
 #[derive(Clone)]
-pub struct TextState<E: Encoder + Clone> {
+pub struct TextState<E: Encoder + Clone + 'static> {
     pub text_matrix: Transform2F, // tracks current glyph
     pub line_matrix: Transform2F, // tracks current line
     pub char_space: f32, // Character spacing
@@ -33,7 +33,7 @@ pub struct TextState<E: Encoder + Clone> {
     pub rise: f32, // Text rise
     pub knockout: f32, //Text knockout
 }
-impl<E: Encoder + Clone> TextState<E> {
+impl<E: Encoder + Clone + 'static> TextState<E> {
     pub fn new() -> TextState<E> {
         TextState {
             text_matrix: Transform2F::default(),

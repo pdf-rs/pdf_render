@@ -146,7 +146,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
             let mask_height = mask.height as usize;
             let bits_per_component = mask.bits_per_component.ok_or_else(|| PdfError::Other { msg: format!("no bits per component")})?;
             let bits = mask_width * mask_height * bits_per_component as usize;
-            assert_eq!(data.len(), (bits + 7) / 8);
+            pdf_assert_eq!(data.len(), (bits + 7) / 8);
 
             let mut alpha: Data = match bits_per_component {
                 1 => data.iter().flat_map(|&b| (0..8).map(move |i| ex(b >> i, 1))).collect::<Vec<u8>>().into(),
@@ -207,7 +207,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
             // dbg!(&cs);
             match cs {
                 Some(&ColorSpace::DeviceGray) => {
-                    assert_eq!(pixel_data.len(), pixel_count);
+                    pdf_assert_eq!(pixel_data.len(), pixel_count);
                     pixel_data.iter().zip(alpha).map(|(&g, a)| ColorU { r: g, g: g, b: g, a }).collect()
                 }
                 Some(&ColorSpace::Indexed(ref base, hival, ref lookup)) => {
@@ -263,7 +263,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
                 }
                 None => {
                     info!("image has data/pixel ratio of 1, but no colorspace");
-                    assert_eq!(pixel_data.len(), pixel_count);
+                    pdf_assert_eq!(pixel_data.len(), pixel_count);
                     pixel_data.iter().zip(alpha).map(|(&g, a)| ColorU { r: g, g: g, b: g, a }).collect()
                 }
                 _ => unimplemented!("cs={:?}", cs),

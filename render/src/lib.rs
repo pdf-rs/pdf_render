@@ -1,7 +1,7 @@
 #[macro_use] extern crate log;
 #[macro_use] extern crate pdf;
 
-macro_rules! assert_eq {
+macro_rules! pdf_assert_eq {
     ($a:expr, $b:expr) => {
         if $a != $b {
             return Err(pdf::error::PdfError::Other { msg: format!("{} ({}) != {} ({})", stringify!($a), $a, stringify!($b), $b)});

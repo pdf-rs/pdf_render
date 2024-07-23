@@ -131,7 +131,6 @@ impl font::Encoder for GlyphData {
             path_data: self.encoding.path_data.len(),
             n_path_segments: self.encoding.n_path_segments,
         });
-        assert_eq!(self.offsets.len(), self.encoding.n_paths as usize);
 
         Ok((o, self.encoding.n_paths))
     }

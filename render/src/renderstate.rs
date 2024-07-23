@@ -568,7 +568,7 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                     Ok(cmyk2rgb((c, m, y, k), mode))
                 }
                 ColorSpace::DeviceN { ref names, ref alt, ref tint, ref attr } => {
-                    assert_eq!(args.len(), tint.input_dim());
+                    pdf_assert_eq!(args.len(), tint.input_dim());
                     let mut input = vec![0.; args.len()];
                     for (i, a) in input.iter_mut().zip(args.iter()) {
                         *i = a.as_number()?;
