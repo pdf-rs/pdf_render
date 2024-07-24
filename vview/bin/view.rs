@@ -18,7 +18,7 @@ pub fn main() -> Result<(), PdfError> {
     let args = Args::parse();
     let path = args.path;
 
-    let file = FileOptions::uncached().open(&path).unwrap();
+    let file = FileOptions::cached().open(&path).unwrap();
 
     let file_ctx = FileContext::new(file);
 

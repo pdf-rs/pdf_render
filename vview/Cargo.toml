@@ -16,6 +16,7 @@ features = ["dump"]
 path = "../render"
 
 [dependencies]
+pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
 log = { version = "0.4" }
 structopt = "0.3"
 font = { git = "https://github.com/pdf-rs/font", branch = "vello"}
@@ -26,6 +27,7 @@ winit = "0.30.0"
 env_logger = "0.10.0"
 pollster = "0.3.0"
 clap = { version = "4.5.10", features = ["derive"] }
+backtrace = "0.3.73"
 
 [dev-dependencies]
 criterion = "0.3"

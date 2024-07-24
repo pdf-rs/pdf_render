@@ -50,6 +50,8 @@ pub struct FillMode {
     pub alpha: f32,
     pub mode: BlendMode,
 }
+
+#[derive(Debug)]
 pub enum DrawMode {
     Fill { fill: FillMode },
     Stroke { stroke: FillMode, stroke_mode: Stroke },

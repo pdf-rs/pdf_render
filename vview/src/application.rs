@@ -1,3 +1,6 @@
+use pathfinder_geometry::transform2d::Transform2F;
+use pathfinder_geometry::vector::Vector2F;
+use vello::kurbo::{Affine, Line, Stroke};
 use vello::util::RenderContext;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, WindowEvent};
@@ -23,7 +26,6 @@ use vello::peniko::Color;
 use vello::util::RenderSurface;
 use vello::{Renderer, RendererOptions, Scene};
 use vello::wgpu;
-
 
 pub struct ActiveRenderState<'s> {
     // The fields MUST be in this order, so that the surface is dropped before the window
@@ -80,7 +82,7 @@ impl<'a> ApplicationHandler for App<'a> {
             .take()
             .unwrap_or_else(|| create_window(&event_loop));
 
-        let size = window.inner_size();
+        let size: winit::dpi::PhysicalSize<u32> = window.inner_size();
         let render_ctx = &mut self.render_ctx;
         let surface_future = render_ctx.create_surface(window.clone(), size.width, size.height, wgpu::PresentMode::AutoVsync);
         
@@ -90,7 +92,7 @@ impl<'a> ApplicationHandler for App<'a> {
         self.render_state = {
             self.renderers.resize_with(render_ctx.devices.len(), || None);
             self.renderers[surface.dev_id].get_or_insert_with(||create_vello_renderer(&render_ctx, &surface));
-             RenderState::Active(ActiveRenderState { window, surface })
+            RenderState::Active(ActiveRenderState { window, surface })
         };
         event_loop.set_control_flow(ControlFlow::Poll);
     }
@@ -156,14 +158,14 @@ impl<'a> ApplicationHandler for App<'a> {
                 
                 let mut scene = Scene::new();
                 if let Some(current) = self.view_ctx.get_current_mut() {
-                    if let Some(s) = current.render() {
+                    if let Some(s) = current.render(render_state.window.clone()) {
                         scene = s;
                     }
                 }
     
                 let antialiasing_method = vello::AaConfig::Area;
                 let render_params = vello::RenderParams {
-                    base_color: Color::BLACK,
+                    base_color: Color::WHITE,
                     width,
                     height,
                     antialiasing_method,
@@ -212,11 +214,20 @@ impl FileContext {
         }
     }
 
-    fn render(&mut self) -> Option<Scene> {
+    fn render(&mut self, window: Arc<Window>) -> Option<Scene> {
         let page = self.file.get_page(self.page_nr).ok()?;
         let mut backend = VelloBackend::new(&mut self.cache);
         let resolver = self.file.resolver();
-        render_page(&mut backend, &resolver, &page, Default::default()).ok()?;
+
+        // Calculate the scale factor to fit the page into the window
+        let page_size = page_bounds(&page);
+        let window_size = window.inner_size();
+        let scale_x = window_size.height as f32 / page_size.height();
+        let scale_y = window_size.width as f32 / page_size.width();
+        let transform = Transform2F::from_scale(if scale_x > scale_y { scale_y } else { scale_x });
+
+        render_page(&mut backend, &resolver, &page, transform).ok()?;
+
         Some(backend.finish())
     }
 }
