@@ -111,8 +111,8 @@ fn convert_stroke(stroke: &crate::backend::Stroke) -> vello::kurbo::Stroke {
     }
 }
 
-
-struct OutlineBuilder {
+#[derive(Default)]
+pub struct OutlineBuilder {
 }
 
 impl Encoder for OutlineBuilder {

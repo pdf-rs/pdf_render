@@ -1,21 +1,28 @@
-use pathfinder_renderer::gpu::options::RendererLevel;
-use pathfinder_view::{show, Config};
-use pathfinder_resources::embedded::EmbeddedResourceLoader;
-use pathfinder_color::ColorF;
+use pdf_vview::application::{App, ViewContext, FileContext};
+use pdf::{file::FileOptions, PdfError};
+use clap::Parser;
 
-use pdf::file::FileOptions;
-use pdf_view::PdfView;
+#[derive(Parser, Debug)]
+#[command(version, about, long_about = None)]
+struct Args {
+    #[arg(short, long, required(true))]
+    path: String,
+}
 
-
-fn main() {
+pub fn main() -> Result<(), PdfError> {
+    // TODO: initializing both env_logger and console_logger fails on wasm.
+    // Figure out a more principled approach.
+    #[cfg(not(target_arch = "wasm32"))]
     env_logger::init();
-    let path = std::env::args().nth(1).unwrap();
+
+    let args = Args::parse();
+    let path = args.path;
+
     let file = FileOptions::uncached().open(&path).unwrap();
-    let view = PdfView::new(file);
-    let mut config = Config::new(Box::new(EmbeddedResourceLoader));
-    config.zoom = true;
-    config.pan = true;
-    config.background = ColorF::new(0.9, 0.9, 0.9, 1.0);
-    config.render_level = RendererLevel::D3D9;
-    show(view, config);
+
+    let file_ctx = FileContext::new(file);
+
+    App::run(ViewContext::new(vec!(file_ctx)));
+
+    Ok(())
 }

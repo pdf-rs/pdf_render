@@ -122,8 +122,8 @@ impl GlyphData {
 impl font::Encoder for GlyphData {
     type Pen<'a> = PathEncoder<'a>;
     type GlyphRef = u32;
-    fn encode_shape<'f, O, E>(&mut self, f: impl for<'a> FnMut(&'a mut Self::Pen<'a>) -> Result<O, E> + 'f) -> Result<(O, Self::GlyphRef), E> {
-        let mut p = self.encoding.encode_path(true);
+    fn encode_shape<'f, O, E>(&mut self, mut f: impl for<'b> FnMut(&mut Self::Pen<'b>) -> Result<O, E> + 'f) -> Result<(O, Self::GlyphRef), E> {
+        let mut p: PathEncoder = self.encoding.encode_path(true);
         let o = f(&mut p)?;
         p.finish(true);
         self.offsets.push(Offset {

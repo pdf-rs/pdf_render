@@ -22,8 +22,10 @@ font = { git = "https://github.com/pdf-rs/font", branch = "vello"}
 itertools = "*"
 image = "0.24.2"
 vello = { version = "0.2.0" }
-winit = "0.29.10"
+winit = "0.30.0"
 env_logger = "0.10.0"
+pollster = "0.3.0"
+clap = { version = "4.5.10", features = ["derive"] }
 
 [dev-dependencies]
 criterion = "0.3"
@@ -33,4 +35,4 @@ crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "pdf_vview"
-path = "src/main.rs"
+path = "bin/view.rs"
