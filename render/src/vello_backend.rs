@@ -1,15 +1,18 @@
+use std::sync::Arc;
+
 use font::{pathfinder_impl::PathBuilder, Encoder, Glyph};
 use pathfinder_color::{ColorF, ColorU};
 use pathfinder_content::{
     fill::FillRule,
     outline::{ContourIterFlags, Outline},
+    pattern::Pattern,
     segment::{Segment, SegmentKind},
 };
-use pathfinder_geometry::vector::Vector2F;
+use pathfinder_geometry::{rect::RectF, transform2d::Transform2F, vector::Vector2F};
 use vello::{
     glyph::skrifa::color::Brush,
     kurbo::{Affine, BezPath, Cap, Stroke},
-    peniko::{BrushRef, Color, Fill, Mix},
+    peniko::{Blob, BrushRef, Color, Fill, Format, Image, Mix},
     Scene,
 };
 
@@ -171,14 +174,7 @@ impl<'a> Backend for VelloBackend<'a> {
     ) {
         self.set_clip_path(clip);
 
-        let transform = Affine::new([
-            transform.m11() as f64,
-            transform.m21() as f64,
-            transform.m12() as f64,
-            transform.m22() as f64,
-            transform.m13() as f64,
-            transform.m23() as f64,
-        ]);
+        let transform = transform_to_affine(transform);
         if let Some(fill) = mode.fill() {
             let style = match fill_rule {
                 FillRule::EvenOdd => Fill::EvenOdd,
@@ -199,12 +195,9 @@ impl<'a> Backend for VelloBackend<'a> {
             self.scene.stroke(&stroke, transform, brush, None, &shape);
         }
     }
-    fn add_text(&mut self, span: crate::TextSpan<OutlineBuilder>, clip: Option<Self::ClipPathId>) {
-    }
+    fn add_text(&mut self, span: crate::TextSpan<OutlineBuilder>, clip: Option<Self::ClipPathId>) {}
 
-    fn set_view_box(&mut self, r: pathfinder_geometry::rect::RectF) {
-
-    }
+    fn set_view_box(&mut self, r: pathfinder_geometry::rect::RectF) {}
 
     fn draw_image(
         &mut self,
@@ -216,24 +209,30 @@ impl<'a> Backend for VelloBackend<'a> {
         clip: Option<Self::ClipPathId>,
         resolve: &impl pdf::object::Resolve,
     ) {
-        // if let Ok(ref image) = *self.cache.get_image(xobject_ref, im, resources, resolve, mode).0 {
-        //     let size = image.size();
-        //     let size_f = size.to_f32();
-        //     let outline: Outline = Outline::from_rect(transform * RectF::new(Vector2F::default(), Vector2F::new(1.0, 1.0)));
-        //     let im_tr = transform
-        //         * Transform2F::from_scale(Vector2F::new(1.0 / size_f.x(), -1.0 / size_f.y()))
-        //         * Transform2F::from_translation(Vector2F::new(0.0, -size_f.y()));
+        if let Some((data, width, height)) = self
+            .cache
+            .get_image(xref, im, resources, resolve, mode)
+            .rgba_data()
+        {
+            let image = Image::new(Blob::new(data), Format::Rgba8, width, height);
 
-        //     let mut pattern = Pattern::from_image(image.clone());
-        //     pattern.apply_transform(im_tr);
-        //     let paint = Paint::from_pattern(pattern);
-        //     let paint_id = self.scene.push_paint(&paint);
-        //     let mut draw_path = DrawPath::new(outline, paint_id);
-        //     draw_path.set_clip_path(clip);
-        //     draw_path.set_blend_mode(blend_mode(mode));
+            if let Some(clip_id) = clip {
+                let (clip_path, _) = self.clip_paths.get(clip_id).unwrap();
 
-        //     self.scene.draw_image(draw_path);
-        // }
+                self.scene.push_layer(Mix::Clip, 1.0,  Affine::IDENTITY, clip_path);
+            }
+
+            let im_tr = transform
+                * Transform2F::from_scale(Vector2F::new(1.0 / (width as f32), -1.0 / (height as f32)))
+                * Transform2F::from_translation(Vector2F::new(0.0, -(height as f32)));
+            let affine = transform_to_affine(im_tr);
+            self.scene
+                .draw_image(&image, affine);
+
+            if clip.is_some() {
+                self.scene.pop_layer();
+            }
+        }
     }
     fn draw_inline_image(
         &mut self,
@@ -282,4 +281,15 @@ impl<'a> Backend for VelloBackend<'a> {
             }
         }
     }
+}
+
+fn transform_to_affine(transform: Transform2F) -> Affine {
+    Affine::new([
+        transform.m11() as f64,
+        transform.m21() as f64,
+        transform.m12() as f64,
+        transform.m22() as f64,
+        transform.m13() as f64,
+        transform.m23() as f64,
+    ])
 }
