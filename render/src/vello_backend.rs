@@ -200,9 +200,6 @@ impl<'a> Backend for VelloBackend<'a> {
         }
     }
     fn add_text(&mut self, span: crate::TextSpan<OutlineBuilder>, clip: Option<Self::ClipPathId>) {
-        let bt = backtrace::Backtrace::new();
-        println!("{bt:?}");
-        
     }
 
     fn set_view_box(&mut self, r: pathfinder_geometry::rect::RectF) {

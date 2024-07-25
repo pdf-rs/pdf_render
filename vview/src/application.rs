@@ -224,7 +224,7 @@ impl FileContext {
         let window_size = window.inner_size();
         let scale_x = window_size.height as f32 / page_size.height();
         let scale_y = window_size.width as f32 / page_size.width();
-        let transform = Transform2F::from_scale(if scale_x > scale_y { scale_y } else { scale_x });
+        let transform = Transform2F::from_scale(scale_x.min(scale_y));
 
         render_page(&mut backend, &resolver, &page, transform).ok()?;
 
