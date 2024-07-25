@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use font::{pathfinder_impl::PathBuilder, Encoder, Glyph};
 use pathfinder_color::{ColorF, ColorU};
 use pathfinder_content::{
@@ -49,6 +47,25 @@ impl<'a> VelloBackend<'a> {
     }
     pub fn finish(self) -> Scene {
         self.scene
+    }
+
+    fn do_draw_image(&mut self, image: &Image, transform: Transform2F, clip: Option<<VelloBackend<'_> as Backend>::ClipPathId>) {
+        if let Some(clip_id) = clip {
+            let (clip_path, _) = self.clip_paths.get(clip_id).unwrap();
+
+            self.scene.push_layer(Mix::Clip, 1.0,  Affine::IDENTITY, clip_path);
+        }
+
+        let im_tr = transform
+            * Transform2F::from_scale(Vector2F::new(1.0 / (image.width as f32), -1.0 / (image.height as f32)))
+            * Transform2F::from_translation(Vector2F::new(0.0, -(image.height as f32)));
+
+        self.scene
+            .draw_image(&image, transform_to_affine(im_tr));
+
+        if clip.is_some() {
+            self.scene.pop_layer();
+        }
     }
 }
 
@@ -216,22 +233,7 @@ impl<'a> Backend for VelloBackend<'a> {
         {
             let image: Image = Image::new(Blob::new(data), Format::Rgba8, width, height);
 
-            if let Some(clip_id) = clip {
-                let (clip_path, _) = self.clip_paths.get(clip_id).unwrap();
-        
-                self.scene.push_layer(Mix::Clip, 1.0,  Affine::IDENTITY, clip_path);
-            }
-        
-            let im_tr = transform
-                * Transform2F::from_scale(Vector2F::new(1.0 / (width as f32), -1.0 / (height as f32)))
-                * Transform2F::from_translation(Vector2F::new(0.0, -(height as f32)));
-        
-            self.scene
-                .draw_image(&image, transform_to_affine(im_tr));
-        
-            if clip.is_some() {
-                self.scene.pop_layer();
-            }
+            self.do_draw_image(&image, transform, clip);
         }
     }
     
@@ -249,22 +251,7 @@ impl<'a> Backend for VelloBackend<'a> {
             let height = image_data.height();
             let image: Image = Image::new(Blob::new(image_data.rgba_data()), Format::Rgba8, width, height);
 
-            if let Some(clip_id) = clip {
-                let (clip_path, _) = self.clip_paths.get(clip_id).unwrap();
-    
-                self.scene.push_layer(Mix::Clip, 1.0,  Affine::IDENTITY, clip_path);
-            }
-    
-            let im_tr = transform
-                * Transform2F::from_scale(Vector2F::new(1.0 / (width as f32), -1.0 / (height as f32)))
-                * Transform2F::from_translation(Vector2F::new(0.0, -(height as f32)));
-    
-            self.scene
-                .draw_image(&image, transform_to_affine(im_tr));
-    
-            if clip.is_some() {
-                self.scene.pop_layer();
-            }
+            self.do_draw_image(&image, transform, clip);
         }
     }
     fn get_font(

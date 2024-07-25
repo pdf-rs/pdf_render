@@ -34,7 +34,7 @@ impl<'a> ImageData<'a> {
     pub fn into_data(self) -> Cow<'a, [ColorU]> {
         self.data
     }
-    pub fn rgba_data(&self) -> Arc<&'static [u8]> {
+    pub fn rgba_data(&self) -> Arc<&'a [u8]> {
         let ptr: *const ColorU = self.data.as_ptr();
         let len = self.data.len();
         let data = unsafe {

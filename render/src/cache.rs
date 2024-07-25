@@ -42,7 +42,7 @@ impl ImageResult
             Ok(ref im) => {
                 let len = im.pixels().len();
                 let data = unsafe {
-                    std::slice::from_raw_parts(im.pixels().as_ptr()  as *const u8, 4 * len)
+                    std::slice::from_raw_parts(im.pixels().as_ptr() as *const u8, 4 * len)
                 };
 
                 Some((Arc::from(data), im.size().x() as u32, im.size().y() as u32))
