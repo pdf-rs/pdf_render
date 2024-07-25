@@ -16,7 +16,7 @@ use vello::{
     Scene,
 };
 
-use crate::{font::FontRc, Backend, Cache, DrawMode, FillMode};
+use crate::{font::FontRc, load_image, Backend, Cache, DrawMode, FillMode};
 
 pub struct VelloBackend<'a> {
     scene: Scene,
@@ -214,26 +214,27 @@ impl<'a> Backend for VelloBackend<'a> {
             .get_image(xref, im, resources, resolve, mode)
             .rgba_data()
         {
-            let image = Image::new(Blob::new(data), Format::Rgba8, width, height);
+            let image: Image = Image::new(Blob::new(data), Format::Rgba8, width, height);
 
             if let Some(clip_id) = clip {
                 let (clip_path, _) = self.clip_paths.get(clip_id).unwrap();
-
+        
                 self.scene.push_layer(Mix::Clip, 1.0,  Affine::IDENTITY, clip_path);
             }
-
+        
             let im_tr = transform
                 * Transform2F::from_scale(Vector2F::new(1.0 / (width as f32), -1.0 / (height as f32)))
                 * Transform2F::from_translation(Vector2F::new(0.0, -(height as f32)));
-            let affine = transform_to_affine(im_tr);
+        
             self.scene
-                .draw_image(&image, affine);
-
+                .draw_image(&image, transform_to_affine(im_tr));
+        
             if clip.is_some() {
                 self.scene.pop_layer();
             }
         }
     }
+    
     fn draw_inline_image(
         &mut self,
         im: &std::sync::Arc<pdf::object::ImageXObject>,
@@ -243,6 +244,28 @@ impl<'a> Backend for VelloBackend<'a> {
         clip: Option<Self::ClipPathId>,
         resolve: &impl pdf::object::Resolve,
     ) {
+        if let Ok(image_data)  = load_image(im, resources, resolve, mode) {
+            let width = image_data.width();
+            let height = image_data.height();
+            let image: Image = Image::new(Blob::new(image_data.rgba_data()), Format::Rgba8, width, height);
+
+            if let Some(clip_id) = clip {
+                let (clip_path, _) = self.clip_paths.get(clip_id).unwrap();
+    
+                self.scene.push_layer(Mix::Clip, 1.0,  Affine::IDENTITY, clip_path);
+            }
+    
+            let im_tr = transform
+                * Transform2F::from_scale(Vector2F::new(1.0 / (width as f32), -1.0 / (height as f32)))
+                * Transform2F::from_translation(Vector2F::new(0.0, -(height as f32)));
+    
+            self.scene
+                .draw_image(&image, transform_to_affine(im_tr));
+    
+            if clip.is_some() {
+                self.scene.pop_layer();
+            }
+        }
     }
     fn get_font(
         &mut self,

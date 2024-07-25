@@ -34,12 +34,14 @@ impl<'a> ImageData<'a> {
     pub fn into_data(self) -> Cow<'a, [ColorU]> {
         self.data
     }
-    pub fn rgba_data(&self) -> &[u8] {
+    pub fn rgba_data(&self) -> Arc<&'static [u8]> {
         let ptr: *const ColorU = self.data.as_ptr();
         let len = self.data.len();
-        unsafe {
-            std::slice::from_raw_parts(ptr.cast(), 4 * len)
-        }
+        let data = unsafe {
+            std::slice::from_raw_parts(ptr.cast() as *const u8, 4 * len)
+        };
+
+        Arc::from(data)
     }
     /// angle must be in range 0 .. 4
     pub fn rotate(&self, angle: u8) -> ImageData<'_> {
@@ -93,7 +95,7 @@ impl<'a> ImageData<'a> {
 
     pub fn safe(&self, path: &Path) {
         let data = self.rgba_data();
-        ImageBuffer::<Rgba<u8>, &[u8]>::from_raw(self.width, self.height, data).unwrap().save(path).unwrap()
+        ImageBuffer::<Rgba<u8>, &[u8]>::from_raw(self.width, self.height, &*data).unwrap().save(path).unwrap()
     }
 }
 
