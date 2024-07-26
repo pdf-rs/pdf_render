@@ -1,9 +1,10 @@
+use pathfinder_geometry::rect::RectF;
 use pathfinder_geometry::transform2d::Transform2F;
 use pathfinder_geometry::vector::Vector2F;
-use vello::kurbo::{Affine, Line, Stroke};
+use vello::kurbo::{Affine, Line, Stroke, Vec2};
 use vello::util::RenderContext;
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::window::{Window, WindowId};
 use winit::dpi::LogicalSize;
@@ -45,7 +46,9 @@ pub struct App<'a> {
     render_state : RenderState<'a>,
     modifiers: ModifiersState,
     mouse_down: bool,
-    view_ctx: ViewContext
+    view_ctx: ViewContext,
+    prior_position: Option<Vector2F>,
+    transform: Transform2F
 }
 
 impl<'a>  App<'a> {
@@ -57,6 +60,8 @@ impl<'a>  App<'a> {
             modifiers: ModifiersState::default(),
             mouse_down : false,
             view_ctx,
+            prior_position: None,
+            transform: Transform2F::default()
         }
     }
 
@@ -146,10 +151,41 @@ impl<'a> ApplicationHandler for App<'a> {
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                const BASE: f64 = 1.05;
+                const PIXELS_PER_LINE: f64 = 20.0;
+
+                if let Some(prior_position) = self.prior_position {
+                    let exponent = if let MouseScrollDelta::PixelDelta(delta) = delta {
+                        delta.y / PIXELS_PER_LINE
+                    } else if let MouseScrollDelta::LineDelta(_, y) = delta {
+                        y as f64
+                    } else {
+                        0.0
+                    };
+
+                    self.transform = Transform2F::from_translation(prior_position)
+                        * Transform2F::from_scale(BASE.powf(exponent) as f32)
+                        * Transform2F::from_translation(-prior_position)
+                        * self.transform;
+
+                    render_state.window.request_redraw();
+                } else {
+                    log::warn!(
+                        "Scrolling without mouse in window; this shouldn't be possible"
+                    );
+                }
             }
             WindowEvent::CursorLeft { .. } => {
+                self.prior_position = None;
             }
             WindowEvent::CursorMoved { position, .. } => {
+                let position = Vector2F::new(position.x as f32, position.y as f32);
+                if self.mouse_down {
+                    if let Some(prior) = self.prior_position {
+                        self.transform = Transform2F::from_translation(position - prior) * self.transform;
+                    }
+                }
+                self.prior_position = Some(position);
             }
             WindowEvent::RedrawRequested => {
                 let width = render_state.surface.config.width;
@@ -158,7 +194,7 @@ impl<'a> ApplicationHandler for App<'a> {
                 
                 let mut scene = Scene::new();
                 if let Some(current) = self.view_ctx.get_current_mut() {
-                    if let Some(s) = current.render(render_state.window.clone()) {
+                    if let Some(s) = current.render(render_state.window.clone(), self.transform) {
                         scene = s;
                     }
                 }
@@ -192,7 +228,7 @@ impl<'a> ApplicationHandler for App<'a> {
                 .expect("failed to render to surface");
 
                 surface_texture.present();
-                device_handle.device.poll(wgpu::Maintain::Poll);
+                device_handle.device.poll(wgpu::Maintain::Wait);
             }
             _ => {}
         }
@@ -214,17 +250,17 @@ impl FileContext {
         }
     }
 
-    fn render(&mut self, window: Arc<Window>) -> Option<Scene> {
+    fn render(&mut self, window: Arc<Window>, transform: Transform2F) -> Option<Scene> {
         let page = self.file.get_page(self.page_nr).ok()?;
         let mut backend = VelloBackend::new(&mut self.cache);
         let resolver = self.file.resolver();
 
         // Calculate the scale factor to fit the page into the window
-        let page_size = page_bounds(&page);
-        let window_size = window.inner_size();
-        let scale_x = window_size.height as f32 / page_size.height();
-        let scale_y = window_size.width as f32 / page_size.width();
-        let transform = Transform2F::from_scale(scale_x.min(scale_y));
+        let bounds = page_bounds(&page);
+        let window_size: winit::dpi::PhysicalSize<u32> = window.inner_size();
+        let scale_x = window_size.height as f32 / bounds.height();
+        let scale_y = window_size.width as f32 / bounds.width();
+        let transform = transform * Transform2F::from_scale(scale_x.min(scale_y));
 
         render_page(&mut backend, &resolver, &page, transform).ok()?;
 
