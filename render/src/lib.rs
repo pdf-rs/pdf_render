@@ -46,7 +46,7 @@ use pdf::{content::TextMode, object::*};
 use renderstate::RenderState;
 use std::sync::Arc;
 
-const SCALE: f32 = 25.4/72.;
+const SCALE: f32 = 1.0;
 
 #[derive(Copy, Clone, Default)]
 pub struct BBox(Option<RectF>);
@@ -91,31 +91,33 @@ pub fn render_page(
     page: &Page,
     transform: Transform2F,
 ) -> Result<Transform2F, PdfError> {
-    let bounds = page_bounds(page);
+    let bounds = page_bounds(&page);
+
+    // Calculate the view box
     let rotate: Transform2F =
         Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
-    let br = rotate * RectF::new(Vector2F::zero(), bounds.size());
+    let br: RectF = rotate * RectF::new(Vector2F::zero(), bounds.size());
+   
+    let view_box = transform  * br;
+    backend.set_view_box(view_box);
 
     let translate: Transform2F = Transform2F::from_translation(Vector2F::new(
         -br.min_x().min(br.max_x()),
         -br.min_y().min(br.max_y()),
     ));
-    let view_box = transform * translate * br;
-    backend.set_view_box(view_box);
 
     // Here is the so called current transformation matrix(CTM)
-    
     let root_transformation = transform
         * translate
         * rotate
-        // zoom out x by SCALE, moved (-bounds.min_x()), so new x:  old_x * SCALE + (-bounds.min_x())
-        // zoom out y by -SCALE, moved bounds.max_y(), so new y:  old y * (-SCALE) + bounds.max_y() 
+        // zoom out x by SCALE, moved (-bounds.min_x()), so,  new_x =  old_x * SCALE + (-bounds.min_x())
+        // zoom out y by -SCALE, moved bounds.max_y(), so,  new_y =  old_y * (-SCALE) + bounds.max_y() 
         * Transform2F::row_major(SCALE, 0.0, -bounds.min_x(), 0.0, -SCALE, bounds.max_y());
-
-    let resources = t!(page.resources());
-
+        
     let contents = try_opt!(page.contents.as_ref());
     let ops = contents.operations(resolve)?;
+    let resources = t!(page.resources());
+
     let mut renderstate = RenderState::new(backend, resolve, &resources, root_transformation);
     for (i, op) in ops.iter().enumerate() {
         debug!("op {}: {:?}", i, op);
