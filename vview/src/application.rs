@@ -19,16 +19,16 @@ use pdf::object::{Page, PageRc};
 use pdf::PdfError;
 use pdf_render::vello_backend::{OutlineBuilder, VelloBackend};
 use pdf_render::{page_bounds, render_page, Cache};
-use std::collections::VecDeque;
 use std::fs::File;
 use std::num::NonZeroUsize;
-use std::process;
 use std::sync::Arc;
 
 use vello::peniko::Color;
 use vello::util::RenderSurface;
 use vello::wgpu;
 use vello::{Renderer, RendererOptions, Scene};
+
+use crate::continuous_scroll::{ContinuousScroll, PageLoader};
 
 pub struct ActiveRenderState<'s> {
     // The fields MUST be in this order, so that the surface is dropped before the window
@@ -175,10 +175,6 @@ impl<'a> ApplicationHandler for App<'a> {
                     0.0
                 };
 
-                let mut scroll_offset = 0.;
-
-                scroll_offset += delta as f32;
-                dbg!(scroll_offset);
                 // When to trigger rendering new page?
                 // 1. scroll up,  current page bottom reached the top of the window
                 // 2. scroll down, current page top reached the bottom of the window
@@ -252,17 +248,46 @@ impl<'a> ApplicationHandler for App<'a> {
 
 pub struct FileContext {
     page_nr: u32,
-    file: pdf::file::CachedFile<Vec<u8>>,
+    file: Arc<pdf::file::CachedFile<Vec<u8>>>,
     cache: Cache<OutlineBuilder>,
-    sliding_window: SlidingWindow<(u32, PageRc, Transform2F)>,
+    continuous_scroll: ContinuousScroll<PdfFileLoader>,
 }
+
+struct PdfFileLoader(Arc<pdf::file::CachedFile<Vec<u8>>>);
+
+impl PageLoader for PdfFileLoader {
+    fn load_page(&self, page_nr: u32) -> Option<PageRc> {
+        self.0.get_page(page_nr).map_or(None, Some)
+    }
+
+    fn num_pages(&self) -> u32 {
+        self.0.num_pages()
+    }
+
+    fn get_page_bounds(&self, page:&PageRc) -> RectF {
+        let page_bounds = page_bounds(page);
+
+        // Calculate the view box
+        let rotate: Transform2F = Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
+        
+        rotate * RectF::new(Vector2F::zero(), page_bounds.size())
+    }
+}
+
 impl FileContext {
     pub fn new(file: pdf::file::CachedFile<Vec<u8>>) -> Self {
+        let file = Arc::new(file);
+        let loader = PdfFileLoader(file.clone());
+        let mut continuous_scroll =  ContinuousScroll::<PdfFileLoader>::new(5, loader);
+
+        let page_nr: u32 =0;
+        continuous_scroll.go_to_page(Some(page_nr));
+
         Self {
-            page_nr: 5,
-            file,
+            page_nr,
             cache: Cache::new(OutlineBuilder::default()),
-            sliding_window: SlidingWindow::new(5),
+            continuous_scroll,
+            file: file.clone(),
         }
     }
 
@@ -270,110 +295,22 @@ impl FileContext {
         let mut backend = VelloBackend::new(&mut self.cache);
         let resolver = self.file.resolver();
 
-        let page: PageRc = self.file.get_page(self.page_nr).ok()?;
-
-        // Calculate the scale factor to fit the page into the window
-        let bounds: RectF = page_bounds(&page);
-
-        // let window_size: winit::dpi::PhysicalSize<u32> = window.inner_size();
-        // let scale_x = window_size.height as f32 / bounds.height();
-        // let scale_y = window_size.width as f32 / bounds.width();
-        // let transform = transform * Transform2F::from_scale(scale_x.min(scale_y));
-
-        let current_page_nr = self.page_nr;
-        let current_page_view_box = get_page_view_box(bounds, page.rotate as f32, transform);
-
-        let threshhold = 100.0;
-        let gap = 30.0;
-
-        // cut the sliding window in half
-        let sliding_window_size = self.sliding_window.get_window_size() as u32;
-        let start_page = current_page_nr.saturating_sub(sliding_window_size / 2);
-        let end_page = (current_page_nr + sliding_window_size / 2).min(self.file.num_pages());
-
-        // the pages before current page
-        let mut translate: Transform2F = transform;
-        for page_nr in (start_page..current_page_nr).rev() {
-            let page: PageRc = self.file.get_page(page_nr).ok()?;
-            let bounds: RectF = page_bounds(&page);
-
-            let page_view_box = get_page_view_box(bounds, page.rotate as f32, transform);
-
-            translate =
-                Transform2F::from_translation(Vector2F::new(0.0, -(page_view_box.height() + gap)))
-                    * translate;
-
-            self.sliding_window.push_front((page_nr, page, translate));
-        }
-
-        self.sliding_window.push_back((current_page_nr, page, transform));
-
-        // the pages after current page
-        let mut translate: Transform2F = transform;
-        let mut previous_page_view_box = current_page_view_box;
-
-        for page_nr in (current_page_nr + 1)..=end_page {
-            let page: PageRc = self.file.get_page(page_nr).ok()?;
-            let bounds: RectF = page_bounds(&page);
-
-            translate = Transform2F::from_translation(Vector2F::new(
-                0.0,
-                previous_page_view_box.height() + gap,
-            )) * translate;
-            previous_page_view_box = get_page_view_box(bounds, page.rotate as f32, transform);
-
-            self.sliding_window.push_back((page_nr, page, translate));
-        }
-        for (page_nr, page, transform) in self.sliding_window.iter() {
-            render_page(&mut backend, &resolver, page, transform.clone()).ok()?;
-        }
-
         let window_size: winit::dpi::PhysicalSize<u32> = window.inner_size();
-        let window_br = Vector2F::new(window_size.width as f32, window_size.height as f32);
+        // let scale_x = size.height as f32 / bounds.height();
+        // let scale_y = size.width as f32 / bounds.width();
+        // let transform = transform * Transform2F::from_scale(scale_x.min(scale_y));
+        
+        self.continuous_scroll.calculate_positions();
 
-        if let Some((last_page_nr, last_page, last_page_transform)) = self.sliding_window.back() {
-            dbg!(last_page_nr, self.sliding_window.len());
-
-            let last_page_br = last_page_transform.translation();
-            if window_br.y() <= last_page_br.y() && (last_page_br.y() <= window_br.y() + threshhold) {
-                let next_page_nr = (last_page_nr + 1).min(self.file.num_pages());
-
-                if next_page_nr > *last_page_nr {
-                    let bounds: RectF = page_bounds(last_page);
-                    let page_view_box = get_page_view_box(bounds, last_page.rotate as f32, transform);
-
-                    let next_page: PageRc = self.file.get_page(next_page_nr).ok()?;
-
-                    self.sliding_window.push_back((
-                        next_page_nr,
-                        next_page,
-                        Transform2F::from_translation(Vector2F::new(
-                            0.0,
-                            page_view_box.height() + gap,
-                        ))*last_page_transform.clone(),
-                    ));
-
-                    dbg!(next_page_nr, self.sliding_window.len());
-                }
+        for (page_nr, page, translate) in self.continuous_scroll.iter() {
+            if let Some(translate) = translate {
+                render_page(&mut backend, &resolver,page,  (*translate) * transform).ok()?;
             }
         }
-        if let Some((first_page_nr, first_page, first_page_transform)) = self.sliding_window.front() {
-            // dbg!(first.2.translation());
-            let first_page_br = first_page_transform.translation();
-            let bounds: RectF = page_bounds(&first_page);
 
-            let page_view_box = get_page_view_box(bounds, first_page.rotate as f32, transform);
-
-            let top_y = first_page_br.y() - page_view_box.height() - gap;
-
-            if  -threshhold <=  top_y && top_y <= 0.0 {
-                let prev_page_nr = (*first_page_nr).saturating_sub(1);
-                if prev_page_nr < *first_page_nr {
-                    let page: PageRc = self.file.get_page(prev_page_nr).ok()?;
-                    self.sliding_window.push_front((prev_page_nr, page));
-                }
-            }
-        }
+        let window_br: Vector2F = Vector2F::new(window_size.width as f32, window_size.height as f32);
+       
+        self.continuous_scroll.scroll(transform, window_br);
 
         Some(backend.finish())
     }
@@ -461,77 +398,4 @@ fn create_vello_renderer(render_ctx: &RenderContext, surface: &RenderSurface) ->
         },
     )
     .expect("Could create renderer")
-}
-
-fn get_page_view_box(page_bounds: RectF, page_rotate: f32, transform: Transform2F) -> RectF {
-    // Calculate the view box
-    let rotate: Transform2F = Transform2F::from_rotation(page_rotate * std::f32::consts::PI / 180.);
-    let br: RectF = rotate * RectF::new(Vector2F::zero(), page_bounds.size());
-
-    transform * br
-}
-
-struct SlidingWindow<T> {
-    queue: VecDeque<T>,
-    capacity: usize,
-}
-
-use std::collections::vec_deque::Iter;
-
-impl<T> SlidingWindow<T> {
-    fn new(capacity: usize) -> Self {
-        SlidingWindow {
-            queue: VecDeque::with_capacity(capacity),
-            capacity,
-        }
-    }
-
-    fn get_window_size(&self) -> usize {
-        self.capacity
-    }
-
-    fn push_front(&mut self, item: T) {
-        if self.queue.len() == self.capacity {
-            self.queue.pop_back();
-        }
-        self.queue.push_front(item);
-    }
-
-    fn front(&self) -> Option<&T> {
-        self.queue.front()
-    }
-
-    fn back(&self) -> Option<&T> {
-        self.queue.back()
-    }
-
-    fn push_back(&mut self, item: T) {
-        if self.queue.len() == self.capacity {
-            self.queue.pop_front();
-        }
-        self.queue.push_back(item);
-    }
-
-    fn len(&self) -> usize {
-        self.queue.len()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.queue.is_empty()
-    }
-
-    pub fn iter(&self) -> Iter<'_, T> {
-        self.queue.iter()
-    }
-}
-
-use std::vec::IntoIter;
-
-impl<T> IntoIterator for SlidingWindow<T> {
-    type Item = T;
-    type IntoIter = IntoIter<T>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.queue.into_iter().collect::<Vec<T>>().into_iter()
-    }
 }
