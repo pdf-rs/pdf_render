@@ -88,6 +88,7 @@ pub fn page_bounds(page: &Page) -> RectF {
 pub fn render_page(
     backend: &mut impl Backend,
     resolve: &impl Resolve,
+    page_nr: u32,
     page: &Page,
     transform: Transform2F,
 ) -> Result<Transform2F, PdfError> {
@@ -103,7 +104,7 @@ pub fn render_page(
     ));
 
     let view_box = transform * translate * br;
-    backend.set_view_box(view_box);
+    backend.set_view_box(view_box, page_nr);
 
     // Here is the so called current transformation matrix(CTM)
     // Everything inside the view box is transformed by this matrix, 

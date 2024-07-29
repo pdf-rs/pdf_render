@@ -214,10 +214,10 @@ impl<'a> Backend for VelloBackend<'a> {
     }
     fn add_text(&mut self, span: crate::TextSpan<OutlineBuilder>, clip: Option<Self::ClipPathId>) {}
 
-    fn set_view_box(&mut self, view_box: pathfinder_geometry::rect::RectF) {
+    fn set_view_box(&mut self, view_box: pathfinder_geometry::rect::RectF, page_nr: u32) {
         let view_box = Rect::new(view_box.min_x() as f64, view_box.min_y() as f64, view_box.max_x() as f64, view_box.max_y() as f64);
 
-        self.scene.fill(Fill::EvenOdd, Affine::IDENTITY, Color::DODGER_BLUE, None, &view_box)
+        self.scene.fill(Fill::EvenOdd, Affine::IDENTITY, Color::DODGER_BLUE, None, &view_box);
     }
 
     fn draw_image(

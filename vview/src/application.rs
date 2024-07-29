@@ -28,7 +28,7 @@ use vello::util::RenderSurface;
 use vello::wgpu;
 use vello::{Renderer, RendererOptions, Scene};
 
-use crate::continuous_scroll::{ContinuousScroll, PageLoader};
+use crate::continuous_scroll::{ContinuousScroll, PageLoader, Scroll, ScrollDirection};
 
 pub struct ActiveRenderState<'s> {
     // The fields MUST be in this order, so that the surface is dropped before the window
@@ -51,6 +51,8 @@ pub struct App<'a> {
     view_ctx: ViewContext,
     prior_position: Option<Vector2F>,
     transform: Transform2F,
+    scroll_progress: Option<Scroll>,
+    scroll_direction: ScrollDirection,
 }
 
 impl<'a> App<'a> {
@@ -64,6 +66,8 @@ impl<'a> App<'a> {
             view_ctx,
             prior_position: None,
             transform: Transform2F::default(),
+            scroll_progress: None,
+            scroll_direction: ScrollDirection::Up,
         }
     }
 
@@ -139,19 +143,23 @@ impl<'a> ApplicationHandler for App<'a> {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::KeyboardInput { event, .. } => {
+                const DELTA: f32 = 60.0;
+
                 if event.state == ElementState::Pressed {
-                    if self.modifiers.shift_key() {
-                        match event.logical_key {
-                            Key::Named(NamedKey::ArrowRight) => self.view_ctx.seek_forward(10),
-                            Key::Named(NamedKey::ArrowLeft) => self.view_ctx.seek_backwards(10),
-                            _ => {}
+                    match event.logical_key {
+                        Key::Named(NamedKey::ArrowUp) => {
+                            self.transform =
+                                Transform2F::from_translation(Vector2F::new(0.0, DELTA))
+                                    * self.transform;
+                            render_state.window.request_redraw();
                         }
-                    } else {
-                        match event.logical_key {
-                            Key::Named(NamedKey::ArrowRight) => self.view_ctx.seek_forward(1),
-                            Key::Named(NamedKey::ArrowLeft) => self.view_ctx.seek_backwards(1),
-                            _ => {}
+                        Key::Named(NamedKey::ArrowDown) => {
+                            self.transform =
+                                Transform2F::from_translation(Vector2F::new(0.0, -DELTA))
+                                    * self.transform;
+                            render_state.window.request_redraw();
                         }
+                        _ => {}
                     }
                 }
             }
@@ -174,11 +182,22 @@ impl<'a> ApplicationHandler for App<'a> {
                 } else {
                     0.0
                 };
+                dbg!(delta);
 
-                // When to trigger rendering new page?
-                // 1. scroll up,  current page bottom reached the top of the window
-                // 2. scroll down, current page top reached the bottom of the window
-                // How to find the position of bottom and top of current page relative to the window?
+                if delta > 0.0 {
+                    self.scroll_direction = ScrollDirection::Down;
+                } else {
+                    self.scroll_direction = ScrollDirection::Up;
+                }
+                dbg!(&self.scroll_progress);
+
+                if let Some(progress) = self.scroll_progress.take() {
+                    match progress {
+                        Scroll::Last(_) => return,
+                        Scroll::First(_) => return,
+                        _ => {}
+                    };
+                };
 
                 self.transform = Transform2F::from_translation(Vector2F::new(0.0, delta as f32))
                     * self.transform;
@@ -205,8 +224,13 @@ impl<'a> ApplicationHandler for App<'a> {
 
                 let mut scene = Scene::new();
                 if let Some(current) = self.view_ctx.get_current_mut() {
-                    if let Some(s) = current.render(render_state.window.clone(), self.transform) {
+                    if let Some((s, scroll)) = current.render(
+                        render_state.window.clone(),
+                        self.transform,
+                        &self.scroll_direction,
+                    ) {
                         scene = s;
+                        self.scroll_progress = Some(scroll);
                     }
                 }
 
@@ -264,12 +288,13 @@ impl PageLoader for PdfFileLoader {
         self.0.num_pages()
     }
 
-    fn get_page_bounds(&self, page:&PageRc) -> RectF {
+    fn get_page_bounds(&self, page: &PageRc) -> RectF {
         let page_bounds = page_bounds(page);
 
         // Calculate the view box
-        let rotate: Transform2F = Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
-        
+        let rotate: Transform2F =
+            Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
+
         rotate * RectF::new(Vector2F::zero(), page_bounds.size())
     }
 }
@@ -278,10 +303,10 @@ impl FileContext {
     pub fn new(file: pdf::file::CachedFile<Vec<u8>>) -> Self {
         let file = Arc::new(file);
         let loader = PdfFileLoader(file.clone());
-        let mut continuous_scroll =  ContinuousScroll::<PdfFileLoader>::new(5, loader);
+        let mut continuous_scroll = ContinuousScroll::<PdfFileLoader>::new(7, loader);
 
-        let page_nr: u32 =0;
-        continuous_scroll.go_to_page(Some(page_nr));
+        let page_nr: u32 = 0;
+        continuous_scroll.go_to_page(Some(1));
 
         Self {
             page_nr,
@@ -291,7 +316,12 @@ impl FileContext {
         }
     }
 
-    fn render(&mut self, window: Arc<Window>, transform: Transform2F) -> Option<Scene> {
+    fn render(
+        &mut self,
+        window: Arc<Window>,
+        transform: Transform2F,
+        scroll_direction: &ScrollDirection,
+    ) -> Option<(Scene, Scroll)> {
         let mut backend = VelloBackend::new(&mut self.cache);
         let resolver = self.file.resolver();
 
@@ -299,20 +329,29 @@ impl FileContext {
         // let scale_x = size.height as f32 / bounds.height();
         // let scale_y = size.width as f32 / bounds.width();
         // let transform = transform * Transform2F::from_scale(scale_x.min(scale_y));
-        
-        self.continuous_scroll.calculate_positions();
+        const PAGE_GAPE: f32 = 30.0;
 
-        for (page_nr, page, translate) in self.continuous_scroll.iter() {
+        for (index, (page_nr, page, translate)) in self.continuous_scroll.iter().enumerate() {
             if let Some(translate) = translate {
-                render_page(&mut backend, &resolver,page,  (*translate) * transform).ok()?;
+                render_page(
+                    &mut backend,
+                    &resolver,
+                    *page_nr,
+                    page,
+                    (*translate).translate(Vector2F::new(0.0, (index as f32) * PAGE_GAPE)) * transform,
+                )
+                .ok()?;
             }
         }
 
-        let window_br: Vector2F = Vector2F::new(window_size.width as f32, window_size.height as f32);
-       
-        self.continuous_scroll.scroll(transform, window_br);
+        let window_br: Vector2F =
+            Vector2F::new(window_size.width as f32, window_size.height as f32);
 
-        Some(backend.finish())
+        let scroll = self
+            .continuous_scroll
+            .scroll(transform, window_br, scroll_direction);
+
+        Some((backend.finish(), scroll))
     }
 }
 pub struct ViewContext {
