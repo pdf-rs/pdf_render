@@ -28,7 +28,7 @@ use vello::util::RenderSurface;
 use vello::wgpu;
 use vello::{Renderer, RendererOptions, Scene};
 
-use crate::continuous_scroll::{ContinuousScroll, PageLoader, Scroll, ScrollDirection};
+use crate::continuous_scroll::{ContinuousScroll, PageLoader, CurrentPageReplacement, ScrollDirection};
 
 pub struct ActiveRenderState<'s> {
     // The fields MUST be in this order, so that the surface is dropped before the window
@@ -51,7 +51,7 @@ pub struct App<'a> {
     view_ctx: ViewContext,
     prior_position: Option<Vector2F>,
     transform: Transform2F,
-    scroll_progress: Option<Scroll>,
+    scroll_progress: Option<CurrentPageReplacement>,
     scroll_direction: ScrollDirection,
 }
 
@@ -152,11 +152,14 @@ impl<'a> ApplicationHandler for App<'a> {
                                 Transform2F::from_translation(Vector2F::new(0.0, DELTA))
                                     * self.transform;
                             render_state.window.request_redraw();
+                            self.scroll_direction = ScrollDirection::Down;
                         }
                         Key::Named(NamedKey::ArrowDown) => {
                             self.transform =
                                 Transform2F::from_translation(Vector2F::new(0.0, -DELTA))
                                     * self.transform;
+                            self.scroll_direction = ScrollDirection::Up;
+
                             render_state.window.request_redraw();
                         }
                         _ => {}
@@ -182,21 +185,17 @@ impl<'a> ApplicationHandler for App<'a> {
                 } else {
                     0.0
                 };
-                dbg!(delta);
+                // dbg!(delta);
 
                 if delta > 0.0 {
                     self.scroll_direction = ScrollDirection::Down;
                 } else {
                     self.scroll_direction = ScrollDirection::Up;
                 }
-                dbg!(&self.scroll_progress);
+                // dbg!(&self.scroll_progress);
 
                 if let Some(progress) = self.scroll_progress.take() {
-                    match progress {
-                        Scroll::Last(_) => return,
-                        Scroll::First(_) => return,
-                        _ => {}
-                    };
+                    //TODO
                 };
 
                 self.transform = Transform2F::from_translation(Vector2F::new(0.0, delta as f32))
@@ -227,7 +226,7 @@ impl<'a> ApplicationHandler for App<'a> {
                     if let Some((s, scroll)) = current.render(
                         render_state.window.clone(),
                         self.transform,
-                        &self.scroll_direction,
+                        self.scroll_direction,
                     ) {
                         scene = s;
                         self.scroll_progress = Some(scroll);
@@ -274,18 +273,32 @@ pub struct FileContext {
     page_nr: u32,
     file: Arc<pdf::file::CachedFile<Vec<u8>>>,
     cache: Cache<OutlineBuilder>,
-    continuous_scroll: ContinuousScroll<PdfFileLoader>,
+    continuous_scroll: Option<ContinuousScroll<PdfFileLoader>>,
 }
 
-struct PdfFileLoader(Arc<pdf::file::CachedFile<Vec<u8>>>);
+struct PdfFileLoader{
+    file: Arc<pdf::file::CachedFile<Vec<u8>>>,
+    window: Arc<Window>,
+    transform: Transform2F,
+}
+
+impl PdfFileLoader {
+    pub fn new(file: Arc<pdf::file::CachedFile<Vec<u8>>>, window: Arc<Window>, initial_transform: Transform2F) -> Self {
+        Self {
+            file,
+            window,
+            transform: initial_transform
+        }
+    }
+}
 
 impl PageLoader for PdfFileLoader {
     fn load_page(&self, page_nr: u32) -> Option<PageRc> {
-        self.0.get_page(page_nr).map_or(None, Some)
+        self.file.get_page(page_nr).map_or(None, Some)
     }
 
     fn num_pages(&self) -> u32 {
-        self.0.num_pages()
+        self.file.num_pages()
     }
 
     fn get_page_bounds(&self, page: &PageRc) -> RectF {
@@ -295,24 +308,30 @@ impl PageLoader for PdfFileLoader {
         let rotate: Transform2F =
             Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
 
-        rotate * RectF::new(Vector2F::zero(), page_bounds.size())
+        self.transform * rotate * RectF::new(Vector2F::zero(), page_bounds.size())
     }
+
+    fn get_window_size(&self) -> Vector2F {
+        let window_size: winit::dpi::PhysicalSize<u32> = self.window.inner_size();
+
+        Vector2F::new(window_size.width as f32, window_size.height as f32)
+    }
+
+    fn set_transform(&mut self, transform: Transform2F)  {
+        dbg!(transform);
+        self.transform = transform;
+    }
+
 }
 
 impl FileContext {
     pub fn new(file: pdf::file::CachedFile<Vec<u8>>) -> Self {
-        let file = Arc::new(file);
-        let loader = PdfFileLoader(file.clone());
-        let mut continuous_scroll = ContinuousScroll::<PdfFileLoader>::new(7, loader);
-
-        let page_nr: u32 = 0;
-        continuous_scroll.go_to_page(Some(1));
-
+       
         Self {
-            page_nr,
+            page_nr: 0,
             cache: Cache::new(OutlineBuilder::default()),
-            continuous_scroll,
-            file: file.clone(),
+            continuous_scroll: None,
+            file: Arc::new(file)
         }
     }
 
@@ -320,36 +339,39 @@ impl FileContext {
         &mut self,
         window: Arc<Window>,
         transform: Transform2F,
-        scroll_direction: &ScrollDirection,
-    ) -> Option<(Scene, Scroll)> {
-        let mut backend = VelloBackend::new(&mut self.cache);
+        scroll_direction: ScrollDirection,
+    ) -> Option<(Scene, CurrentPageReplacement)> {
+        let mut backend: VelloBackend = VelloBackend::new(&mut self.cache);
         let resolver = self.file.resolver();
-
+        
         let window_size: winit::dpi::PhysicalSize<u32> = window.inner_size();
         // let scale_x = size.height as f32 / bounds.height();
         // let scale_y = size.width as f32 / bounds.width();
         // let transform = transform * Transform2F::from_scale(scale_x.min(scale_y));
-        const PAGE_GAPE: f32 = 30.0;
 
-        for (index, (page_nr, page, translate)) in self.continuous_scroll.iter().enumerate() {
-            if let Some(translate) = translate {
-                render_page(
-                    &mut backend,
-                    &resolver,
-                    *page_nr,
-                    page,
-                    (*translate).translate(Vector2F::new(0.0, (index as f32) * PAGE_GAPE)) * transform,
-                )
-                .ok()?;
-            }
+        let continuous_scroll = self.continuous_scroll.get_or_insert_with(|| {
+            let loader = PdfFileLoader::new(self.file.clone(), window.clone(), transform);
+            let mut continuous_scroll = ContinuousScroll::new(loader);
+            continuous_scroll.go_to_page(10).ok();
+
+            continuous_scroll
+        });
+
+        for (page_nr, page, view_box) in continuous_scroll.iter() {
+            dbg!(page_nr, view_box);
+            render_page(
+                &mut backend,
+                &resolver,
+                *page_nr,
+                page,
+                *view_box,
+                transform,
+            )
+            .ok()?;
         }
 
-        let window_br: Vector2F =
-            Vector2F::new(window_size.width as f32, window_size.height as f32);
-
-        let scroll = self
-            .continuous_scroll
-            .scroll(transform, window_br, scroll_direction);
+        let scroll = continuous_scroll
+            .scroll(scroll_direction, transform);
 
         Some((backend.finish(), scroll))
     }

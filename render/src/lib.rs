@@ -90,30 +90,30 @@ pub fn render_page(
     resolve: &impl Resolve,
     page_nr: u32,
     page: &Page,
+    view_box: RectF,
     transform: Transform2F,
 ) -> Result<Transform2F, PdfError> {
-    let bounds = page_bounds(page);
-   
-    let br: RectF =  RectF::new(Vector2F::zero(), bounds.size());
+    backend.set_view_box(view_box, page_nr);
 
+    let br: RectF =  RectF::new(Vector2F::zero(), view_box.size());
+
+    // dbg!(view_box, br, -br.min_x().min(br.max_x()),
+    // -br.min_y().min(br.max_y()));
     // The coordinate origin is top left corner(0, 0), the Y axe points down positively, X axe points right positively
     // basically this following brings the coordinate origin to the top left of the view box 
-    let translate: Transform2F = Transform2F::from_translation(Vector2F::new(
-        -br.min_x().min(br.max_x()),
-        -br.min_y().min(br.max_y()),
-    ));
-
-    let view_box = transform * translate * br;
-    backend.set_view_box(view_box, page_nr);
+    // let translate: Transform2F = Transform2F::from_translation(Vector2F::new(
+    //     -br.min_x().min(br.max_x()),
+    //     -br.min_y().min(br.max_y()),
+    // ));
 
     // Here is the so called current transformation matrix(CTM)
     // Everything inside the view box is transformed by this matrix, 
     // So means drawing everything inside the pages relative the page itself.
     let root_transformation = transform
-        * translate
+        // * translate
         // zoom out x by SCALE, moved (-bounds.min_x()), so,  new_x =  old_x * SCALE + (-bounds.min_x())
         // zoom out y by -SCALE, moved bounds.max_y(), so,  new_y =  old_y * (-SCALE) + bounds.max_y() 
-        * Transform2F::row_major(SCALE, 0.0, -bounds.min_x(), 0.0, -SCALE, bounds.max_y());
+        * Transform2F::row_major(SCALE, 0.0, -view_box.min_x(), 0.0, -SCALE, view_box.max_y());
     
     let contents = try_opt!(page.contents.as_ref());
     let ops = contents.operations(resolve)?;
