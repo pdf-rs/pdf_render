@@ -46,7 +46,7 @@ use pdf::{content::TextMode, object::*};
 use renderstate::RenderState;
 use std::sync::Arc;
 
-const SCALE: f32 = 1.0;
+const SCALE: f32 = 25.4/72.;
 
 #[derive(Copy, Clone, Default)]
 pub struct BBox(Option<RectF>);
@@ -88,38 +88,34 @@ pub fn page_bounds(page: &Page) -> RectF {
 pub fn render_page(
     backend: &mut impl Backend,
     resolve: &impl Resolve,
-    page_nr: u32,
     page: &Page,
-    view_box: RectF,
     transform: Transform2F,
 ) -> Result<Transform2F, PdfError> {
-    backend.set_view_box(view_box, page_nr);
+    let bounds = page_bounds(page);
+    let rotate: Transform2F =
+        Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
+    let br = rotate * RectF::new(Vector2F::zero(), bounds.size());
 
-    let br: RectF =  RectF::new(Vector2F::zero(), view_box.size());
-
-    // dbg!(view_box, br, -br.min_x().min(br.max_x()),
-    // -br.min_y().min(br.max_y()));
-    // The coordinate origin is top left corner(0, 0), the Y axe points down positively, X axe points right positively
-    // basically this following brings the coordinate origin to the top left of the view box 
-    // let translate: Transform2F = Transform2F::from_translation(Vector2F::new(
-    //     -br.min_x().min(br.max_x()),
-    //     -br.min_y().min(br.max_y()),
-    // ));
+    let translate: Transform2F = Transform2F::from_translation(Vector2F::new(
+        -br.min_x().min(br.max_x()),
+        -br.min_y().min(br.max_y()),
+    ));
+    let view_box = transform * translate * br;
+    backend.set_view_box(view_box);
 
     // Here is the so called current transformation matrix(CTM)
-    // Everything inside the view box is transformed by this matrix, 
-    // So means drawing everything inside the pages relative the page itself.
-    let root_transformation = transform
-        // * translate
-        // zoom out x by SCALE, moved (-bounds.min_x()), so,  new_x =  old_x * SCALE + (-bounds.min_x())
-        // zoom out y by -SCALE, moved bounds.max_y(), so,  new_y =  old_y * (-SCALE) + bounds.max_y() 
-        * Transform2F::row_major(SCALE, 0.0, -view_box.min_x(), 0.0, -SCALE, view_box.max_y());
     
-    let contents = try_opt!(page.contents.as_ref());
-    let ops = contents.operations(resolve)?;
+    let root_transformation = transform
+        * translate
+        * rotate
+        // zoom out x by SCALE, moved (-bounds.min_x()), so new x:  old_x * SCALE + (-bounds.min_x())
+        // zoom out y by -SCALE, moved bounds.max_y(), so new y:  old y * (-SCALE) + bounds.max_y() 
+        * Transform2F::row_major(SCALE, 0.0, -bounds.min_x(), 0.0, -SCALE, bounds.max_y());
+
     let resources = t!(page.resources());
 
-    // dbg!(root_transformation, transform);
+    let contents = try_opt!(page.contents.as_ref());
+    let ops = contents.operations(resolve)?;
     let mut renderstate = RenderState::new(backend, resolve, &resources, root_transformation);
     for (i, op) in ops.iter().enumerate() {
         debug!("op {}: {:?}", i, op);

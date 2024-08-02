@@ -9,7 +9,7 @@ use pathfinder_content::{
 use pathfinder_geometry::{rect::RectF, transform2d::Transform2F, vector::Vector2F};
 use vello::{
     glyph::skrifa::color::Brush,
-    kurbo::{Affine, BezPath, Cap, Rect, Stroke},
+    kurbo::{Affine, BezPath, Cap, Stroke},
     peniko::{Blob, BrushRef, Color, Fill, Format, Image, Mix},
     Scene,
 };
@@ -214,11 +214,7 @@ impl<'a> Backend for VelloBackend<'a> {
     }
     fn add_text(&mut self, span: crate::TextSpan<OutlineBuilder>, clip: Option<Self::ClipPathId>) {}
 
-    fn set_view_box(&mut self, view_box: pathfinder_geometry::rect::RectF, page_nr: u32) {
-        let view_box = Rect::new(view_box.min_x() as f64, view_box.min_y() as f64, view_box.max_x() as f64, view_box.max_y() as f64);
-
-        self.scene.fill(Fill::EvenOdd, Affine::IDENTITY, Color::DODGER_BLUE, None, &view_box);
-    }
+    fn set_view_box(&mut self, r: pathfinder_geometry::rect::RectF) {}
 
     fn draw_image(
         &mut self,

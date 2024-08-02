@@ -22,7 +22,7 @@ pub fn main() -> Result<(), PdfError> {
 
     let file_ctx = FileContext::new(file);
 
-    App::run(ViewContext::new(vec!(file_ctx), None));
+    App::run(ViewContext::new(vec!(file_ctx)));
 
     Ok(())
 }

@@ -4,31 +4,29 @@ use pathfinder_geometry::vector::Vector2F;
 use vello::kurbo::{Affine, Line, Stroke, Vec2};
 use vello::util::RenderContext;
 use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+use winit::window::{Window, WindowId};
+use winit::dpi::LogicalSize;
 use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::Icon;
-use winit::window::{Window, WindowId};
 
-use font::Encoder;
-use pdf::any::AnySync;
-use pdf::backend::Backend;
-use pdf::file::{Cache as PdfCache, File as PdfFile, Log};
-use pdf::object::{Page, PageRc};
-use pdf::PdfError;
-use pdf_render::vello_backend::{OutlineBuilder, VelloBackend};
-use pdf_render::{page_bounds, render_page, Cache};
 use std::fs::File;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use font::Encoder;
+use pdf::file::{File as PdfFile, Cache as PdfCache, Log};
+use pdf::any::AnySync;
+use pdf::object::PageRc;
+use pdf::PdfError;
+use pdf::backend::Backend;
+use pdf_render::vello_backend::{VelloBackend, OutlineBuilder};
+use pdf_render::{Cache, page_bounds, render_page};
 
 use vello::peniko::Color;
 use vello::util::RenderSurface;
-use vello::wgpu;
 use vello::{Renderer, RendererOptions, Scene};
-
-use crate::continuous_scroll::{ContinuousScroll, PageLoader, CurrentPageReplacement, ScrollDirection};
+use vello::wgpu;
 
 pub struct ActiveRenderState<'s> {
     // The fields MUST be in this order, so that the surface is dropped before the window
@@ -44,38 +42,35 @@ enum RenderState<'s> {
 
 pub struct App<'a> {
     renderers: Vec<Option<Renderer>>,
-    render_ctx: RenderContext,
-    render_state: RenderState<'a>,
+    render_ctx : RenderContext,
+    render_state : RenderState<'a>,
     modifiers: ModifiersState,
     mouse_down: bool,
     view_ctx: ViewContext,
     prior_position: Option<Vector2F>,
-    transform: Transform2F,
-    scroll_progress: Option<CurrentPageReplacement>,
-    scroll_direction: ScrollDirection,
+    transform: Transform2F
 }
 
-impl<'a> App<'a> {
+impl<'a>  App<'a> {
     fn new(view_ctx: ViewContext) -> Self {
         Self {
             renderers: vec![],
             render_ctx: RenderContext::new(),
-            render_state: RenderState::Suspended(None),
+            render_state : RenderState::Suspended(None),
             modifiers: ModifiersState::default(),
-            mouse_down: false,
+            mouse_down : false,
             view_ctx,
             prior_position: None,
-            transform: Transform2F::default(),
-            scroll_progress: None,
-            scroll_direction: ScrollDirection::Up,
+            transform: Transform2F::default()
         }
     }
 
-    pub fn run(view_ctx: ViewContext) {
+    pub fn run(view_ctx: ViewContext)
+    {
         let event_loop = EventLoop::new().unwrap();
 
         event_loop.set_control_flow(ControlFlow::Wait);
-
+        
         let mut app = App::new(view_ctx);
 
         let _ = event_loop.run_app(&mut app);
@@ -94,22 +89,14 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let size: winit::dpi::PhysicalSize<u32> = window.inner_size();
         let render_ctx = &mut self.render_ctx;
-        let surface_future = render_ctx.create_surface(
-            window.clone(),
-            size.width,
-            size.height,
-            wgpu::PresentMode::AutoVsync,
-        );
-
+        let surface_future = render_ctx.create_surface(window.clone(), size.width, size.height, wgpu::PresentMode::AutoVsync);
+        
         // We need to block here, in case a Suspended event appeared
-        let surface: RenderSurface =
-            pollster::block_on(surface_future).expect("Error creating surface");
+        let surface: RenderSurface = pollster::block_on(surface_future).expect("Error creating surface");
 
         self.render_state = {
-            self.renderers
-                .resize_with(render_ctx.devices.len(), || None);
-            self.renderers[surface.dev_id]
-                .get_or_insert_with(|| create_vello_renderer(&render_ctx, &surface));
+            self.renderers.resize_with(render_ctx.devices.len(), || None);
+            self.renderers[surface.dev_id].get_or_insert_with(||create_vello_renderer(&render_ctx, &surface));
             RenderState::Active(ActiveRenderState { window, surface })
         };
         event_loop.set_control_flow(ControlFlow::Poll);
@@ -122,12 +109,7 @@ impl<'a> ApplicationHandler for App<'a> {
         event_loop.set_control_flow(ControlFlow::Wait);
     }
 
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        window_id: WindowId,
-        event: WindowEvent,
-    ) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
         // Ignore the event (return from the function) if
         //   - we have no render_state
         //   - OR the window id of the event doesn't match the window id of our render_state
@@ -143,26 +125,19 @@ impl<'a> ApplicationHandler for App<'a> {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::ModifiersChanged(m) => self.modifiers = m.state(),
             WindowEvent::KeyboardInput { event, .. } => {
-                const DELTA: f32 = 60.0;
-
                 if event.state == ElementState::Pressed {
-                    match event.logical_key {
-                        Key::Named(NamedKey::ArrowUp) => {
-                            self.transform =
-                                Transform2F::from_translation(Vector2F::new(0.0, DELTA))
-                                    * self.transform;
-                            render_state.window.request_redraw();
-                            self.scroll_direction = ScrollDirection::Down;
+                    if self.modifiers.shift_key() {
+                        match event.logical_key {
+                            Key::Named(NamedKey::ArrowRight) => self.view_ctx.seek_forward(10),
+                            Key::Named(NamedKey::ArrowLeft) =>  self.view_ctx.seek_backwards(10),
+                            _ => {}
                         }
-                        Key::Named(NamedKey::ArrowDown) => {
-                            self.transform =
-                                Transform2F::from_translation(Vector2F::new(0.0, -DELTA))
-                                    * self.transform;
-                            self.scroll_direction = ScrollDirection::Up;
-
-                            render_state.window.request_redraw();
+                    } else {
+                        match event.logical_key {
+                            Key::Named(NamedKey::ArrowRight) => self.view_ctx.seek_forward(1),
+                            Key::Named(NamedKey::ArrowLeft) =>  self.view_ctx.seek_backwards(1),
+                            _ => {}
                         }
-                        _ => {}
                     }
                 }
             }
@@ -176,32 +151,29 @@ impl<'a> ApplicationHandler for App<'a> {
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                const BASE: f64 = 1.05;
                 const PIXELS_PER_LINE: f64 = 20.0;
 
-                let delta = if let MouseScrollDelta::PixelDelta(delta) = delta {
-                    delta.y
-                } else if let MouseScrollDelta::LineDelta(_, y) = delta {
-                    y as f64 * PIXELS_PER_LINE
-                } else {
-                    0.0
-                };
-                // dbg!(delta);
+                if let Some(prior_position) = self.prior_position {
+                    let exponent = if let MouseScrollDelta::PixelDelta(delta) = delta {
+                        delta.y / PIXELS_PER_LINE
+                    } else if let MouseScrollDelta::LineDelta(_, y) = delta {
+                        y as f64
+                    } else {
+                        0.0
+                    };
 
-                if delta > 0.0 {
-                    self.scroll_direction = ScrollDirection::Down;
+                    self.transform = Transform2F::from_translation(prior_position)
+                        * Transform2F::from_scale(BASE.powf(exponent) as f32)
+                        * Transform2F::from_translation(-prior_position)
+                        * self.transform;
+
+                    render_state.window.request_redraw();
                 } else {
-                    self.scroll_direction = ScrollDirection::Up;
+                    log::warn!(
+                        "Scrolling without mouse in window; this shouldn't be possible"
+                    );
                 }
-                // dbg!(&self.scroll_progress);
-
-                if let Some(progress) = self.scroll_progress.take() {
-                    //TODO
-                };
-
-                self.transform = Transform2F::from_translation(Vector2F::new(0.0, delta as f32))
-                    * self.transform;
-
-                render_state.window.request_redraw();
             }
             WindowEvent::CursorLeft { .. } => {
                 self.prior_position = None;
@@ -210,8 +182,7 @@ impl<'a> ApplicationHandler for App<'a> {
                 let position = Vector2F::new(position.x as f32, position.y as f32);
                 if self.mouse_down {
                     if let Some(prior) = self.prior_position {
-                        self.transform =
-                            Transform2F::from_translation(position - prior) * self.transform;
+                        self.transform = Transform2F::from_translation(position - prior) * self.transform;
                     }
                 }
                 self.prior_position = Some(position);
@@ -220,19 +191,14 @@ impl<'a> ApplicationHandler for App<'a> {
                 let width = render_state.surface.config.width;
                 let height = render_state.surface.config.height;
                 let device_handle = &render_ctx.devices[render_state.surface.dev_id];
-
+                
                 let mut scene = Scene::new();
                 if let Some(current) = self.view_ctx.get_current_mut() {
-                    if let Some((s, scroll)) = current.render(
-                        render_state.window.clone(),
-                        self.transform,
-                        self.scroll_direction,
-                    ) {
+                    if let Some(s) = current.render(render_state.window.clone(), self.transform) {
                         scene = s;
-                        self.scroll_progress = Some(scroll);
                     }
                 }
-
+    
                 let antialiasing_method = vello::AaConfig::Area;
                 let render_params = vello::RenderParams {
                     base_color: Color::WHITE,
@@ -269,128 +235,49 @@ impl<'a> ApplicationHandler for App<'a> {
     }
 }
 
+
 pub struct FileContext {
     page_nr: u32,
-    file: Arc<pdf::file::CachedFile<Vec<u8>>>,
+    file: pdf::file::CachedFile<Vec<u8>>,
     cache: Cache<OutlineBuilder>,
-    continuous_scroll: Option<ContinuousScroll<PdfFileLoader>>,
 }
-
-struct PdfFileLoader{
-    file: Arc<pdf::file::CachedFile<Vec<u8>>>,
-    window: Arc<Window>,
-    transform: Transform2F,
-}
-
-impl PdfFileLoader {
-    pub fn new(file: Arc<pdf::file::CachedFile<Vec<u8>>>, window: Arc<Window>, initial_transform: Transform2F) -> Self {
-        Self {
-            file,
-            window,
-            transform: initial_transform
-        }
-    }
-}
-
-impl PageLoader for PdfFileLoader {
-    fn load_page(&self, page_nr: u32) -> Option<PageRc> {
-        self.file.get_page(page_nr).map_or(None, Some)
-    }
-
-    fn num_pages(&self) -> u32 {
-        self.file.num_pages()
-    }
-
-    fn get_page_bounds(&self, page: &PageRc) -> RectF {
-        let page_bounds = page_bounds(page);
-
-        // Calculate the view box
-        let rotate: Transform2F =
-            Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
-
-        self.transform * rotate * RectF::new(Vector2F::zero(), page_bounds.size())
-    }
-
-    fn get_window_size(&self) -> Vector2F {
-        let window_size: winit::dpi::PhysicalSize<u32> = self.window.inner_size();
-
-        Vector2F::new(window_size.width as f32, window_size.height as f32)
-    }
-
-    fn set_transform(&mut self, transform: Transform2F)  {
-        dbg!(transform);
-        self.transform = transform;
-    }
-
-}
-
 impl FileContext {
     pub fn new(file: pdf::file::CachedFile<Vec<u8>>) -> Self {
-       
         Self {
             page_nr: 0,
+            file,
             cache: Cache::new(OutlineBuilder::default()),
-            continuous_scroll: None,
-            file: Arc::new(file)
         }
     }
 
-    fn render(
-        &mut self,
-        window: Arc<Window>,
-        transform: Transform2F,
-        scroll_direction: ScrollDirection,
-    ) -> Option<(Scene, CurrentPageReplacement)> {
-        let mut backend: VelloBackend = VelloBackend::new(&mut self.cache);
+    fn render(&mut self, window: Arc<Window>, transform: Transform2F) -> Option<Scene> {
+        let page = self.file.get_page(self.page_nr).ok()?;
+        let mut backend = VelloBackend::new(&mut self.cache);
         let resolver = self.file.resolver();
-        
+
+        // Calculate the scale factor to fit the page into the window
+        let bounds = page_bounds(&page);
         let window_size: winit::dpi::PhysicalSize<u32> = window.inner_size();
-        // let scale_x = size.height as f32 / bounds.height();
-        // let scale_y = size.width as f32 / bounds.width();
-        // let transform = transform * Transform2F::from_scale(scale_x.min(scale_y));
+        let scale_x = window_size.height as f32 / bounds.height();
+        let scale_y = window_size.width as f32 / bounds.width();
+        let transform = transform * Transform2F::from_scale(scale_x.min(scale_y));
 
-        let continuous_scroll = self.continuous_scroll.get_or_insert_with(|| {
-            let loader = PdfFileLoader::new(self.file.clone(), window.clone(), transform);
-            let mut continuous_scroll = ContinuousScroll::new(loader);
-            continuous_scroll.go_to_page(10).ok();
+        render_page(&mut backend, &resolver, &page, transform).ok()?;
 
-            continuous_scroll
-        });
-
-        for (page_nr, page, view_box) in continuous_scroll.iter() {
-            dbg!(page_nr, view_box);
-            render_page(
-                &mut backend,
-                &resolver,
-                *page_nr,
-                page,
-                *view_box,
-                transform,
-            )
-            .ok()?;
-        }
-
-        let scroll = continuous_scroll
-            .scroll(scroll_direction, transform);
-
-        Some((backend.finish(), scroll))
+        Some(backend.finish())
     }
 }
 pub struct ViewContext {
     files: Vec<FileContext>,
-    current_file: Option<usize>,
+    current_file: Option<usize>
 }
 impl ViewContext {
-    pub fn new(files: Vec<FileContext>, current_file: Option<usize>) -> Self {
-        let current_file = if files.is_empty() {
-            None
-        } else {
-            current_file.or(Some(0))
-        };
+    pub fn new(files: Vec<FileContext>) -> Self {
+        let current_file = if files.is_empty() {  None } else { Some(0) };
 
         Self {
             files,
-            current_file,
+            current_file
         }
     }
 
@@ -420,15 +307,10 @@ impl ViewContext {
     }
 }
 
+
 fn create_window(event_loop: &ActiveEventLoop) -> Arc<Window> {
     let icon = {
-        let icon: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
-            image::load_from_memory_with_format(
-                include_bytes!("../../logo.png"),
-                image::ImageFormat::Png,
-            )
-            .unwrap()
-            .to_rgba8();
+        let icon: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> = image::load_from_memory_with_format(include_bytes!("../../logo.png"), image::ImageFormat::Png).unwrap().to_rgba8();
 
         let image = icon;
         let (width, height) = image.dimensions();
