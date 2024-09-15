@@ -21,7 +21,7 @@ use pdf::object::PageRc;
 use pdf::PdfError;
 use pdf::backend::Backend;
 use pdf_render::vello_backend::{VelloBackend, OutlineBuilder};
-use pdf_render::{Cache, page_bounds, render_page};
+use pdf_render::{page_bounds, render_page, Cache, Size};
 
 use vello::peniko::Color;
 use vello::util::RenderSurface;
@@ -251,18 +251,14 @@ impl FileContext {
     }
 
     fn render(&mut self, window: Arc<Window>, transform: Transform2F) -> Option<Scene> {
-        let page = self.file.get_page(self.page_nr).ok()?;
         let mut backend = VelloBackend::new(&mut self.cache);
         let resolver = self.file.resolver();
-
-        // Calculate the scale factor to fit the page into the window
-        let bounds = page_bounds(&page);
+    
         let window_size: winit::dpi::PhysicalSize<u32> = window.inner_size();
-        let scale_x = window_size.height as f32 / bounds.height();
-        let scale_y = window_size.width as f32 / bounds.width();
-        let transform = transform * Transform2F::from_scale(scale_x.min(scale_y));
 
-        render_page(&mut backend, &resolver, &page, transform).ok()?;
+        let page = self.file.get_page(self.page_nr).ok()?;
+
+        render_page(&mut backend, &resolver, &page, transform, Some(Size::new(window_size.width as f32, window_size.height as f32))).ok()?;
 
         Some(backend.finish())
     }

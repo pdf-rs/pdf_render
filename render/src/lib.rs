@@ -85,32 +85,57 @@ pub fn page_bounds(page: &Page) -> RectF {
     } = page.media_box().expect("no media box");
     RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top)) * SCALE
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct Size<T = f32> {
+    /// The width.
+    pub width: T,
+    /// The height.
+    pub height: T,
+}
+
+impl<T> Size<T> {
+    /// Creates a new  [`Size`] with the given width and height.
+    pub const fn new(width: T, height: T) -> Self {
+        Size { width, height }
+    }
+}
+
 pub fn render_page(
     backend: &mut impl Backend,
     resolve: &impl Resolve,
     page: &Page,
     transform: Transform2F,
+    size: Option<Size>,
 ) -> Result<Transform2F, PdfError> {
-    let bounds = page_bounds(page);
+    let page_bounds = page_bounds(page);
     let rotate: Transform2F =
         Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
-    let br = rotate * RectF::new(Vector2F::zero(), bounds.size());
+    
+    let br = rotate * RectF::new(Vector2F::zero(), page_bounds.size());
 
     let translate: Transform2F = Transform2F::from_translation(Vector2F::new(
         -br.min_x().min(br.max_x()),
         -br.min_y().min(br.max_y()),
     ));
+
+    let mut scale_factor = 1.0;
+    if let Some(size) = size {
+        scale_factor = size.width/ br.width();
+    }
+
+    let transform = transform * Transform2F::from_scale(scale_factor);
+
     let view_box = transform * translate * br;
+    
     backend.set_view_box(view_box);
 
-    // Here is the so called current transformation matrix(CTM)
-    
     let root_transformation = transform
         * translate
         * rotate
         // zoom out x by SCALE, moved (-bounds.min_x()), so new x:  old_x * SCALE + (-bounds.min_x())
         // zoom out y by -SCALE, moved bounds.max_y(), so new y:  old y * (-SCALE) + bounds.max_y() 
-        * Transform2F::row_major(SCALE, 0.0, -bounds.min_x(), 0.0, -SCALE, bounds.max_y());
+        * Transform2F::row_major(SCALE, 0.0, -page_bounds.min_x(), 0.0, -SCALE, page_bounds.max_y());
 
     let resources = t!(page.resources());
 

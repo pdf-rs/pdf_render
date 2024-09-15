@@ -22,12 +22,11 @@ structopt = "0.3"
 font = { git = "https://github.com/pdf-rs/font", branch = "vello"}
 itertools = "*"
 image = "0.24.2"
-vello = { version = "0.2.0" }
+vello = { path="../../vello/vello" }
 winit = "0.30.0"
 env_logger = "0.10.0"
 pollster = "0.3.0"
 clap = { version = "4.5.10", features = ["derive"] }
-backtrace = "0.3.73"
 
 [dev-dependencies]
 criterion = "0.3"
