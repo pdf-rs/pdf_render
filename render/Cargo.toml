@@ -36,7 +36,7 @@ once_cell = "*"
 serde_json = "*"
 glyphmatcher = { git = "https://github.com/s3bk/glyphmatcher", optional = true }
 vello_encoding = "*"
-vello = { path="../../vello/vello" }
+vello =  { git="https://github.com/linebender/vello", branch="main" }
 
 [dev-dependencies]
 criterion = "0.3"

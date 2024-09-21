@@ -5,5 +5,5 @@ members = [
     "render",
     # "view",
     "vview",
-    # "examples/pdf2image",
+    "examples/pdf_viewer",
 ]

@@ -22,7 +22,7 @@ structopt = "0.3"
 font = { git = "https://github.com/pdf-rs/font", branch = "vello"}
 itertools = "*"
 image = "0.24.2"
-vello = { path="../../vello/vello" }
+vello =  { git="https://github.com/linebender/vello", branch="main" }
 winit = "0.30.0"
 env_logger = "0.10.0"
 pollster = "0.3.0"

@@ -124,6 +124,7 @@ pub fn render_page(
         scale_factor = size.width/ br.width();
     }
 
+    dbg!(scale_factor,size, br);
     let transform = transform * Transform2F::from_scale(scale_factor);
 
     let view_box = transform * translate * br;
