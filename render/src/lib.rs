@@ -124,11 +124,12 @@ pub fn render_page(
         scale_factor = size.width/ br.width();
     }
 
-    dbg!(scale_factor,size, br);
     let transform = transform * Transform2F::from_scale(scale_factor);
 
     let view_box = transform * translate * br;
     
+    // dbg!(scale_factor,size, br, view_box);
+
     backend.set_view_box(view_box);
 
     let root_transformation = transform

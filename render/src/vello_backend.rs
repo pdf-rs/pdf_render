@@ -8,7 +8,7 @@ use pathfinder_content::{
 };
 use pathfinder_geometry::{rect::RectF, transform2d::Transform2F, vector::Vector2F};
 use vello::{
-    glyph::skrifa::color::Brush,
+    skrifa::color::Brush,
     kurbo::{Affine, BezPath, Cap, Stroke},
     peniko::{Blob, BrushRef, Color, Fill, Format, Image, Mix},
     Scene,
