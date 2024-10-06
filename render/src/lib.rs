@@ -46,7 +46,8 @@ use pdf::{content::TextMode, object::*};
 use renderstate::RenderState;
 use std::sync::Arc;
 
-const SCALE: f32 = 25.4/72.;
+// turn into mm
+const SCALE: f32 = 1.;
 
 #[derive(Copy, Clone, Default)]
 pub struct BBox(Option<RectF>);
@@ -106,9 +107,9 @@ pub fn render_page(
     resolve: &impl Resolve,
     page: &Page,
     transform: Transform2F,
-    size: Option<Size>,
 ) -> Result<Transform2F, PdfError> {
     let page_bounds = page_bounds(page);
+
     let rotate: Transform2F =
         Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
     
@@ -119,17 +120,9 @@ pub fn render_page(
         -br.min_y().min(br.max_y()),
     ));
 
-    let mut scale_factor = 1.0;
-    if let Some(size) = size {
-        scale_factor = size.width/ br.width();
-    }
-
-    let transform = transform * Transform2F::from_scale(scale_factor);
-
     let view_box = transform * translate * br;
     
-    // dbg!(scale_factor,size, br, view_box);
-
+    // dbg!(size, view_box);
     backend.set_view_box(view_box);
 
     let root_transformation = transform
