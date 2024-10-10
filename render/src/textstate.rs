@@ -2,7 +2,7 @@ use pathfinder_geometry::{
     vector::Vector2F,
     transform2d::Transform2F,
 };
-use font::{Encoder, GlyphId};
+use font::{Encoder, GlyphId, Shape};
 use crate::{BlendMode, backend::{FillMode, Stroke}};
 
 use super::{
@@ -20,7 +20,7 @@ use itertools::Either;
 use istring::SmallString;
 
 #[derive(Clone)]
-pub struct TextState<E: Encoder> {
+pub struct TextState<E: Encoder + Clone + 'static> {
     pub text_matrix: Transform2F, // tracks current glyph
     pub line_matrix: Transform2F, // tracks current line
     pub char_space: f32, // Character spacing
@@ -33,7 +33,7 @@ pub struct TextState<E: Encoder> {
     pub rise: f32, // Text rise
     pub knockout: f32, //Text knockout
 }
-impl<E: Encoder> TextState<E> {
+impl<E: Encoder + Clone + 'static> TextState<E> {
     pub fn new() -> TextState<E> {
         TextState {
             text_matrix: Transform2F::default(),
@@ -66,7 +66,7 @@ impl<E: Encoder> TextState<E> {
         self.text_matrix = m;
         self.line_matrix = m;
     }
-    pub fn draw_text<B: Backend>(&mut self, backend: &mut B, gs: &GraphicsState<B>, data: &[u8], span: &mut Span, fill_mode: BlendMode, stroke_mode: BlendMode) {
+    pub fn draw_text<B: Backend<Encoder = E>>(&mut self, backend: &mut B, gs: &GraphicsState<B>, data: &[u8], span: &mut Span, fill_mode: BlendMode, stroke_mode: BlendMode) {
         use font::Font;
         let e = match self.font_entry {
             Some(ref e) => e,
@@ -100,7 +100,7 @@ impl<E: Encoder> TextState<E> {
         };
         let e = self.font_entry.as_ref().expect("no font");
 
-        let tr = Transform2F::row_major(
+          let tr = Transform2F::row_major(
             self.horiz_scale * self.font_size, 0., 0.,
             0., self.font_size, self.rise
         ) * e.font.font_matrix();
@@ -134,17 +134,9 @@ impl<E: Encoder> TextState<E> {
                 span.width += advance;
                 continue;
             }
-            if let Some(glyph) = glyph {
+            if let (Some(glyph), Some(draw_mode)) = (glyph, draw_mode.as_ref()){
                 let transform = gs.transform * self.text_matrix * tr;
-                match glyph.shape {
-                    
-                }
-                if glyph.path.len() != 0 {
-                    span.bbox.add(gs.transform * transform * glyph.path.bounds());
-                    if let Some(ref draw_mode) = draw_mode {
-                        backend.draw_glyph(&e.font, &glyph, draw_mode, transform, gs.clip_path_id);
-                    }
-                }
+                backend.draw_glyph(&e.font, &glyph, draw_mode, transform, gs.clip_path_id);
             } else {
                 debug!("no glyph for gid {:?}", gid);
             }

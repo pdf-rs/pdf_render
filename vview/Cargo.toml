@@ -2,7 +2,7 @@
 name = "pdf_vview"
 version = "0.1.0"
 authors = ["Sebastian Köln <s3bk@protonmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [features]
 unstable = []
@@ -16,17 +16,24 @@ features = ["dump"]
 path = "../render"
 
 [dependencies]
+pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
 log = { version = "0.4" }
 structopt = "0.3"
-font = { git = "https://github.com/pdf-rs/font" }
+font = { git = "https://github.com/pdf-rs/font", branch = "vello"}
 itertools = "*"
 image = "0.24.2"
-vello = { path = "../../vello" }
-winit = "0.29.10"
+vello =  { git="https://github.com/linebender/vello", branch="main" }
+winit = "0.30.0"
 env_logger = "0.10.0"
+pollster = "0.3.0"
+clap = { version = "4.5.10", features = ["derive"] }
 
 [dev-dependencies]
 criterion = "0.3"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "pdf_vview"
+path = "bin/view.rs"

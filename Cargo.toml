@@ -3,30 +3,7 @@ resolver = "2"
 
 members = [
     "render",
-    "view",
+    # "view",
     "vview",
-    "examples/pdf2image",
+    "examples/pdf_viewer",
 ]
-[patch.crates-io]
-pathfinder_gl = { git = "https://github.com/servo/pathfinder" }
-pathfinder_webgl = { git = "https://github.com/servo/pathfinder" }
-pathfinder_gpu = { git = "https://github.com/servo/pathfinder" }
-pathfinder_content = { git = "https://github.com/servo/pathfinder" }
-pathfinder_color = { git = "https://github.com/servo/pathfinder" }
-pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
-pathfinder_renderer = { git = "https://github.com/servo/pathfinder" }
-pathfinder_resources = { git = "https://github.com/servo/pathfinder" }
-pathfinder_export = { git = "https://github.com/servo/pathfinder" }
-pathfinder_simd = { git = "https://github.com/servo/pathfinder" }
-
-[patch."https://github.com/servo/pathfinder"]
-pathfinder_gl = { path = "../pathfinder/gl" }
-pathfinder_webgl = { path = "../pathfinder/webgl" }
-pathfinder_gpu = { path = "../pathfinder/gpu" }
-pathfinder_content = { path = "../pathfinder/content" }
-pathfinder_color = { path = "../pathfinder/color" }
-pathfinder_renderer = { path = "../pathfinder/renderer" }
-pathfinder_resources = { path = "../pathfinder/resources" }
-pathfinder_export = { path = "../pathfinder/export" }
-pathfinder_simd = { path = "../pathfinder/simd" }
-pathfinder_geometry = { path = "../pathfinder/geometry" }

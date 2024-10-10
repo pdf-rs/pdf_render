@@ -1,0 +1,29 @@
+[package]
+name = "pdf_viewer"
+version = "0.1.0"
+authors = ["vidy videni vidyvideni@gmail.com"]
+edition = "2021"
+
+[dependencies]
+iced = { path = "../../../iced", features = [
+    "wgpu",
+    "canvas",
+    "highlighter",
+    'svg',
+    "advanced",
+    "tokio",
+    "debug",
+    "image",
+], default-features = false}
+iced_winit = {  path = "../../../iced/winit" }
+iced_wgpu = {  path = "../../../iced/wgpu" }
+pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
+wgpu = "22.0.0"
+oneshot = "0.1.8"
+bytemuck = "1.18.0"
+vello =  { path="../../../vello/vello" }
+
+pdf = { git = "https://github.com/pdf-rs/pdf" }
+pdf_render = { path = "../../render" }
+
+rfd = "0.14.1"

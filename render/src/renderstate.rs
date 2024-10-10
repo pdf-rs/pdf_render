@@ -1,11 +1,11 @@
 use pathfinder_content::outline::ContourIterFlags;
-use pathfinder_renderer::scene::ClipPath;
 use pdf::object::*;
 use pdf::primitive::{Primitive, Dictionary};
 use pdf::content::{Op, Matrix, Point, Rect, Color, Rgb, Cmyk, Winding, FormXObject};
 use pdf::error::{PdfError, Result};
 use pdf::content::TextDrawAdjusted;
 use crate::backend::{Backend, BlendMode, Stroke, FillMode};
+use crate::graphicsstate::ClipPath;
 
 use pathfinder_geometry::{
     vector::Vector2F,
@@ -74,10 +74,11 @@ impl Cvt for Cmyk {
     }
 }
 
-pub struct RenderState<'a, R: Resolve, B: Backend> {
+pub struct RenderState<'a, R: Resolve, B: Backend>
+ {
     graphics_state: GraphicsState<'a, B>,
-    text_state: TextState,
-    stack: Vec<(GraphicsState<'a, B>, TextState)>,
+    text_state: TextState<B::Encoder>,
+    stack: Vec<(GraphicsState<'a, B>, TextState<B::Encoder>)>,
     current_outline: Outline,
     current_contour: Contour,
     resolve: &'a R,
@@ -200,10 +201,11 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             Op::Shade { ref name } => {},
             Op::Clip { winding } => {
                 self.flush();
-                let mut path = self.current_outline.clone().transformed(&self.graphics_state.transform);
+                let mut path: Outline = self.current_outline.clone().transformed(&self.graphics_state.transform);
                 let clip_path_rect = to_rect(&path);
 
-                let (path, r, parent) = match (self.graphics_state.clip_path_rect, clip_path_rect, self.graphics_state.clip_path_id) {
+                let (path, r, parent) = 
+                match (self.graphics_state.clip_path_rect, clip_path_rect, self.graphics_state.clip_path_id) {
                     (Some(r1), Some(r2), Some(p)) => {
                         let r = r1.intersection(r2).unwrap_or_default();
                         (Outline::from_rect(r), Some(r), None)
@@ -227,9 +229,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
 
                 let id = self.backend.create_clip_path(path.clone(), winding.cvt(), parent);
                 self.graphics_state.clip_path_id = Some(id);
-                let mut clip = ClipPath::new(path);
-                clip.set_fill_rule(winding.cvt());
-                self.graphics_state.clip_path = Some(clip);
+                self.graphics_state.clip_path = Some(ClipPath { outline: path, fill_rule: winding.cvt()});
                 self.graphics_state.clip_path_rect = r;
             },
 
@@ -394,7 +394,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         }
     }
 
-    fn text(&mut self, inner: impl FnOnce(&mut B, &mut TextState, &mut GraphicsState<B>, &mut Span), op_nr: usize) {
+    fn text(&mut self, inner: impl FnOnce(&mut B, &mut TextState<B::Encoder>, &mut GraphicsState<B>, &mut Span), op_nr: usize) {
         let mut span = Span::default();
         let tm = self.text_state.text_matrix;
         let origin = tm.translation();
@@ -568,7 +568,7 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                     Ok(cmyk2rgb((c, m, y, k), mode))
                 }
                 ColorSpace::DeviceN { ref names, ref alt, ref tint, ref attr } => {
-                    assert_eq!(args.len(), tint.input_dim());
+                    pdf_assert_eq!(args.len(), tint.input_dim());
                     let mut input = vec![0.; args.len()];
                     for (i, a) in input.iter_mut().zip(args.iter()) {
                         *i = a.as_number()?;
@@ -674,7 +674,6 @@ fn cmyk2rgb((c, m, y, k): (f32, f32, f32, f32), mode: BlendMode) -> Fill {
         1.0 - clamp(y + k),
     )
 }
-
 
 fn to_rect(o: &Outline) -> Option<RectF> {
     if o.contours().len() != 1 {

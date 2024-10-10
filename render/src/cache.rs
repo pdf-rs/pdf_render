@@ -2,10 +2,12 @@ use std::path::{PathBuf};
 use std::sync::Arc;
 
 use font::Encoder;
+use pathfinder_color::ColorU;
 use pdf::object::*;
 use pdf::primitive::Name;
 use pdf::font::{Font as PdfFont};
 use pdf::error::{Result};
+use std::slice;
 
 use pathfinder_geometry::{
     vector::{Vector2I},
@@ -30,6 +32,31 @@ impl ValueSize for ImageResult {
             Ok(ref im) => im.pixels().len() * 4,
             Err(_) => 1,
         }
+    }
+}
+
+impl ImageResult
+{
+    pub fn rgba_data(&self) -> Option<(Arc<&'static [u8]>, u32, u32)> {
+        match *self.0 {
+            Ok(ref im) => {
+                let len = im.pixels().len();
+                let data = unsafe {
+                    std::slice::from_raw_parts(im.pixels().as_ptr() as *const u8, 4 * len)
+                };
+
+                Some((Arc::from(data), im.size().x() as u32, im.size().y() as u32))
+            },
+            Err(_) => None,
+        }
+    }
+}
+
+
+#[inline]
+pub fn color_slice_to_u8_slice(slice: &[ColorU]) -> &[u8] {
+    unsafe {
+        slice::from_raw_parts(slice.as_ptr() as *const u8, slice.len() * 4)
     }
 }
 

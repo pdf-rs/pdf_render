@@ -34,12 +34,14 @@ impl<'a> ImageData<'a> {
     pub fn into_data(self) -> Cow<'a, [ColorU]> {
         self.data
     }
-    pub fn rgba_data(&self) -> &[u8] {
+    pub fn rgba_data(&self) -> Arc<&'a [u8]> {
         let ptr: *const ColorU = self.data.as_ptr();
         let len = self.data.len();
-        unsafe {
-            std::slice::from_raw_parts(ptr.cast(), 4 * len)
-        }
+        let data = unsafe {
+            std::slice::from_raw_parts(ptr.cast() as *const u8, 4 * len)
+        };
+
+        Arc::from(data)
     }
     /// angle must be in range 0 .. 4
     pub fn rotate(&self, angle: u8) -> ImageData<'_> {
@@ -93,7 +95,7 @@ impl<'a> ImageData<'a> {
 
     pub fn safe(&self, path: &Path) {
         let data = self.rgba_data();
-        ImageBuffer::<Rgba<u8>, &[u8]>::from_raw(self.width, self.height, data).unwrap().save(path).unwrap()
+        ImageBuffer::<Rgba<u8>, &[u8]>::from_raw(self.width, self.height, &*data).unwrap().save(path).unwrap()
     }
 }
 
@@ -146,7 +148,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
             let mask_height = mask.height as usize;
             let bits_per_component = mask.bits_per_component.ok_or_else(|| PdfError::Other { msg: format!("no bits per component")})?;
             let bits = mask_width * mask_height * bits_per_component as usize;
-            assert_eq!(data.len(), (bits + 7) / 8);
+            pdf_assert_eq!(data.len(), (bits + 7) / 8);
 
             let mut alpha: Data = match bits_per_component {
                 1 => data.iter().flat_map(|&b| (0..8).map(move |i| ex(b >> i, 1))).collect::<Vec<u8>>().into(),
@@ -207,7 +209,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
             // dbg!(&cs);
             match cs {
                 Some(&ColorSpace::DeviceGray) => {
-                    assert_eq!(pixel_data.len(), pixel_count);
+                    pdf_assert_eq!(pixel_data.len(), pixel_count);
                     pixel_data.iter().zip(alpha).map(|(&g, a)| ColorU { r: g, g: g, b: g, a }).collect()
                 }
                 Some(&ColorSpace::Indexed(ref base, hival, ref lookup)) => {
@@ -263,7 +265,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
                 }
                 None => {
                     info!("image has data/pixel ratio of 1, but no colorspace");
-                    assert_eq!(pixel_data.len(), pixel_count);
+                    pdf_assert_eq!(pixel_data.len(), pixel_count);
                     pixel_data.iter().zip(alpha).map(|(&g, a)| ColorU { r: g, g: g, b: g, a }).collect()
                 }
                 _ => unimplemented!("cs={:?}", cs),
@@ -357,4 +359,3 @@ fn cmyk2color_arr(data: &[u8], alpha: impl Iterator<Item=u8>, mode: BlendMode) -
         cmyk2color(buf, a, mode)
     }).collect()
 }
-

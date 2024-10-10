@@ -24,7 +24,7 @@ pub enum BlendMode {
 }
 
 pub trait Backend {
-    type Encoder: Encoder;
+    type Encoder: Encoder + Clone + 'static;
     type ClipPathId: Copy;
 
     fn create_clip_path(&mut self, path: Outline, fill_rule: FillRule, parent: Option<Self::ClipPathId>) -> Self::ClipPathId;
@@ -50,6 +50,8 @@ pub struct FillMode {
     pub alpha: f32,
     pub mode: BlendMode,
 }
+
+#[derive(Debug)]
 pub enum DrawMode {
     Fill { fill: FillMode },
     Stroke { stroke: FillMode, stroke_mode: Stroke },

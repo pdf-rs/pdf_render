@@ -1,4 +1,4 @@
-use crate::{TextSpan, DrawMode, Backend, FontEntry, Fill, backend::{BlendMode, FillMode}, BBox};
+use crate::{backend::{BlendMode, FillMode, StrokeStyle}, BBox, Backend, DrawMode, Fill, FontEntry, TextSpan};
 use pathfinder_content::{
     outline::Outline,
     fill::FillRule,
@@ -8,18 +8,14 @@ use pathfinder_geometry::{
     transform2d::Transform2F,
     vector::Vector2F,
 };
-use pathfinder_content::{
-    stroke::{StrokeStyle},
-}; 
 use pdf::object::{Ref, XObject, ImageXObject, Resolve, Resources, MaybeRef};
-use font::Glyph;
+use font::{Encoder, Glyph};
 use pdf::font::Font as PdfFont;
 use pdf::error::PdfError;
 use std::sync::Arc;
 use std::path::PathBuf;
 use crate::font::{load_font, StandardCache};
 use globalcache::sync::SyncCache;
-use crate::backend::Stroke;
 
 pub struct ClipPath {
     pub path: Outline,
@@ -30,16 +26,16 @@ pub struct ClipPath {
 #[derive(Copy, Clone, Debug)]
 pub struct ClipPathId(pub usize);
 
-pub struct Tracer<'a> {
+pub struct Tracer<'a, E: Encoder> {
     pub items: Vec<DrawItem>,
     clip_paths: &'a mut Vec<ClipPath>,
     pub view_box: RectF,
-    cache: &'a TraceCache,
+    cache: &'a TraceCache<E>,
     op_nr: usize,
 }
-pub struct TraceCache {
-    fonts: Arc<SyncCache<u64, Option<Arc<FontEntry>>>>,
-    std: StandardCache,
+pub struct TraceCache<E:Encoder> {
+    fonts: Arc<SyncCache<u64, Option<Arc<FontEntry<E>>>>>,
+    std: StandardCache<E>,
 }
 fn font_key(font_ref: &MaybeRef<PdfFont>) -> u64 {
     match font_ref {
@@ -47,7 +43,7 @@ fn font_key(font_ref: &MaybeRef<PdfFont>) -> u64 {
         MaybeRef::Indirect(re) => re.get_ref().get_inner().id as _
     }
 }
-impl TraceCache {
+impl<E:Encoder> TraceCache<E> {
     pub fn new() -> Self {
         let standard_fonts = PathBuf::from(std::env::var_os("STANDARD_FONTS").expect("STANDARD_FONTS is not set. Please check https://github.com/pdf-rs/pdf_render/#fonts for instructions."));
 
@@ -56,7 +52,7 @@ impl TraceCache {
             std: StandardCache::new(standard_fonts),
         }
     }
-    pub fn get_font(&self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
+    pub fn get_font(&self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry<>>>, PdfError> {
         let mut error = None;
         let val = self.fonts.get(font_key(font_ref), || 
             match load_font(font_ref, resolve, &self.std) {
@@ -186,7 +182,7 @@ pub enum DrawItem {
 pub struct VectorPath {
     pub outline: Outline,
     pub fill: Option<FillMode>,
-    pub stroke: Option<(FillMode, Stroke)>,
+    pub stroke: Option<(FillMode, StrokeStyle)>,
     pub transform: Transform2F,
     pub op_nr: usize,
     pub clip: Option<ClipPathId>,

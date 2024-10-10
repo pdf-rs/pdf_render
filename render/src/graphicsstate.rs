@@ -1,9 +1,18 @@
-use pathfinder_content::stroke::StrokeStyle;
-use pathfinder_renderer::{paint::PaintId, scene::ClipPath};
 use pdf::object::ColorSpace;
+use pathfinder_content::{fill::FillRule, outline::Outline, stroke::StrokeStyle};
+use crate::{Fill, Backend, backend::Stroke};
+use pathfinder_geometry::{
+    transform2d::Transform2F,
+    rect::RectF,
+};
 
-use pathfinder_geometry::{transform2d::Transform2F, rect::RectF};
-use crate::{Fill, backend::Stroke, Backend};
+
+/// Describes a path that can be used to clip other paths.
+#[derive(Clone, Debug)]
+pub struct ClipPath {
+    pub outline: Outline,
+    pub fill_rule: FillRule,
+}
 
 pub struct GraphicsState<'a, B: Backend> {
     pub transform: Transform2F,
@@ -11,10 +20,10 @@ pub struct GraphicsState<'a, B: Backend> {
 
     pub fill_color: Fill,
     pub fill_color_alpha: f32,
-    pub fill_paint: Option<PaintId>,
+    pub fill_paint: Option<usize>,
     pub stroke_color: Fill,
     pub stroke_color_alpha: f32,
-    pub stroke_paint: Option<PaintId>,
+    pub stroke_paint: Option<usize>,
     pub clip_path_id: Option<B::ClipPathId>,
     pub clip_path: Option<ClipPath>,
     pub clip_path_rect: Option<RectF>,
