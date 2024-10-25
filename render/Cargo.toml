@@ -29,7 +29,7 @@ itertools = "*"
 image = "0.24.2"
 instant = "*"
 custom_debug_derive = "*"
-globalcache = { git = "https://github.com/s3bk/cachelib", features = ["sync"] }
+globalcache = { version = "0.3", features = ["sync"] }
 istring = { git = "https://github.com/s3bk/istring" }
 once_cell = "*"
 serde_json = "*"
