@@ -116,7 +116,7 @@ pub fn load_font(font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve, cache: &S
             debug!("loading {name} instead");
             match cache.fonts.get(name).or_else(|| cache.fonts.get("Arial")) {
                 Some(file_name) => {
-                    let val = cache.inner.get(file_name.clone(), || {
+                    let val = cache.inner.get(file_name.clone(), |_| {
                         let data = match std::fs::read(cache.dir.join(file_name)) {
                             Ok(data) => data,
                             Err(e) => {
