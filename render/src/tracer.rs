@@ -58,7 +58,7 @@ impl TraceCache {
     }
     pub fn get_font(&self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
         let mut error = None;
-        let val = self.fonts.get(font_key(font_ref), || 
+        let val = self.fonts.get(font_key(font_ref), |_| 
             match load_font(font_ref, resolve, &self.std) {
                 Ok(Some(f)) => Some(Arc::new(f)),
                 Ok(None) => None,
