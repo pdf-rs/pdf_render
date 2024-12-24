@@ -6,6 +6,7 @@ edition = "2021"
 
 [features]
 unstable = []
+embed = ["dep:rust-embed"]
 
 [[bench]]
 name = "render"
@@ -34,6 +35,7 @@ istring = { git = "https://github.com/s3bk/istring" }
 once_cell = "*"
 serde_json = "*"
 glyphmatcher = { git = "https://github.com/s3bk/glyphmatcher" }
+rust-embed = { version = "*", optional = true, features = ["interpolate-folder-path"] }
 
 [dev-dependencies]
 criterion = "0.3"

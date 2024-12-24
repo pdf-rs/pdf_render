@@ -38,22 +38,13 @@ pub struct Cache {
     std: StandardCache,
     missing_fonts: Vec<Name>,
 }
+
 impl Cache {
     pub fn new() -> Cache {
-        let standard_fonts;
-        if let Some(path) = std::env::var_os("STANDARD_FONTS") {
-            standard_fonts = PathBuf::from(path);
-        } else {
-            eprintln!("PDF: STANDARD_FONTS not set. using fonts/ instead.");
-            standard_fonts = PathBuf::from("fonts");
-        }
-        if !standard_fonts.is_dir() {
-            panic!("STANDARD_FONTS (or fonts/) is not directory.");
-        }
         Cache {
             fonts: SyncCache::new(),
             images: SyncCache::new(),
-            std: StandardCache::new(standard_fonts),
+            std: StandardCache::new(),
             missing_fonts: Vec::new(),
         }
     }

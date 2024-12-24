@@ -49,11 +49,9 @@ fn font_key(font_ref: &MaybeRef<PdfFont>) -> u64 {
 }
 impl TraceCache {
     pub fn new() -> Self {
-        let standard_fonts = PathBuf::from(std::env::var_os("STANDARD_FONTS").expect("STANDARD_FONTS is not set. Please check https://github.com/pdf-rs/pdf_render/#fonts for instructions."));
-
         TraceCache {
             fonts: SyncCache::new(),
-            std: StandardCache::new(standard_fonts),
+            std: StandardCache::new(),
         }
     }
     pub fn get_font(&self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry>>, PdfError> {
