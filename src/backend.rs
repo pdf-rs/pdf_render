@@ -11,7 +11,7 @@ use pathfinder_content::{
 use pdf::{content::{Op, Point, ViewRect}, object::{ImageXObject, MaybeRef, Ref, Resolve, Resources, XObject}};
 use pdf::error::PdfError;
 use font::{Encoder, Glyph};
-use crate::font::FontRc;
+use crate::{ImageData, font::FontRc};
 
 use super::{FontEntry, TextSpan, Fill};
 use pdf::font::Font as PdfFont;
@@ -26,6 +26,7 @@ pub enum BlendMode {
 pub trait Backend {
     type Encoder: Encoder + Clone + 'static;
     type ClipPathId: Copy;
+    type Image;
 
     fn create_clip_path(&mut self, path: Outline, fill_rule: FillRule, parent: Option<Self::ClipPathId>) -> Self::ClipPathId;
     fn draw(&mut self, outline: &Outline, mode: &DrawMode, fill_rule: FillRule, transform: Transform2F, clip: Option<Self::ClipPathId>);

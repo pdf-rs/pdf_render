@@ -1,6 +1,6 @@
 use pdf::file::FileOptions;
 use pdf_render::render_page;
-use pdf_render::tracer::{TraceCache, Tracer};
+use pdf_render::tracer::{NullEncoder, TraceCache, Tracer};
 
 fn main() {
     env_logger::init();
@@ -9,7 +9,7 @@ fn main() {
     let file = FileOptions::cached().open(&arg).unwrap();
     let resolver = file.resolver();
 
-    let mut cache = TraceCache::new();
+    let mut cache = TraceCache::<NullEncoder>::new();
 
     for page in file.pages() {
         let p = page.unwrap();

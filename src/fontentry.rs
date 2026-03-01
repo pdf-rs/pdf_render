@@ -5,10 +5,12 @@ use font::{Font, CffFont, Encoder, FontVariant, GlyphId};
 use glyphmatcher::FontDb;
 
 use itertools::Itertools;
+use log::{debug, info, warn};
 use pdf::encoding::BaseEncoding;
 use pdf::font::{Font as PdfFont, Widths, CidToGidMap};
 use pdf::object::{Resolve, MaybeRef};
 use pdf::error::PdfError;
+use pdf::t;
 use pdf_encoding::{Encoding, glyphname_to_unicode};
 use istring::SmallString;
 use crate::font::FontRc;
@@ -24,7 +26,7 @@ pub struct FontEntry<E: Encoder> {
 
 
 impl<E: Encoder + 'static> FontEntry<E> {
-    pub fn build(font: FontRc<E>, pdf_font: MaybeRef<PdfFont>, 
+    pub fn build(font: FontRc<E>, pdf_font: MaybeRef<PdfFont>,
         #[cfg(feature="glyphmatcher")]
         font_db: Option<&FontDb>, resolve: &impl Resolve, require_unique_unicode: bool) -> Result<FontEntry<E>, PdfError> {
         let mut is_cid = pdf_font.is_cid();
@@ -230,7 +232,7 @@ impl<E: Encoder + 'static> FontEntry<E> {
                 cmap
             }
         };
-        
+
         #[cfg(feature="glyphmatcher")]
         if let Some(font_db) = font_db {
             if let Some(name) = name {

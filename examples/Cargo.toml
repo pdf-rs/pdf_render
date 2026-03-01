@@ -13,7 +13,7 @@ name = "render"
 harness = false
 
 [dependencies.pdf]
-default-features=false 
+default-features=false
 features = ["cache", "dump"]
 git = "https://github.com/pdf-rs/pdf"
 
@@ -23,6 +23,7 @@ pathfinder_color = { git = "https://github.com/servo/pathfinder" }
 pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
 pathfinder_resources = { git = "https://github.com/servo/pathfinder" }
 pathfinder_content = { git = "https://github.com/servo/pathfinder" }
+pathfinder_renderer = { git = "https://github.com/servo/pathfinder" }
 log = "0.4"
 font = { git = "https://github.com/pdf-rs/font", branch = "vello", features=['cff']}
 pdf_encoding = "0.4"
@@ -36,7 +37,8 @@ once_cell = "*"
 serde_json = "*"
 glyphmatcher = { git = "https://github.com/s3bk/glyphmatcher", optional = true }
 vello_encoding = "*"
-vello =  { git="https://github.com/linebender/vello", branch="main" }
+vello = "0.7.0"
+rand = "*"
 
 [dev-dependencies]
 criterion = "0.3"

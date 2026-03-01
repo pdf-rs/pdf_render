@@ -1,5 +1,6 @@
 use image::{RgbaImage, ImageBuffer, Rgba};
-use pdf::object::*;
+use log::{debug, info, warn};
+use pdf::{object::*, t};
 use pdf::error::PdfError;
 use pathfinder_color::ColorU;
 use std::borrow::Cow;
@@ -34,14 +35,14 @@ impl<'a> ImageData<'a> {
     pub fn into_data(self) -> Cow<'a, [ColorU]> {
         self.data
     }
-    pub fn rgba_data(&self) -> Arc<&'a [u8]> {
+    pub fn rgba_data(&self) -> &'a [u8] {
         let ptr: *const ColorU = self.data.as_ptr();
         let len = self.data.len();
         let data = unsafe {
             std::slice::from_raw_parts(ptr.cast() as *const u8, 4 * len)
         };
 
-        Arc::from(data)
+        data
     }
     /// angle must be in range 0 .. 4
     pub fn rotate(&self, angle: u8) -> ImageData<'_> {
@@ -53,13 +54,13 @@ impl<'a> ImageData<'a> {
             },
             1 => {
                 let mut data = Vec::with_capacity(self.data.len());
-                
+
                 for y in 0 .. self.width as usize {
                     for x in (0 .. self.height as usize).rev() {
                         data.push(self.data[x * self.width as usize + y]);
                     }
                 }
-                
+
                 ImageData::new(
                     data,
                     self.height,
@@ -76,13 +77,13 @@ impl<'a> ImageData<'a> {
             }
             3 => {
                 let mut data = Vec::with_capacity(self.data.len());
-                
+
                 for y in (0 .. self.width as usize).rev() {
                     for x in 0 .. self.height as usize {
                         data.push(self.data[x * self.width as usize + y]);
                     }
                 }
-                
+
                 ImageData::new(
                     data,
                     self.height,
@@ -170,7 +171,7 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
     fn ex(b: u8, bits: u8) -> u8 {
         b & ((1 << bits) - 1)
     }
-    
+
     fn resolve_cs<'a>(cs: &'a ColorSpace, resources: &'a Resources) -> Option<&'a ColorSpace> {
         match cs {
             ColorSpace::Icc(icc) => {
@@ -308,7 +309,7 @@ fn rgb2rgba(c: &[u8], a: u8, mode: BlendMode) -> ColorU {
             ColorU { r: 255 - c[0], g: 255 - c[1], b: 255 - c[2], a }
         }
     }
-    
+
 }
 fn rgb2rgb(r: f32, g: f32, b: f32, mode: BlendMode) -> [u8; 3] {
     match mode {
@@ -319,7 +320,7 @@ fn rgb2rgb(r: f32, g: f32, b: f32, mode: BlendMode) -> [u8; 3] {
             [ 255 - (255. * r) as u8, 255 - (255. * g) as u8, 255 - (255. * b) as u8 ]
         }
     }
-    
+
 }
 /*
 red = 1.0 – min ( 1.0, cyan + black )

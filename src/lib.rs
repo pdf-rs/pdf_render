@@ -1,15 +1,9 @@
-#[macro_use]
-extern crate log;
-#[macro_use]
-extern crate pdf;
-
 macro_rules! pdf_assert_eq {
     ($a:expr, $b:expr) => {
         if $a != $b {
-            return Err(pdf::error::PdfError::Other {
-                msg: format!("{} ({}) != {} ({})", stringify!($a), $a, stringify!($b), $b),
-            });
+            return Err(pdf::error::PdfError::Other { msg: format!("{} ({}) != {} ({})", stringify!($a), $a, stringify!($b), $b)});
         }
+
     };
 }
 
@@ -19,35 +13,46 @@ macro_rules! unimplemented {
     };
 }
 
-mod backend;
+mod types;
+
 mod cache;
 mod fontentry;
 mod graphicsstate;
 mod renderstate;
 mod textstate;
-// pub mod tracer;
+mod backend;
+pub mod tracer;
 mod image;
-// mod pathfinder_backend;
+//mod scene;
 mod font;
-pub mod vello_backend;
 
+pub use cache::{Cache};
 use ::font::Encoder;
-pub use backend::{Backend, BlendMode, DrawMode, FillMode};
-pub use cache::Cache;
-pub use fontentry::FontEntry;
-// pub use pathfinder_backend::SceneBackend;
+pub use fontentry::{FontEntry};
+pub use backend::{DrawMode, Backend, BlendMode, FillMode};
+use log::debug;
+use pathfinder_geometry::vector::vec2f;
+use pdf::{t, try_opt};
+//pub use scene::SceneBackend;
 pub use crate::image::{load_image, ImageData};
 use custom_debug_derive::Debug;
+pub use ::font::Glyph;
+pub mod vello_backend;
+pub use font::FontRc;
 
-use itertools::Itertools;
-use pathfinder_geometry::{rect::RectF, transform2d::Transform2F, vector::Vector2F};
+pub use pdf;
+use pdf::{object::*, content::TextMode};
 use pdf::error::PdfError;
-use pdf::{content::TextMode, object::*};
+use pathfinder_geometry::{
+    vector::{Vector2F},
+    rect::RectF, transform2d::Transform2F,
+};
 use renderstate::RenderState;
+use std::ops::Range;
 use std::sync::Arc;
+use itertools::Itertools;
+const SCALE: f32 = 25.4 / 72.;
 
-// turn into mm
-const SCALE: f32 = 1.;
 
 #[derive(Copy, Clone, Default)]
 pub struct BBox(Option<RectF>);
@@ -58,7 +63,7 @@ impl BBox {
     pub fn add(&mut self, r2: RectF) {
         self.0 = Some(match self.0 {
             Some(r1) => r1.union_rect(r2),
-            None => r2,
+            None => r2
         });
     }
     pub fn add_bbox(&mut self, bb: Self) {
@@ -76,61 +81,26 @@ impl From<RectF> for BBox {
     }
 }
 
-// Get page bounds in millimeters
+
 pub fn page_bounds(page: &Page) -> RectF {
-    let Rect {
-        left,
-        right,
-        top,
-        bottom,
-    } = page.media_box().expect("no media box");
+    let Rectangle { left, right, top, bottom } = page.media_box().expect("no media box");
     RectF::from_points(Vector2F::new(left, bottom), Vector2F::new(right, top)) * SCALE
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct Size<T = f32> {
-    /// The width.
-    pub width: T,
-    /// The height.
-    pub height: T,
-}
-
-impl<T> Size<T> {
-    /// Creates a new  [`Size`] with the given width and height.
-    pub const fn new(width: T, height: T) -> Self {
-        Size { width, height }
-    }
-}
-
-pub fn render_page(
-    backend: &mut impl Backend,
-    resolve: &impl Resolve,
-    page: &Page,
-    transform: Transform2F,
-) -> Result<Transform2F, PdfError> {
-    let page_bounds = page_bounds(page);
-
-    let rotate: Transform2F =
-        Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
-    
-    let br = rotate * RectF::new(Vector2F::zero(), page_bounds.size());
-
-    let translate: Transform2F = Transform2F::from_translation(Vector2F::new(
+pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Page, transform: Transform2F) -> Result<Transform2F, PdfError> {
+    let bounds = page_bounds(page);
+    let rotate = Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
+    let br = rotate * RectF::new(Vector2F::zero(), bounds.size());
+    let translate = Transform2F::from_translation(Vector2F::new(
         -br.min_x().min(br.max_x()),
         -br.min_y().min(br.max_y()),
     ));
-
     let view_box = transform * translate * br;
-    
-    // dbg!(size, view_box);
     backend.set_view_box(view_box);
 
     let root_transformation = transform
         * translate
         * rotate
-        // zoom out x by SCALE, moved (-bounds.min_x()), so new x:  old_x * SCALE + (-bounds.min_x())
-        // zoom out y by -SCALE, moved bounds.max_y(), so new y:  old y * (-SCALE) + bounds.max_y() 
-        * Transform2F::row_major(SCALE, 0.0, -page_bounds.min_x(), 0.0, -SCALE, page_bounds.max_y());
+        * Transform2F::row_major(SCALE, 0.0, -bounds.min_x(), 0.0, -SCALE, bounds.max_y());
 
     let resources = t!(page.resources());
 
@@ -144,16 +114,11 @@ pub fn render_page(
 
     Ok(root_transformation)
 }
-pub fn render_pattern(
-    backend: &mut impl Backend,
-    pattern: &Pattern,
-    resolve: &impl Resolve,
-) -> Result<(), PdfError> {
+pub fn render_pattern(backend: &mut impl Backend, pattern: &Pattern, resolve: &impl Resolve) -> Result<(), PdfError> {
     match pattern {
-        Pattern::Stream(ref dict, ref ops) => {
+        Pattern::Stream(dict, ops) => {
             let resources = resolve.get(dict.resources)?;
-            let mut renderstate =
-                RenderState::new(backend, resolve, &*resources, Transform2F::default());
+            let mut renderstate = RenderState::new(backend, resolve, &*resources, Transform2F::default());
             for (i, op) in ops.iter().enumerate() {
                 debug!("op {}: {:?}", i, op);
                 renderstate.draw_op(op, i)?;
@@ -163,6 +128,7 @@ pub fn render_pattern(
     }
     Ok(())
 }
+
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Fill {
@@ -175,16 +141,15 @@ impl Fill {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TextSpan<E: Encoder> {
     // A rect with the origin at the baseline, a height of 1em and width that corresponds to the advance width.
     pub rect: RectF,
 
     // width in textspace units (before applying transform)
     pub width: f32,
-    // Bounding box of the rendered outline
-    pub bbox: Option<RectF>,
     pub font_size: f32,
+
     #[debug(skip)]
     pub font: Option<Arc<FontEntry<E>>>,
     pub text: String,
@@ -196,53 +161,67 @@ pub struct TextSpan<E: Encoder> {
     pub transform: Transform2F,
     pub mode: TextMode,
     pub op_nr: usize,
+
+    pub bytes: Vec<u8>,
 }
+
 impl<E: Encoder> TextSpan<E> {
-    pub fn parts(&self) -> impl Iterator<Item = Part> + '_ {
-        self.chars
-            .iter()
-            .cloned()
-            .chain(std::iter::once(TextChar {
-                offset: self.text.len(),
-                pos: self.width,
-                width: 0.0,
-            }))
+    pub fn parts(&self) -> impl Iterator<Item=Part> + '_ {
+        self.chars.iter().cloned()
+            .chain(std::iter::once(TextChar { offset: self.text.len(), pos: self.width, width: 0.0, idx: self.bytes.len(), leading_space: 0.0 }))
             .tuple_windows()
             .map(|(a, b)| Part {
                 text: &self.text[a.offset..b.offset],
                 pos: a.pos,
                 width: a.width,
                 offset: a.offset,
+                byte_idx: a.idx,
             })
     }
-    pub fn rparts(&self) -> impl Iterator<Item = Part> + '_ {
-        self.chars
-            .iter()
-            .cloned()
-            .chain(std::iter::once(TextChar {
-                offset: self.text.len(),
-                pos: self.width,
-                width: 0.0,
-            }))
-            .rev()
+    pub fn rparts(&self) -> impl Iterator<Item=Part> + '_ {
+        self.chars.iter().cloned()
+            .chain(std::iter::once(TextChar { offset: self.text.len(), pos: self.width, width: 0.0, idx: self.bytes.len(), leading_space: 0.0 })).rev()
             .tuple_windows()
             .map(|(b, a)| Part {
                 text: &self.text[a.offset..b.offset],
                 pos: a.pos,
                 width: a.width,
                 offset: a.offset,
+                byte_idx: a.idx,
+
             })
+    }
+    pub fn split(&self, range: Range<usize>) -> Self {
+        let first = self.chars[range.start];
+        let (last_off, last_pos, last_idx) = self.chars.get(range.end).map(|c| (c.offset, c.pos, c.idx)).unwrap_or((self.text.len(), self.width, self.bytes.len()));
+        TextSpan {
+            rect: RectF::from_points(vec2f(first.pos, self.rect.min_y()), vec2f(last_pos, self.rect.max_y())),
+            width: last_pos - first.pos,
+            font_size: self.font_size,
+            font: self.font.clone(),
+            text: self.text[first.offset..last_off].to_string(),
+            chars: self.chars[range].iter().map(|c| TextChar { idx: c.idx - first.idx, .. c.clone() }).collect(),
+            color: self.color.clone(),
+            alpha: self.alpha,
+            transform: self.transform,
+            mode: self.mode,
+            op_nr: self.op_nr,
+            bytes: self.bytes[first.idx..last_idx].into()
+        }
     }
 }
 pub struct Part<'a> {
     pub text: &'a str,
     pub pos: f32,
     pub width: f32,
-    pub offset: usize,
+    pub offset: usize, // index into text
+    pub byte_idx: usize, // index into bytes
 }
 #[derive(Debug, Clone, Copy)]
 pub struct TextChar {
     pub offset: usize,
     pub pos: f32,
     pub width: f32,
+    pub idx: usize,
+    pub leading_space: f32,
 }

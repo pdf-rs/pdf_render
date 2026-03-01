@@ -1,11 +1,11 @@
+use log::{debug, info, warn};
 use pathfinder_content::outline::ContourIterFlags;
-use pdf::object::*;
+use pdf::{object::*, t, try_opt};
 use pdf::primitive::{Primitive, Dictionary};
 use pdf::content::{Op, Matrix, Point, Rect, Color, Rgb, Cmyk, Winding, FormXObject};
 use pdf::error::{PdfError, Result};
 use pdf::content::TextDrawAdjusted;
 use crate::backend::{Backend, BlendMode, Stroke, FillMode};
-use crate::graphicsstate::ClipPath;
 
 use pathfinder_geometry::{
     vector::Vector2F,
@@ -74,8 +74,7 @@ impl Cvt for Cmyk {
     }
 }
 
-pub struct RenderState<'a, R: Resolve, B: Backend>
- {
+pub struct RenderState<'a, R: Resolve, B: Backend> {
     graphics_state: GraphicsState<'a, B>,
     text_state: TextState<B::Encoder>,
     stack: Vec<(GraphicsState<'a, B>, TextState<B::Encoder>)>,
@@ -84,6 +83,7 @@ pub struct RenderState<'a, R: Resolve, B: Backend>
     resolve: &'a R,
     resources: &'a Resources,
     backend: &'a mut B,
+    _debug: bool,
 }
 
 impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
@@ -92,14 +92,12 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             transform: root_transformation,
             fill_color: Fill::black(),
             fill_color_alpha: 1.0,
-            fill_paint: None,
             fill_alpha: 1.0,
             stroke_color: Fill::black(),
             stroke_color_alpha: 1.0,
-            stroke_paint: None,
             stroke_alpha: 1.0,
             clip_path_id: None,
-            clip_path: None,
+            //clip_path: None,
             clip_path_rect: None,
             fill_color_space: &ColorSpace::DeviceRGB,
             stroke_color_space: &ColorSpace::DeviceRGB,
@@ -127,6 +125,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             resources,
             resolve,
             backend,
+            _debug: false,
         }
     }
     fn draw(&mut self, mode: &DrawMode, fill_rule: FillRule) {
@@ -164,7 +163,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 self.current_outline.clear();
             }
             Op::Stroke => {
-                self.draw(&DrawMode::Stroke { 
+                self.draw(&DrawMode::Stroke {
                     stroke: FillMode {
                         color: self.graphics_state.stroke_color,
                         alpha: self.graphics_state.stroke_color_alpha,
@@ -204,8 +203,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 let mut path: Outline = self.current_outline.clone().transformed(&self.graphics_state.transform);
                 let clip_path_rect = to_rect(&path);
 
-                let (path, r, parent) = 
-                match (self.graphics_state.clip_path_rect, clip_path_rect, self.graphics_state.clip_path_id) {
+                let (path, r, parent) = match (self.graphics_state.clip_path_rect, clip_path_rect, self.graphics_state.clip_path_id) {
                     (Some(r1), Some(r2), Some(p)) => {
                         let r = r1.intersection(r2).unwrap_or_default();
                         (Outline::from_rect(r), Some(r), None)
@@ -215,7 +213,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                         (path, None, None)
                     }
                     (None, Some(r), Some(p)) => {
-                        let mut path = self.graphics_state.clip_path.as_ref().unwrap().outline.clone();
+                        //let mut path = self.graphics_state.clip_path.as_ref().unwrap().outline.clone();
                         path.clip_against_polygon(&[r.origin(), r.upper_right(), r.lower_right(), r.lower_left()]);
                         (path, None, None)
                     }
@@ -229,7 +227,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
 
                 let id = self.backend.create_clip_path(path.clone(), winding.cvt(), parent);
                 self.graphics_state.clip_path_id = Some(id);
-                self.graphics_state.clip_path = Some(ClipPath { outline: path, fill_rule: winding.cvt()});
+                //self.graphics_state.clip_path = Some(clip);
                 self.graphics_state.clip_path_rect = r;
             },
 
@@ -259,7 +257,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 }
                 self.graphics_state.set_fill_alpha(gs.fill_alpha.unwrap_or(1.0));
                 self.graphics_state.set_stroke_alpha(gs.stroke_alpha.unwrap_or(1.0));
-                
+
                 if let Some((font_ref, size)) = gs.font {
                     let font = self.resolve.get(font_ref)?;
                     if let Some(e) = self.backend.get_font(&MaybeRef::Indirect(font), self.resolve)? {
@@ -309,7 +307,8 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             Op::TextFont { ref name, size } => {
                 let font = match self.resources.fonts.get(name) {
                     Some(font_ref) => {
-                        self.backend.get_font(font_ref, self.resolve)?
+                        let font = font_ref.load(self.resolve)?;
+                        self.backend.get_font(&font, self.resolve)?
                     },
                     None => None
                 };
@@ -330,6 +329,11 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             Op::TextDraw { ref text } => {
                 let fill_mode = self.blend_mode_fill();
                 let stroke_mode = self.blend_mode_stroke();
+
+                if self._debug {
+                    dbg!(text);
+                }
+
                 self.text(|backend, text_state, graphics_state, span| {
                     text_state.draw_text(backend, graphics_state, &text.data, span, fill_mode, stroke_mode);
                 }, op_nr);
@@ -337,6 +341,9 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             Op::TextDrawAdjusted { ref array } => {
                 let fill_mode = self.blend_mode_fill();
                 let stroke_mode = self.blend_mode_stroke();
+
+                //let mut _debug = self._debug;
+
                 self.text(|backend, text_state, graphics_state, span| {
                     for arg in array {
                         match *arg {
@@ -347,10 +354,23 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                                 // because why not PDF…
                                 let advance = text_state.advance(-0.001 * offset);
                                 span.width += advance;
+                                span.adjust += offset;
                             }
                         }
                     }
+                    /*
+                    if span.text.contains("both for") {
+                        dbg!(array);
+                        _debug = true;
+                    }
+                    if span.text.contains("those that") {
+                        dbg!(array);
+                        _debug = false
+                    }
+                    */
                 }, op_nr);
+
+                //self._debug = _debug
             },
             Op::XObject { ref name } => {
                 let &xobject_ref = self.resources.xobjects.get(name).ok_or(PdfError::NotFound { word: name.as_str().into()})?;
@@ -397,20 +417,19 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
     fn text(&mut self, inner: impl FnOnce(&mut B, &mut TextState<B::Encoder>, &mut GraphicsState<B>, &mut Span), op_nr: usize) {
         let mut span = Span::default();
         let tm = self.text_state.text_matrix;
-        let origin = tm.translation();
+
+        let p1 = Vector2F::new(span.width, -1.0);
 
         inner(&mut self.backend, &mut self.text_state, &mut self.graphics_state, &mut span);
 
         let transform = self.graphics_state.transform * tm * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
-        let p1 = origin;
-        let p2 = (tm * Transform2F::from_translation(Vector2F::new(span.width, self.text_state.font_size))).translation();
+        let p2 = Vector2F::new(span.width, 0.0);
         let clip = self.graphics_state.clip_path_id;
 
         debug!("text {}", span.text);
         self.backend.add_text(TextSpan {
-            rect: self.graphics_state.transform * RectF::from_points(p1.min(p2), p1.max(p2)),
+            rect: RectF::from_points(p1, p2),
             width: span.width,
-            bbox: span.bbox.rect(),
             text: span.text,
             chars: span.chars,
             font: self.text_state.font_entry.clone(),
@@ -419,7 +438,8 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             alpha: self.graphics_state.fill_color_alpha,
             mode: self.text_state.mode,
             transform,
-            op_nr
+            op_nr,
+            bytes: span.bytes
         }, clip);
     }
 
@@ -447,7 +467,6 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             stroke_alpha: self.graphics_state.stroke_color_alpha,
             fill_alpha: self.graphics_state.fill_color_alpha,
             clip_path_id: self.graphics_state.clip_path_id,
-            clip_path: self.graphics_state.clip_path.clone(),
             .. self.graphics_state
         };
         let resources = match form.dict().resources {
@@ -464,8 +483,9 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             current_contour: Contour::new(),
             backend: self.backend,
             resolve: self.resolve,
+            _debug: self._debug,
         };
-        
+
         let ops = t!(form.operations(self.resolve));
         for (i, op) in ops.iter().enumerate() {
             debug!(" form op {}: {:?}", i, op);
@@ -477,8 +497,8 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
     #[allow(dead_code)]
     fn get_properties<'b>(&'b self, p: &'b Primitive) -> Result<&'b Dictionary> {
         match p {
-            Primitive::Dictionary(ref dict) => Ok(dict),
-            Primitive::Name(ref name) => self.resources.properties.get(name.as_str())
+            Primitive::Dictionary(dict) => Ok(dict),
+            Primitive::Name(name) => self.resources.properties.get(name.as_str())
                 .map(|rc| &**rc)
                 .ok_or_else(|| {
                     PdfError::MissingEntry { typ: "Properties", field: name.into() }
@@ -532,13 +552,13 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                     }
                 }
                 ColorSpace::Named(ref name) => {
-                    resources.color_spaces.get(name).ok_or_else(|| 
+                    resources.color_spaces.get(name).ok_or_else(||
                         PdfError::Other { msg: format!("named color space {} not found", name) }
                     )?
                 }
                 _ => &**cs
             };
-            
+
             match *cs {
                 ColorSpace::Icc(_) => return Err(PdfError::Other { msg: format!("nested ICC color space") }),
                 ColorSpace::DeviceGray | ColorSpace::CalGray(_) => {
@@ -568,7 +588,7 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                     Ok(cmyk2rgb((c, m, y, k), mode))
                 }
                 ColorSpace::DeviceN { ref names, ref alt, ref tint, ref attr } => {
-                    pdf_assert_eq!(args.len(), tint.input_dim());
+                    assert_eq!(args.len(), tint.input_dim());
                     let mut input = vec![0.; args.len()];
                     for (i, a) in input.iter_mut().zip(args.iter()) {
                         *i = a.as_number()?;
@@ -674,6 +694,7 @@ fn cmyk2rgb((c, m, y, k): (f32, f32, f32, f32), mode: BlendMode) -> Fill {
         1.0 - clamp(y + k),
     )
 }
+
 
 fn to_rect(o: &Outline) -> Option<RectF> {
     if o.contours().len() != 1 {

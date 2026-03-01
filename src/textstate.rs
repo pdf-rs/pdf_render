@@ -1,8 +1,9 @@
+use log::debug;
 use pathfinder_geometry::{
     vector::Vector2F,
     transform2d::Transform2F,
 };
-use font::{Encoder, GlyphId, Shape};
+use font::{Encoder, Font, GlyphId};
 use crate::{BlendMode, backend::{FillMode, Stroke}};
 
 use super::{
@@ -14,13 +15,13 @@ use super::{
     TextChar,
 };
 use std::convert::TryInto;
-use pdf::content::TextMode;
+use pdf::{content::TextMode, primitive::PdfString};
 use std::sync::Arc;
 use itertools::Either;
 use istring::SmallString;
 
 #[derive(Clone)]
-pub struct TextState<E: Encoder + Clone + 'static> {
+pub struct TextState<E: Encoder> {
     pub text_matrix: Transform2F, // tracks current glyph
     pub line_matrix: Transform2F, // tracks current line
     pub char_space: f32, // Character spacing
@@ -33,7 +34,7 @@ pub struct TextState<E: Encoder + Clone + 'static> {
     pub rise: f32, // Text rise
     pub knockout: f32, //Text knockout
 }
-impl<E: Encoder + Clone + 'static> TextState<E> {
+impl<E: Encoder + 'static> TextState<E> {
     pub fn new() -> TextState<E> {
         TextState {
             text_matrix: Transform2F::default(),
@@ -56,7 +57,7 @@ impl<E: Encoder + Clone + 'static> TextState<E> {
         let m = self.line_matrix * Transform2F::from_translation(v);
         self.set_matrix(m);
     }
-    
+
     // move to the next line
     pub fn next_line(&mut self) {
         self.translate(Vector2F::new(0., -self.leading));
@@ -67,7 +68,6 @@ impl<E: Encoder + Clone + 'static> TextState<E> {
         self.line_matrix = m;
     }
     pub fn draw_text<B: Backend<Encoder = E>>(&mut self, backend: &mut B, gs: &GraphicsState<B>, data: &[u8], span: &mut Span, fill_mode: BlendMode, stroke_mode: BlendMode) {
-        use font::Font;
         let e = match self.font_entry {
             Some(ref e) => e,
             None => {
@@ -76,14 +76,16 @@ impl<E: Encoder + Clone + 'static> TextState<E> {
             }
         };
 
+        let idx0 = span.bytes.len();
+        span.bytes.extend(data);
         let codepoints = if e.is_cid {
             Either::Left(data.chunks_exact(2).map(|s| u16::from_be_bytes(s.try_into().unwrap())))
         } else {
             Either::Right(data.iter().map(|&b| b as u16))
         };
-
-        let glyphs = codepoints.map(|cid|
-            (cid, e.cmap.get(&cid).map(|&(gid, ref uni)| (gid, uni.clone())))
+        let step = if e.is_cid { 2 } else { 1 };
+        let glyphs = codepoints.enumerate().map(|(i, cid)|
+            (cid, e.cmap.get(&cid).map(|&(gid, ref uni)| (gid, uni.clone())), i * step + idx0)
         );
 
         let fill = FillMode { color: gs.fill_color, alpha: gs.fill_color_alpha, mode: fill_mode };
@@ -100,12 +102,12 @@ impl<E: Encoder + Clone + 'static> TextState<E> {
         };
         let e = self.font_entry.as_ref().expect("no font");
 
-          let tr = Transform2F::row_major(
+        let tr = Transform2F::row_major(
             self.horiz_scale * self.font_size, 0., 0.,
             0., self.font_size, self.rise
         ) * e.font.font_matrix();
-        
-        for (cid, t) in glyphs {
+
+        for (cid, t, idx) in glyphs {
             let (gid, unicode, is_space) = match t {
                 Some((gid, unicode)) => {
                     let is_space = !e.is_cid && unicode.as_deref() == Some(" ");
@@ -114,12 +116,12 @@ impl<E: Encoder + Clone + 'static> TextState<E> {
                 None => (GlyphId(0), None, cid == 0x20)
             };
             //debug!("cid {} -> gid {:?} {:?}", cid, gid, unicode);
-            
+
             let glyph = e.font.glyph(gid);
             let width: f32 = e.widths.as_ref().map(|w| w.get(cid as usize) * 0.001 * self.horiz_scale * self.font_size)
                 .or_else(|| glyph.as_ref().map(|g| tr.m11() * g.metrics.advance))
                 .unwrap_or(0.0);
-            
+
             if is_space {
                 let advance = (self.char_space + self.word_space) * self.horiz_scale + width;
                 self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
@@ -129,28 +131,37 @@ impl<E: Encoder + Clone + 'static> TextState<E> {
                 span.chars.push(TextChar {
                     offset,
                     pos: span.width,
-                    width
+                    width,
+                    idx,
+                    leading_space: span.adjust,
                 });
                 span.width += advance;
+                span.adjust = 0.0;
                 continue;
             }
-            if let (Some(glyph), Some(draw_mode)) = (glyph, draw_mode.as_ref()){
+            if let Some(glyph) = glyph {
                 let transform = gs.transform * self.text_matrix * tr;
-                backend.draw_glyph(&e.font, &glyph, draw_mode, transform, gs.clip_path_id);
+
+                if let Some(ref draw_mode) = draw_mode {
+                    backend.draw_glyph(&e.font, glyph, draw_mode, transform, gs.clip_path_id);
+                }
             } else {
                 debug!("no glyph for gid {:?}", gid);
             }
             let advance = self.char_space * self.horiz_scale + width;
             self.text_matrix = self.text_matrix * Transform2F::from_translation(Vector2F::new(advance, 0.));
-            
+
             let offset = span.text.len();
             if let Some(s) = unicode {
                 span.text.push_str(&*s);
                 span.chars.push(TextChar {
                     offset,
                     pos: span.width,
-                    width
+                    width,
+                    idx,
+                    leading_space: span.adjust
                 });
+                span.adjust = 0.0;
             }
             span.width += advance;
         }
@@ -169,4 +180,6 @@ pub struct Span {
     pub chars: Vec<TextChar>,
     pub width: f32,
     pub bbox: BBox,
+    pub bytes: Vec<u8>,
+    pub adjust: f32,
 }

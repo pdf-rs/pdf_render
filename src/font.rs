@@ -5,6 +5,7 @@ use std::collections::HashMap;
 #[cfg(feature="glyphmatcher")]
 use glyphmatcher::FontDb;
 
+use log::{debug, warn};
 use pdf::object::*;
 use pdf::font::{Font as PdfFont};
 use pdf::error::{Result, PdfError};
@@ -63,7 +64,7 @@ pub struct StandardCache<E: Encoder> {
 
     #[cfg(feature="glyphmatcher")]
     font_db: Option<FontDb>,
-    
+
     require_unique_unicode: bool,
 }
 impl<E: Encoder + 'static> StandardCache<E> where E::GlyphRef: Sync + Send {
@@ -142,7 +143,7 @@ pub fn load_font<E: Encoder + 'static>(encoder: &mut E, font_ref: &MaybeRef<PdfF
 {
     let pdf_font = font_ref.clone();
     debug!("loading {:?}", pdf_font);
-    
+
     let font: FontRc<E> = match pdf_font.embedded_data(resolve) {
         Some(Ok(data)) => {
             debug!("loading embedded font");
@@ -166,7 +167,7 @@ pub fn load_font<E: Encoder + 'static>(encoder: &mut E, font_ref: &MaybeRef<PdfF
             debug!("loading {name} instead");
             match cache.fonts.get(name).or_else(|| cache.fonts.get("Arial")) {
                 Some(file_name) => {
-                    let val = cache.inner.get(file_name.clone(), || {
+                    let val = cache.inner.get(file_name.clone(), |_| {
                         let data = match std::fs::read(cache.dir.join(file_name)) {
                             Ok(data) => data,
                             Err(e) => {
@@ -197,7 +198,7 @@ pub fn load_font<E: Encoder + 'static>(encoder: &mut E, font_ref: &MaybeRef<PdfF
         }
     };
 
-    Ok(Some(FontEntry::build(font, pdf_font, 
+    Ok(Some(FontEntry::build(font, pdf_font,
         #[cfg(feature="glyphmatcher")] cache.font_db.as_ref(),
         resolve, cache.require_unique_unicode)?))
 }
