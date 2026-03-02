@@ -135,8 +135,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
     }
     #[allow(unused_variables)]
     pub fn draw_op(&mut self, op: &'a Op, op_nr: usize) -> Result<()> {
-        self.backend.inspect_op(op);
-        self.backend.bug_op(op_nr);
+        self.backend.inspect_op(op_nr, op);
         match *op {
             Op::BeginMarkedContent { .. } => {}
             Op::EndMarkedContent { .. } => {}

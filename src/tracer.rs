@@ -188,7 +188,7 @@ impl<'a, E> Backend for Tracer<'a, E>
     fn add_text(&mut self, span: TextSpan<E>, clip: Option<Self::ClipPathId>) {
         self.items.push(DrawItem::Text(span, clip));
     }
-    fn bug_op(&mut self, op_nr: usize) {
+    fn inspect_op(&mut self, op_nr: usize, op: &pdf::content::Op) {
         self.op_nr = op_nr;
     }
 }

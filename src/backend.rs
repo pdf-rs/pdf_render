@@ -41,8 +41,8 @@ pub trait Backend {
     fn bug_text_no_font(&mut self, data: &[u8]) {}
     fn bug_text_invisible(&mut self, text: &str) {}
     fn bug_postscript(&mut self, data: &[u8]) {}
-    fn bug_op(&mut self, op_nr: usize) {}
-    fn inspect_op(&mut self, op: &Op) {}
+
+    fn inspect_op(&mut self, op_nr: usize, op: &Op) {}
 }
 #[derive(Clone, Debug)]
 
