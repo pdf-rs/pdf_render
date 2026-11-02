@@ -35,8 +35,8 @@ istring = { git = "https://github.com/s3bk/istring" }
 once_cell = "*"
 serde_json = "*"
 glyphmatcher = { git = "https://github.com/s3bk/glyphmatcher", optional = true }
-vello = "0.7"
-vello_encoding = "0.7"
+vello = "0.11"
+vello_encoding = "0.11"
 
 [dev-dependencies]
 criterion = "0.3"

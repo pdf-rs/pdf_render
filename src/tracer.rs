@@ -88,7 +88,7 @@ where
     pub fn get_font(&self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry<E>>>, PdfError> {
         let mut error = None;
 
-        let val = self.fonts.get(font_key(font_ref), |_| {
+        let val = self.fonts.get(font_key(font_ref), || {
             let mut encoder = E::default();
                 match load_font(&mut encoder, font_ref, resolve, &self.std) {
                     Ok(Some(f)) => Some(Arc::new(f)),
