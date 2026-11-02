@@ -44,7 +44,7 @@ impl Pen for NullPen {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct NullEncoder;
 impl Encoder for NullEncoder {
     type Pen<'a> = NullPen;
