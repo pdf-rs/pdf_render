@@ -1855,6 +1855,7 @@ dependencies = [
  "pathfinder_resources",
  "pdf",
  "pdf_encoding 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "peniko",
  "rand 0.6.5",
  "serde_json",
  "vello",

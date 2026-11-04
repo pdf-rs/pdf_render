@@ -37,6 +37,7 @@ use pdf::{t, try_opt};
 pub use crate::image::{load_image, ImageData};
 use custom_debug_derive::Debug;
 pub use ::font::Glyph;
+#[cfg(feature = "vello")]
 pub mod vello_backend;
 #[cfg(feature = "vello_cpu")]
 pub mod vello_cpu_backend;

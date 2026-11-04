@@ -8,7 +8,7 @@ use pdf::object::*;
 use pdf::primitive::Name;
 use pdf::font::{Font as PdfFont};
 use pdf::error::{Result};
-use vello::peniko::{Blob, ImageBrush, ImageData};
+use peniko::{Blob, ImageAlphaType, ImageBrush, ImageData, ImageFormat};
 use std::slice;
 
 use pathfinder_geometry::{
@@ -120,9 +120,9 @@ impl<E: Encoder + 'static> Cache<E> where E::GlyphRef: Send + Sync {
                 Err(e) => return ImageResult(Arc::new(Err(e)))
             };
             let data = ImageData {
-                alpha_type: vello::peniko::ImageAlphaType::Alpha,
+                alpha_type: ImageAlphaType::Alpha,
                 data: Blob::new(Arc::new(im.rgba_data().to_owned())),
-                format: vello::peniko::ImageFormat::Rgba8,
+                format: ImageFormat::Rgba8,
                 height: im.height(),
                 width: im.width()
             };

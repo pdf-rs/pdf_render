@@ -1,9 +1,9 @@
 //! Software (CPU) rendering backend, built on `vello_cpu`.
 //!
-//! The GPU backend in [`crate::vello_backend`] records a `vello::Scene` and needs a
-//! wgpu device to turn it into pixels.  `vello_cpu` rasterises on the CPU instead and
-//! is used through an immediate-mode [`RenderContext`]: every drawing call is
-//! rasterised into strips right away, and [`RenderContext::render`] composites them
+//! The GPU backend in `vello_backend` (feature `vello`) records a `vello::Scene` and
+//! needs a wgpu device to turn it into pixels.  `vello_cpu` rasterises on the CPU
+//! instead and is used through an immediate-mode [`RenderContext`]: every drawing call
+//! is rasterised into strips right away, and [`RenderContext::render`] composites them
 //! into a [`Pixmap`].  That makes it usable without any GPU at all.
 //!
 //! Two API differences shape this file:

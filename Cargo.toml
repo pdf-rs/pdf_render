@@ -7,6 +7,9 @@ edition = "2021"
 [features]
 unstable = []
 glyphmatcher = ["dep:glyphmatcher"]
+# GPU rendering through vello (wgpu). Off by default so the crate builds and
+# tests without a graphics stack.
+vello = ["dep:vello"]
 # Software rendering without a GPU, via the vello_cpu crate.
 vello_cpu = ["dep:vello_cpu"]
 
@@ -22,6 +25,10 @@ required-features = ["vello_cpu"]
 [[example]]
 name = "cpu_smoke"
 required-features = ["vello_cpu"]
+
+[[example]]
+name = "vello_scene"
+required-features = ["vello"]
 
 [dependencies.pdf]
 default-features=false
@@ -46,7 +53,8 @@ istring = { git = "https://github.com/s3bk/istring" }
 once_cell = "*"
 serde_json = "*"
 glyphmatcher = { git = "https://github.com/s3bk/glyphmatcher", optional = true }
-vello = "0.11"
+peniko = "0.6"
+vello = { version = "0.11", optional = true }
 vello_encoding = "0.11"
 vello_cpu = { version = "0.3", optional = true, default-features = false, features = ["std", "png", "u8_pipeline", "f32_pipeline"] }
 
