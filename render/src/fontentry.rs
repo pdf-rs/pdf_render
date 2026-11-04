@@ -15,6 +15,15 @@ use pdf_encoding::{Encoding, glyphname_to_unicode};
 use istring::SmallString;
 use crate::font::FontRc;
 
+/// The Adobe Symbol code for the character a glyph name stands for: `/bullet`
+/// is U+2022, which Symbol keeps at code 0xb7.
+fn symbol_code(unicode: Option<&str>) -> Option<u32> {
+    unicode
+        .and_then(|s| s.chars().next())
+        .and_then(|c| Encoding::AdobeSymbol.reverse_map().and_then(|m| m.get(c as u32)))
+        .map(|code| code as u32)
+}
+
 pub struct FontEntry<E: Encoder> {
     pub font: FontRc<E>,
     pub pdf_font: MaybeRef<PdfFont>,
@@ -187,14 +196,25 @@ impl<E: Encoder + 'static> FontEntry<E> {
 
                 }
             }
+            // Symbol and the free clones of it put their glyphs at PostScript
+            // codes (bullet at 0xb7, not at U+2022), and the clones often carry
+            // no glyph names at all. A `/Differences` entry like `/1 /bullet`
+            // therefore misses every lookup above; go through the Symbol code
+            // for the character the name stands for.
+            let symbolic = encoding.map(|e| e.base == BaseEncoding::SymbolEncoding).unwrap_or(false)
+                || name.map(|n| n.as_str() == "Symbol").unwrap_or(false);
             if let Some(encoding) = encoding {
                 for (&cp, name) in encoding.differences.iter() {
                     let uni = glyphname_to_unicode(name);
-                    let gid = font.gid_for_name(&name).or_else(||
+                    let mut gid = font.gid_for_name(&name).or_else(||
                         uni.and_then(|s| s.chars().next()).and_then(|cp| font.gid_for_unicode_codepoint(cp as u32))
                     ).or_else(||
                         font.gid_for_codepoint(cp)
-                    ).unwrap_or(GlyphId(cp));
+                    );
+                    if gid.is_none() && symbolic {
+                        gid = symbol_code(uni).and_then(|code| font.gid_for_codepoint(code));
+                    }
+                    let gid = gid.unwrap_or(GlyphId(cp));
 
                     let unicode = uni.map(|s| s.into())
                         .or_else(|| std::char::from_u32(0xf000 + gid.0).map(SmallString::from));
@@ -334,5 +354,21 @@ impl<E: Encoder + 'static> FontEntry<E> {
 impl<E: Encoder> globalcache::ValueSize for FontEntry<E> {
     fn size(&self) -> usize {
         1 // TODO
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::symbol_code;
+
+    #[test]
+    fn a_glyph_name_goes_through_the_symbol_code() {
+        // `/bullet` is U+2022; Symbol and its clones keep it at 0xb7, and the
+        // clones carry no glyph names, so only the code leads to a glyph.
+        assert_eq!(symbol_code(Some("\u{2022}")), Some(0xb7));
+        assert_eq!(symbol_code(Some("\u{3b1}")), Some(0x61)); // alpha
+        // Not a Symbol character: nothing to translate.
+        assert_eq!(symbol_code(Some("A")), None);
+        assert_eq!(symbol_code(None), None);
     }
 }

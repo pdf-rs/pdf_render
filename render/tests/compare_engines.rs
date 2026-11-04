@@ -107,7 +107,8 @@ fn pages_match_a_second_engine() {
         return;
     };
     eprintln!("external engine: {}", engine.describe());
-    point_standard_fonts_at_the_repository();
+    let out_dir = output_dir();
+    point_standard_fonts_at_the_reference(&out_dir);
 
     let dpi = env_f32("PDF_COMPARE_DPI", DEFAULT_DPI);
     let max_pages = env_u32("PDF_COMPARE_MAX_PAGES", DEFAULT_MAX_PAGES);
@@ -115,7 +116,6 @@ fn pages_match_a_second_engine() {
         .ok()
         .filter(|s| !s.is_empty())
         .map(|s| s.to_lowercase());
-    let out_dir = output_dir();
 
     let documents = corpus();
     if documents.is_empty() {
@@ -304,7 +304,11 @@ fn write_report(
     dpi: f32,
     lines: &[String],
 ) -> std::io::Result<PathBuf> {
-    let header = format!("external engine: {}\ndpi: {dpi}\n\n", engine.describe());
+    let header = format!(
+        "external engine: {}\ndpi: {dpi}\nstandard fonts: {}\n\n",
+        engine.describe(),
+        std::env::var("STANDARD_FONTS").unwrap_or_else(|_| "(unset)".into())
+    );
     let path = out_dir.join("report.txt");
     std::fs::create_dir_all(out_dir)?;
     std::fs::write(&path, format!("{header}{}\n", lines.join("\n")))?;
@@ -1148,6 +1152,128 @@ fn corpus() -> Vec<PathBuf> {
 
     pdfs.dedup();
     pdfs
+}
+
+/// Directories that carry the URW base 35 clones of the standard 14 fonts.
+const URW_DIRS: &[&str] = &[
+    "/usr/share/fonts/opentype/urw-base35",
+    "/usr/share/fonts/TTF/urw-base35",
+    "/usr/local/share/fonts/urw-base35",
+];
+
+/// Standard 14 font names and the URW file that stands in for each, without the
+/// extension.
+const URW_FONTS: &[(&str, &str)] = &[
+    ("Helvetica", "NimbusSans-Regular"),
+    ("Helvetica-Bold", "NimbusSans-Bold"),
+    ("Helvetica-Oblique", "NimbusSans-Italic"),
+    ("Helvetica-BoldOblique", "NimbusSans-BoldItalic"),
+    ("Times-Roman", "NimbusRoman-Regular"),
+    ("Times-Bold", "NimbusRoman-Bold"),
+    ("Times-Italic", "NimbusRoman-Italic"),
+    ("Times-BoldItalic", "NimbusRoman-BoldItalic"),
+    ("Times New Roman", "NimbusRoman-Regular"),
+    ("TimesNewRomanPSMT", "NimbusRoman-Regular"),
+    ("TimesNewRoman", "NimbusRoman-Regular"),
+    ("TimesNewRomanPS-BoldMT", "NimbusRoman-Bold"),
+    ("TimesNewRoman,Bold", "NimbusRoman-Bold"),
+    ("TimesNewRomanPS-ItalicMT", "NimbusRoman-Italic"),
+    ("TimesNewRoman,Italic", "NimbusRoman-Italic"),
+    ("TimesNewRomanPS-BoldItalicMT", "NimbusRoman-BoldItalic"),
+    ("TimesNewRoman,BoldItalic", "NimbusRoman-BoldItalic"),
+    ("Courier", "NimbusMonoPS-Regular"),
+    ("Courier-Bold", "NimbusMonoPS-Bold"),
+    ("Courier-Oblique", "NimbusMonoPS-Italic"),
+    ("Courier-BoldOblique", "NimbusMonoPS-BoldItalic"),
+    ("CourierNewPSMT", "NimbusMonoPS-Regular"),
+    ("ArialMT", "NimbusSans-Regular"),
+    ("Arial", "NimbusSans-Regular"),
+    ("Arial-BoldMT", "NimbusSans-Bold"),
+    ("Arial-ItalicMT", "NimbusSans-Italic"),
+    ("Symbol", "StandardSymbolsPS"),
+    ("ZapfDingbats", "D050000L"),
+];
+
+/// Point `$STANDARD_FONTS` at a font directory that maps the standard 14 to the
+/// URW base 35 outlines — the ones Ghostscript, poppler and mupdf substitute for
+/// a `Helvetica` or `Times-Roman` that is not embedded.  The repository's own
+/// substitutes (Myriad Pro for Helvetica, Minion Pro for Times) are a design
+/// choice, but every glyph of them differs from the reference render, so a
+/// comparison that uses them measures font choice instead of rendering.
+///
+/// `PDF_COMPARE_FONTS=<dir>` uses a directory of its own, `PDF_COMPARE_REPO_FONTS=1`
+/// keeps the repository substitutes, and a `$STANDARD_FONTS` that is already set
+/// is left untouched.
+fn point_standard_fonts_at_the_reference(out_dir: &Path) {
+    if let Some(dir) = std::env::var_os("STANDARD_FONTS") {
+        eprintln!(
+            "standard fonts: {} (from the environment)",
+            PathBuf::from(dir).display()
+        );
+        return;
+    }
+    if env_flag("PDF_COMPARE_REPO_FONTS") {
+        point_standard_fonts_at_the_repository();
+        eprintln!("standard fonts: repository substitutes");
+        return;
+    }
+    if let Some(dir) = std::env::var_os("PDF_COMPARE_FONTS") {
+        std::env::set_var("STANDARD_FONTS", &dir);
+        eprintln!(
+            "standard fonts: {} (from PDF_COMPARE_FONTS)",
+            PathBuf::from(dir).display()
+        );
+        return;
+    }
+    if let Some(dir) = write_reference_font_dir(out_dir) {
+        eprintln!("standard fonts: {} (URW base 35)", dir.display());
+        std::env::set_var("STANDARD_FONTS", dir);
+        return;
+    }
+    point_standard_fonts_at_the_repository();
+    eprintln!(
+        "standard fonts: repository substitutes — non-embedded text differs in glyph \
+         shape; install the urw-base35 fonts to compare text pixel by pixel"
+    );
+}
+
+/// Build a font directory under `out_dir` whose `fonts.json` names the installed
+/// URW files by absolute path: `StandardCache` joins the names onto the
+/// directory, so absolute paths work and nothing has to be copied or linked.
+fn write_reference_font_dir(out_dir: &Path) -> Option<PathBuf> {
+    let mut found: Option<(PathBuf, &str)> = None;
+    'search: for dir in URW_DIRS {
+        for extension in ["otf", "pfb"] {
+            let complete = ["NimbusSans-Regular", "NimbusSans-Bold", "NimbusRoman-Regular"]
+                .iter()
+                .all(|name| Path::new(dir).join(format!("{name}.{extension}")).is_file());
+            if complete {
+                found = Some((PathBuf::from(dir), extension));
+                break 'search;
+            }
+        }
+    }
+    let (dir, extension) = found?;
+
+    let mut json = String::from("{\n");
+    let mut first = true;
+    for (name, file) in URW_FONTS {
+        let path = dir.join(format!("{file}.{extension}"));
+        if !path.is_file() {
+            continue;
+        }
+        if !first {
+            json.push_str(",\n");
+        }
+        first = false;
+        json.push_str(&format!("    {name:?}: {:?}", path.to_string_lossy()));
+    }
+    json.push_str("\n}\n");
+
+    let fonts = out_dir.join("fonts");
+    std::fs::create_dir_all(&fonts).ok()?;
+    std::fs::write(fonts.join("fonts.json"), json).ok()?;
+    Some(fonts)
 }
 
 /// The renderer resolves the standard 14 fonts from `$STANDARD_FONTS`; point that
