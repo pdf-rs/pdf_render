@@ -62,10 +62,7 @@ const MAX_STRUCTURE_DIFF: f64 = 0.06;
 /// Documents whose pages are compared and reported but do not fail the test:
 /// differences we know about and that are not part of what this test guards
 /// (yet). Remove an entry when the cause is fixed.
-const KNOWN_GAPS: &[(&str, &str)] = &[(
-    "jpeg,lossless",
-    "image XObjects are not painted by the vello_cpu backend yet",
-)];
+const KNOWN_GAPS: &[(&str, &str)] = &[];
 
 fn known_gap(stem: &str) -> Option<&'static str> {
     KNOWN_GAPS

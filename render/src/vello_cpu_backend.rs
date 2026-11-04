@@ -8,10 +8,10 @@
 //!
 //! Two API differences shape this file:
 //!
-//! * `vello_cpu` has no `draw_image`; an image is a *paint* that is sampled in a unit
-//!   square, and the geometry is an ordinary filled path.  So an image is drawn by
-//!   filling the unit rect with both the path and the paint transform set to the
-//!   image transform.
+//! * `vello_cpu` has no `draw_image`; an image is a *paint* that is sampled in
+//!   image pixel space, and the geometry is an ordinary filled path.  So an
+//!   image is drawn by filling the rect `(0, 0) .. (w, h)` with the transform
+//!   that maps image pixels onto the device.
 //! * There is no scene graph, so clipping has to be pushed around each individual
 //!   draw with [`RenderContext::push_layer`] / [`RenderContext::pop_layer`].
 //!
@@ -112,7 +112,8 @@ impl<'a> VelloCpuBackend<'a> {
         }
     }
 
-    /// Draw `source` into the unit square mapped by `transform`.
+    /// Draw `source` (in image pixel space) with `transform`, which maps the
+    /// unit square onto the device.
     fn draw_image_source(
         &mut self,
         source: ImageSource,
@@ -136,17 +137,29 @@ impl<'a> VelloCpuBackend<'a> {
 
         let tf = transform_to_affine(image_transform);
 
+        // `vello_cpu` samples image paints in image pixel space: the paint
+        // transform is inverted and applied to device coordinates, so what it
+        // wants is the pixel -> device map.  `image_transform` already is that
+        // map (`transform * scale(1/w, -1/h) * translate(0, -h)` sends pixel
+        // (x, y) to the unit square with y flipped, and then to the device), so
+        // it can be used directly -- as the geometry transform, with the image
+        // rect in pixel space and an identity paint transform, so that geometry
+        // and paint agree and the transform is not applied twice.
+        let pixel_to_device = tf;
+
         self.push_clip(clip);
         self.ctx.set_paint(Image {
             image: source,
             sampler: Default::default(),
         });
-        self.ctx.set_transform(tf);
-        self.ctx.set_paint_transform(tf);
-        // vello_cpu has no separate pixel rect: filling the unit rect with the paint
-        // transform set to the same affine samples the whole image.
-        self.ctx.fill_rect(&Rect::new(0.0, 0.0, 1.0, 1.0));
+        self.ctx.set_transform(pixel_to_device);
         self.ctx.reset_paint_transform();
+        self.ctx.fill_rect(&Rect::new(
+            0.0,
+            0.0,
+            f64::from(width),
+            f64::from(height),
+        ));
         self.pop_clip(clip);
     }
 
