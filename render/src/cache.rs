@@ -1,4 +1,3 @@
-use std::path::{PathBuf};
 use std::sync::Arc;
 
 use font::Encoder;
@@ -11,9 +10,6 @@ use pdf::error::{Result};
 use peniko::{Blob, ImageAlphaType, ImageBrush, ImageData, ImageFormat};
 use std::slice;
 
-use pathfinder_geometry::{
-    vector::{Vector2I},
-};
 use pathfinder_content::{
     pattern::{Image},
 };
@@ -54,7 +50,6 @@ impl ImageResult
     }
 }
 
-
 #[inline]
 pub fn color_slice_to_u8_slice(slice: &[ColorU]) -> &[u8] {
     unsafe {
@@ -72,27 +67,17 @@ pub struct Cache<E: Encoder> {
 }
 impl<E: Encoder + 'static> Cache<E> where E::GlyphRef: Send + Sync {
     pub fn new(encoder: E) -> Cache<E> {
-        let standard_fonts;
-        if let Some(path) = std::env::var_os("STANDARD_FONTS") {
-            standard_fonts = PathBuf::from(path);
-        } else {
-            eprintln!("PDF: STANDARD_FONTS not set. using fonts/ instead.");
-            standard_fonts = PathBuf::from("fonts");
-        }
-        if !standard_fonts.is_dir() {
-            panic!("STANDARD_FONTS (or fonts/) is not directory.");
-        }
         Cache {
             fonts: SyncCache::new(),
             images: SyncCache::new(),
-            std: StandardCache::new(standard_fonts),
+            std: StandardCache::new(),
             missing_fonts: Vec::new(),
             encoder,
         }
     }
     pub fn get_font(&mut self, pdf_font: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry<E>>>> {
         let mut error = None;
-        let val = self.fonts.get(&**pdf_font as *const PdfFont as usize, ||
+        let val = self.fonts.get(&**pdf_font as *const PdfFont as usize, |_| 
             match load_font(&mut self.encoder, pdf_font, resolve, &self.std) {
                 Ok(Some(f)) => Some(Arc::new(f)),
                 Ok(None) => {
@@ -114,7 +99,7 @@ impl<E: Encoder + 'static> Cache<E> where E::GlyphRef: Send + Sync {
     }
 
     pub fn get_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resources: &Resources, resolve: &impl Resolve, mode: BlendMode) -> ImageResult {
-        self.images.get((xobject_ref, mode), || {
+        self.images.get((xobject_ref, mode), |_| {
             let im = match load_image(im, resources, resolve, mode) {
                 Ok(im) => im,
                 Err(e) => return ImageResult(Arc::new(Err(e)))

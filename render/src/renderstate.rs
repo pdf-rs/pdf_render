@@ -140,6 +140,9 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             Op::BeginMarkedContent { .. } => {}
             Op::EndMarkedContent { .. } => {}
             Op::MarkedContentPoint { .. } => {}
+            // Type 3 glyph metrics; they set widths declared by d0/d1 and draw nothing.
+            Op::GlyphWidth { .. } => {}
+            Op::GlyphWidthAndBBox { .. } => {}
             Op::Close => {
                 self.current_contour.close();
             }
@@ -306,7 +309,8 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             Op::TextFont { ref name, size } => {
                 let font = match self.resources.fonts.get(name) {
                     Some(font_ref) => {
-                        self.backend.get_font(font_ref, self.resolve)?
+                        let font = font_ref.load(self.resolve)?;
+                        self.backend.get_font(&font, self.resolve)?
                     },
                     None => None
                 };
@@ -559,6 +563,7 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
 
             match *cs {
                 ColorSpace::Icc(_) => return Err(PdfError::Other { msg: format!("nested ICC color space") }),
+                ColorSpace::Lab(_) => return Err(PdfError::Other { msg: format!("Lab color space is not supported") }),
                 ColorSpace::DeviceGray | ColorSpace::CalGray(_) => {
                     if args.len() != 1 {
                         return Err(PdfError::Other { msg: format!("expected 1 color arguments, got {:?}", args) });

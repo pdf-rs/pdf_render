@@ -96,9 +96,11 @@ impl<E: Encoder + 'static> TextState<E> {
             TextMode::Fill => Some(DrawMode::Fill { fill }),
             TextMode::FillAndClip => Some(DrawMode::Fill { fill }),
             TextMode::FillThenStroke => Some(DrawMode::FillStroke { fill, stroke, stroke_mode }),
+            TextMode::FillThenStrokeAndClip => Some(DrawMode::FillStroke { fill, stroke, stroke_mode }),
             TextMode::Invisible => None,
             TextMode::Stroke => Some(DrawMode::Stroke { stroke, stroke_mode }),
             TextMode::StrokeAndClip => Some(DrawMode::Stroke { stroke, stroke_mode }),
+            TextMode::TextAndClip => Some(DrawMode::Fill { fill }),
         };
         let e = self.font_entry.as_ref().expect("no font");
 

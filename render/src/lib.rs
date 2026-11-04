@@ -91,7 +91,7 @@ pub fn page_bounds(page: &Page) -> RectF {
 }
 pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Page, transform: Transform2F) -> Result<Transform2F, PdfError> {
     let bounds = page_bounds(page);
-    let rotate = Transform2F::from_rotation(page.rotate as f32 * std::f32::consts::PI / 180.);
+    let rotate = Transform2F::from_rotation(page.rotate() as f32 * std::f32::consts::PI / 180.);
     let br = rotate * RectF::new(Vector2F::zero(), bounds.size());
     let translate = Transform2F::from_translation(Vector2F::new(
         -br.min_x().min(br.max_x()),

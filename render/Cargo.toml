@@ -1,0 +1,76 @@
+[package]
+name = "pdf_render"
+version = "0.2.0"
+authors = ["Sebastian Köln <s3bk@protonmail.com>"]
+edition = "2021"
+
+[features]
+default = []
+unstable = []
+# Embed the standard fonts into the binary instead of reading them from
+# $STANDARD_FONTS at run time.
+embed = ["dep:rust-embed"]
+# Load the system font database for glyph fallback.
+glyphmatcher = ["dep:glyphmatcher"]
+# Legacy GPU backend built on pathfinder_renderer. Off by default: the vello
+# backends below replace it, and it pulls in the whole pathfinder renderer
+# stack.
+pathfinder = ["dep:pathfinder_renderer"]
+# GPU rendering through vello (wgpu).
+vello = ["dep:vello"]
+# Software rendering without a GPU, via the vello_cpu crate.
+vello_cpu = ["dep:vello_cpu"]
+
+[[bench]]
+name = "render"
+harness = false
+
+# CPU rendering examples need the optional vello_cpu dependency.
+[[example]]
+name = "render_cpu"
+required-features = ["vello_cpu"]
+
+[[example]]
+name = "cpu_smoke"
+required-features = ["vello_cpu"]
+
+[[example]]
+name = "vello_scene"
+required-features = ["vello"]
+
+[dependencies.pdf]
+default-features = false
+features = ["cache", "dump"]
+git = "https://github.com/pdf-rs/pdf"
+
+[dependencies]
+log = "0.4"
+font = { git = "https://github.com/pdf-rs/font", branch = "vello", features = ["cff"] }
+pdf_encoding = "0.4"
+itertools = "*"
+image = "0.25"
+instant = "*"
+custom_debug_derive = "*"
+globalcache = { version = "0.3", features = ["sync"] }
+istring = { git = "https://github.com/s3bk/istring" }
+once_cell = "*"
+serde_json = "*"
+glyphmatcher = { git = "https://github.com/s3bk/glyphmatcher", optional = true }
+rust-embed = { version = "*", optional = true, features = ["interpolate-folder-path"] }
+
+# Geometry and path types are part of the public backend API (and the font crate
+# expresses glyph outlines in them), so they stay unconditional for now.
+pathfinder_color = { git = "https://github.com/servo/pathfinder" }
+pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
+pathfinder_content = { git = "https://github.com/servo/pathfinder" }
+pathfinder_renderer = { git = "https://github.com/servo/pathfinder", optional = true }
+
+peniko = "0.6"
+vello = { version = "=0.11.0", optional = true }
+vello_encoding = "=0.11.0"
+vello_cpu = { version = "0.3", optional = true, default-features = false, features = ["std", "png", "u8_pipeline", "f32_pipeline"] }
+
+[dev-dependencies]
+criterion = "0.3"
+env_logger = "*"
+rand = "0.6"

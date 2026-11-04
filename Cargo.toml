@@ -1,64 +1,42 @@
-[package]
-name = "pdf_render"
-version = "0.2.0"
-authors = ["Sebastian Köln <s3bk@protonmail.com>"]
-edition = "2021"
-
-[features]
-unstable = []
-glyphmatcher = ["dep:glyphmatcher"]
-# GPU rendering through vello (wgpu). Off by default so the crate builds and
-# tests without a graphics stack.
-vello = ["dep:vello"]
-# Software rendering without a GPU, via the vello_cpu crate.
-vello_cpu = ["dep:vello_cpu"]
-
-[[bench]]
-name = "render"
-harness = false
-
-# CPU rendering examples need the optional vello_cpu dependency.
-[[example]]
-name = "render_cpu"
-required-features = ["vello_cpu"]
-
-[[example]]
-name = "cpu_smoke"
-required-features = ["vello_cpu"]
-
-[[example]]
-name = "vello_scene"
-required-features = ["vello"]
-
-[dependencies.pdf]
-default-features=false
-features = ["cache", "dump"]
-git = "https://github.com/pdf-rs/pdf"
-
-[dependencies]
-# pathfinder_renderer = { git = "https://github.com/servo/pathfinder" }
+[workspace]
+members = [
+    "render",
+    "view",
+    # Needs the sibling checkout of pathfinder_rasterize.
+    # "examples/pdf2image",
+]
+[patch.crates-io]
+pathfinder_gl = { git = "https://github.com/servo/pathfinder" }
+pathfinder_webgl = { git = "https://github.com/servo/pathfinder" }
+pathfinder_gpu = { git = "https://github.com/servo/pathfinder" }
+pathfinder_content = { git = "https://github.com/servo/pathfinder" }
 pathfinder_color = { git = "https://github.com/servo/pathfinder" }
 pathfinder_geometry = { git = "https://github.com/servo/pathfinder" }
+pathfinder_renderer = { git = "https://github.com/servo/pathfinder" }
 pathfinder_resources = { git = "https://github.com/servo/pathfinder" }
-pathfinder_content = { git = "https://github.com/servo/pathfinder" }
-log = "0.4"
-font = { git = "https://github.com/pdf-rs/font", branch = "vello", features=['cff']}
-pdf_encoding = "0.4"
-itertools = "*"
-image = "0.24.2"
-instant = "*"
-custom_debug_derive = "*"
-globalcache = { git = "https://github.com/s3bk/cachelib", features = ["sync"] }
-istring = { git = "https://github.com/s3bk/istring" }
-once_cell = "*"
-serde_json = "*"
-glyphmatcher = { git = "https://github.com/s3bk/glyphmatcher", optional = true }
-peniko = "0.6"
-vello = { version = "0.11", optional = true }
-vello_encoding = "0.11"
-vello_cpu = { version = "0.3", optional = true, default-features = false, features = ["std", "png", "u8_pipeline", "f32_pipeline"] }
+pathfinder_export = { git = "https://github.com/servo/pathfinder" }
+pathfinder_simd = { git = "https://github.com/servo/pathfinder" }
 
-[dev-dependencies]
-criterion = "0.3"
-env_logger = "*"
-rand = "0.6"
+
+# Local checkouts, enabled when the sibling repos are present.
+
+#[patch."https://github.com/s3bk/pathfinder_view"]
+#pathfinder_view = { path = "../pathfinder_view", features=["icon"] }
+
+[patch."https://github.com/pdf-rs/pdf"]
+pdf = { path = "../pdf/pdf", default-features=false }
+
+#[patch."https://github.com/pdf-rs/font"]
+#font = { path = "../font" }
+
+#[patch."https://github.com/servo/pathfinder"]
+#pathfinder_gl = { path = "../pathfinder/gl" }
+#pathfinder_webgl = { path = "../pathfinder/webgl" }
+#pathfinder_gpu = { path = "../pathfinder/gpu" }
+#pathfinder_content = { path = "../pathfinder/content" }
+#pathfinder_color = { path = "../pathfinder/color" }
+#pathfinder_renderer = { path = "../pathfinder/renderer" }
+#pathfinder_resources = { path = "../pathfinder/resources" }
+#pathfinder_export = { path = "../pathfinder/export" }
+#pathfinder_simd = { path = "../pathfinder/simd" }
+#pathfinder_geometry = { path = "../pathfinder/geometry" }

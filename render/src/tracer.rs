@@ -12,7 +12,6 @@ use font::{Encoder, Glyph, Pen};
 use pdf::font::Font as PdfFont;
 use pdf::error::PdfError;
 use std::sync::Arc;
-use std::path::PathBuf;
 use crate::font::{load_font, StandardCache};
 use globalcache::sync::SyncCache;
 
@@ -78,17 +77,15 @@ where
     E::GlyphRef: Sync + Send
 {
     pub fn new() -> Self {
-        let standard_fonts = PathBuf::from(std::env::var_os("STANDARD_FONTS").expect("STANDARD_FONTS is not set. Please check https://github.com/pdf-rs/pdf_render/#fonts for instructions."));
-
         TraceCache {
             fonts: SyncCache::new(),
-            std: StandardCache::new(standard_fonts),
+            std: StandardCache::new(),
         }
     }
     pub fn get_font(&self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry<E>>>, PdfError> {
         let mut error = None;
 
-        let val = self.fonts.get(font_key(font_ref), || {
+        let val = self.fonts.get(font_key(font_ref), |_| {
             let mut encoder = E::default();
                 match load_font(&mut encoder, font_ref, resolve, &self.std) {
                     Ok(Some(f)) => Some(Arc::new(f)),
