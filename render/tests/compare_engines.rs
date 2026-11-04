@@ -14,9 +14,15 @@
 //!
 //! Environment:
 //!
-//! * `PDF_COMPARE_ENGINE`     path to the external renderer (default: `pdftoppm`
-//!                            from `PATH`); it must accept
-//!                            `-png -r DPI -f N -l N -singlefile IN OUT`
+//! * `PDF_COMPARE_ENGINE_KIND` which renderer family the external engine is:
+//!                            `pdftoppm` (default), `gs`, `mutool` or `pdfium`.
+//!                            Each takes its page range, resolution and output
+//!                            path differently; see [`EngineKind`]. When it is
+//!                            unset the kind is guessed from the engine's file
+//!                            name (`gs`, `mutool`, `*pdfium*`), else Poppler.
+//! * `PDF_COMPARE_ENGINE`     path to the external renderer (default: the
+//!                            program of the selected kind from `PATH`, e.g.
+//!                            `pdftoppm` or `gs`)
 //! * `PDF_COMPARE_PDF`        colon separated list of PDFs; replaces the default corpus
 //! * `PDF_COMPARE_DIR`        directory of `*.pdf` files to add
 //! * `PDF_COMPARE_DPI`        resolution for both engines (default 600)
@@ -90,16 +96,17 @@ fn known_gap(stem: &str) -> Option<&'static str> {
 
 #[test]
 fn pages_match_a_second_engine() {
-    let Some(engine) = engine_binary() else {
+    let Some(engine) = select_engine() else {
         let msg = "no external PDF renderer found (install poppler-utils / pdftoppm, \
-                   or set PDF_COMPARE_ENGINE=/path/to/pdftoppm)";
+                   ghostscript or mupdf; or set PDF_COMPARE_ENGINE=/path/to/renderer and \
+                   PDF_COMPARE_ENGINE_KIND=pdftoppm|gs|mutool|pdfium)";
         if env_flag("PDF_COMPARE_REQUIRE") {
             panic!("{msg}");
         }
         eprintln!("skipping cross-engine comparison: {msg}");
         return;
     };
-    eprintln!("external engine: {}", engine.display());
+    eprintln!("external engine: {}", engine.describe());
     point_standard_fonts_at_the_repository();
 
     let dpi = env_f32("PDF_COMPARE_DPI", DEFAULT_DPI);
@@ -199,7 +206,10 @@ fn pages_match_a_second_engine() {
                 let region = spot.crop(overlay.width(), overlay.height());
                 let suffix = format!("spot{}", n + 1);
                 let (dx, dy, shifted, unshifted) = best_shift(&ours, &theirs, region, 32);
-                save(&prefix.with_extension(format!("{suffix}.png")), &crop(&overlay, region));
+                save(
+                    &prefix.with_extension(format!("{suffix}.png")),
+                    &crop(&overlay, region),
+                );
                 save(
                     &prefix.with_extension(format!("{suffix}.ours.png")),
                     &crop(&ours, region),
@@ -268,7 +278,10 @@ fn pages_match_a_second_engine() {
         }
     }
 
-    assert!(pages_compared > 0, "no page could be compared: {failures:#?}");
+    assert!(
+        pages_compared > 0,
+        "no page could be compared: {failures:#?}"
+    );
     match write_report(&out_dir, &engine, dpi, &lines) {
         Ok(path) => eprintln!("comparison report: {}", path.display()),
         Err(e) => eprintln!("cannot write the comparison report: {e}"),
@@ -277,7 +290,7 @@ fn pages_match_a_second_engine() {
         panic!(
             "{} of {pages_compared} compared pages disagree with {}:\n{}",
             failures.len(),
-            engine.display(),
+            engine.describe(),
             failures.join("\n")
         );
     }
@@ -287,11 +300,11 @@ fn pages_match_a_second_engine() {
 /// still leaves the pages it got through.
 fn write_report(
     out_dir: &Path,
-    engine: &Path,
+    engine: &Engine,
     dpi: f32,
     lines: &[String],
 ) -> std::io::Result<PathBuf> {
-    let header = format!("external engine: {}\ndpi: {dpi}\n\n", engine.display());
+    let header = format!("external engine: {}\ndpi: {dpi}\n\n", engine.describe());
     let path = out_dir.join("report.txt");
     std::fs::create_dir_all(out_dir)?;
     std::fs::write(&path, format!("{header}{}\n", lines.join("\n")))?;
@@ -299,12 +312,8 @@ fn write_report(
 }
 
 /// The concrete document type produced by `FileOptions::cached()`.
-type CachedPdf = pdf::file::File<
-    Vec<u8>,
-    pdf::file::ObjectCache,
-    pdf::file::StreamCache,
-    pdf::file::NoLog,
->;
+type CachedPdf =
+    pdf::file::File<Vec<u8>, pdf::file::ObjectCache, pdf::file::StreamCache, pdf::file::NoLog>;
 
 /// Render one page with this crate's CPU backend.
 fn render_ours(file: &CachedPdf, page_index: u32, dpi: f32) -> Result<RgbaImage, String> {
@@ -340,37 +349,32 @@ fn render_ours(file: &CachedPdf, page_index: u32, dpi: f32) -> Result<RgbaImage,
 
 /// Render one page with the external engine.
 fn render_engine(
-    engine: &Path,
+    engine: &Engine,
     pdf: &Path,
     page_number: u32,
     dpi: f32,
     out_prefix: &Path,
 ) -> Result<RgbaImage, String> {
     if let Some(dir) = out_prefix.parent() {
-        std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+        std::fs::create_dir_all(dir)
+            .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     }
-    let output = Command::new(engine)
-        .arg("-png")
-        .arg("-r")
-        .arg(format!("{dpi}"))
-        .arg("-f")
-        .arg(page_number.to_string())
-        .arg("-l")
-        .arg(page_number.to_string())
-        .arg("-singlefile")
-        .arg(pdf)
-        .arg(out_prefix)
+    let png = engine.kind.output_path(out_prefix);
+    // A stale image from an earlier run would be read back as this run's output
+    // when an engine fails without writing anything.
+    let _ = std::fs::remove_file(&png);
+    let output = engine
+        .command(pdf, page_number, dpi, out_prefix)
         .output()
-        .map_err(|e| format!("cannot run {}: {e}", engine.display()))?;
+        .map_err(|e| format!("cannot run {}: {e}", engine.program.display()))?;
     if !output.status.success() {
         return Err(format!(
             "{} failed with {}: {}",
-            engine.display(),
+            engine.program.display(),
             output.status,
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
-    let png = out_prefix.with_extension("png");
     image::open(&png)
         .map(|i| i.to_rgba8())
         .map_err(|e| format!("cannot decode {}: {e}", png.display()))
@@ -417,9 +421,18 @@ impl Hotspot {
             .min(page_height.max(1));
         let cx = (self.x0 + self.x1) / 2;
         let cy = (self.y0 + self.y1) / 2;
-        let x0 = cx.saturating_sub(side / 2).min(page_width.saturating_sub(side));
-        let y0 = cy.saturating_sub(side / 2).min(page_height.saturating_sub(side));
-        (x0, y0, side.min(page_width - x0), side.min(page_height - y0))
+        let x0 = cx
+            .saturating_sub(side / 2)
+            .min(page_width.saturating_sub(side));
+        let y0 = cy
+            .saturating_sub(side / 2)
+            .min(page_height.saturating_sub(side));
+        (
+            x0,
+            y0,
+            side.min(page_width - x0),
+            side.min(page_height - y0),
+        )
     }
 }
 
@@ -589,7 +602,11 @@ fn line_dx(
                 n += 1.0;
             }
         }
-        if n == 0.0 { f64::INFINITY } else { sum / (n * 255.0) }
+        if n == 0.0 {
+            f64::INFINITY
+        } else {
+            sum / (n * 255.0)
+        }
     };
     let unshifted = score(0);
     let (mut best_dx, mut best) = (0, unshifted);
@@ -644,7 +661,11 @@ fn worst_lines(ours: &RgbaImage, theirs: &RgbaImage, count: usize) -> Vec<String
         ));
     }
     found.sort_by(|a, b| b.0.total_cmp(&a.0));
-    found.into_iter().take(count).map(|(_, line)| line).collect()
+    found
+        .into_iter()
+        .take(count)
+        .map(|(_, line)| line)
+        .collect()
 }
 
 /// Shifts estimated separately for vertical strips of the page: a shift that
@@ -726,7 +747,11 @@ fn best_shift(
                 n += 1.0;
             }
         }
-        if n == 0.0 { f64::INFINITY } else { sum / (n * 255.0) }
+        if n == 0.0 {
+            f64::INFINITY
+        } else {
+            sum / (n * 255.0)
+        }
     };
     let unshifted = score(0, 0);
     // Coarse search first, then refine around the winner.
@@ -841,15 +866,230 @@ fn save(path: &Path, image: &RgbaImage) {
     }
 }
 
-/// The external renderer: `PDF_COMPARE_ENGINE` or `pdftoppm` from `PATH`.
-fn engine_binary() -> Option<PathBuf> {
+/// An external renderer: which family it belongs to and the program to run.
+struct Engine {
+    kind: EngineKind,
+    program: PathBuf,
+}
+
+impl Engine {
+    /// `kind at /path/to/program`, for the report header and error messages.
+    fn describe(&self) -> String {
+        format!("{} ({})", self.program.display(), self.kind.name())
+    }
+
+    /// The command that renders one page of `pdf` at `dpi` to
+    /// `kind.output_path(out_prefix)`.
+    fn command(&self, pdf: &Path, page_number: u32, dpi: f32, out_prefix: &Path) -> Command {
+        self.kind
+            .command(&self.program, pdf, page_number, dpi, out_prefix)
+    }
+}
+
+/// Which renderer family the external engine belongs to. They agree on nothing
+/// but the job: each spells the page range, the resolution and the output path
+/// its own way, and only Poppler takes an output *prefix* instead of a file.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EngineKind {
+    /// Poppler: `-png -r DPI -f N -l N -singlefile IN OUTPREFIX`.
+    Pdftoppm,
+    /// Ghostscript: `-sDEVICE=png16m -rDPI -dFirstPage=N -dLastPage=N
+    /// -sOutputFile=OUT IN`.
+    Ghostscript,
+    /// MuPDF: `draw -q -r DPI -o OUT IN N`.
+    Mutool,
+    /// pdfium through pypdfium2: a Python program, `pdf page dpi out`.
+    Pdfium,
+}
+
+impl EngineKind {
+    /// `PDF_COMPARE_ENGINE_KIND`, with the synonyms people actually type.
+    fn parse(name: &str) -> Option<Self> {
+        match name.trim().to_ascii_lowercase().as_str() {
+            "pdftoppm" | "poppler" => Some(Self::Pdftoppm),
+            "gs" | "ghostscript" => Some(Self::Ghostscript),
+            "mutool" | "mupdf" => Some(Self::Mutool),
+            "pdfium" | "pypdfium2" | "python" => Some(Self::Pdfium),
+            _ => None,
+        }
+    }
+
+    /// The kind of a renderer named by the caller or found on `PATH`, from its
+    /// file name. Anything unrecognised is Poppler, the only family this test
+    /// supported before the adapters existed.
+    fn from_program(program: &Path) -> Self {
+        let name = program
+            .file_name()
+            .map(|n| n.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        if name.starts_with("gs") || name.contains("ghostscript") {
+            Self::Ghostscript
+        } else if name.starts_with("mutool") {
+            Self::Mutool
+        } else if name.contains("pdfium") {
+            Self::Pdfium
+        } else {
+            Self::Pdftoppm
+        }
+    }
+
+    /// The program to look for on `PATH` when the caller named a kind but no
+    /// path. pdfium has no raster CLI of its own, hence Python.
+    fn default_program(self) -> &'static str {
+        match self {
+            Self::Pdftoppm => "pdftoppm",
+            Self::Ghostscript => "gs",
+            Self::Mutool => "mutool",
+            Self::Pdfium => "python3",
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Pdftoppm => "pdftoppm",
+            Self::Ghostscript => "ghostscript",
+            Self::Mutool => "mutool",
+            Self::Pdfium => "pdfium",
+        }
+    }
+
+    /// Where this family leaves the rendered page, given the prefix the test
+    /// hands it: a PNG next to the other images of that page.
+    fn output_path(self, out_prefix: &Path) -> PathBuf {
+        out_prefix.with_extension("png")
+    }
+
+    fn command(
+        self,
+        program: &Path,
+        pdf: &Path,
+        page_number: u32,
+        dpi: f32,
+        out_prefix: &Path,
+    ) -> Command {
+        let out = self.output_path(out_prefix);
+        let mut command = Command::new(program);
+        match self {
+            Self::Pdftoppm => {
+                command
+                    .arg("-png")
+                    .arg("-r")
+                    .arg(format!("{dpi}"))
+                    .arg("-f")
+                    .arg(page_number.to_string())
+                    .arg("-l")
+                    .arg(page_number.to_string())
+                    .arg("-singlefile")
+                    .arg(pdf)
+                    .arg(out_prefix);
+            }
+            Self::Ghostscript => {
+                command
+                    .arg("-q")
+                    .arg("-dNOPAUSE")
+                    .arg("-dBATCH")
+                    .arg("-sDEVICE=png16m")
+                    .arg(format!("-r{dpi}"))
+                    // Without these Ghostscript draws hard-edged glyphs and
+                    // vectors, which the pixel comparison would read as a
+                    // rendering difference rather than a rasteriser default.
+                    .arg("-dTextAlphaBits=4")
+                    .arg("-dGraphicsAlphaBits=4")
+                    .arg(format!("-dFirstPage={page_number}"))
+                    .arg(format!("-dLastPage={page_number}"))
+                    .arg(format!("-sOutputFile={}", out.display()))
+                    .arg(pdf);
+            }
+            Self::Mutool => {
+                command
+                    .arg("draw")
+                    .arg("-q")
+                    .arg("-r")
+                    .arg(format!("{dpi}"))
+                    .arg("-o")
+                    .arg(&out)
+                    .arg(pdf)
+                    .arg(page_number.to_string());
+            }
+            Self::Pdfium => {
+                // A Python interpreter runs the adapter inline; a wrapper script
+                // (or any other program) gets the same four arguments instead
+                // and is expected to import pypdfium2 itself.
+                let name = program
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_ascii_lowercase())
+                    .unwrap_or_default();
+                if name.starts_with("python") {
+                    command.arg("-c").arg(PDFIUM_SCRIPT);
+                }
+                command
+                    .arg(pdf)
+                    .arg(page_number.to_string())
+                    .arg(format!("{dpi}"))
+                    .arg(&out);
+            }
+        }
+        command
+    }
+}
+
+/// The pdfium adapter: render one page, flattened onto white so a transparent
+/// background does not read as black ink. `sys.argv` = program, pdf, page, dpi,
+/// output path (see [`EngineKind::Pdfium`]).
+const PDFIUM_SCRIPT: &str = r#"
+import sys
+import pypdfium2 as pdfium
+from PIL import Image
+path, page, dpi, out = sys.argv[1], int(sys.argv[2]), float(sys.argv[3]), sys.argv[4]
+document = pdfium.PdfDocument(path)
+image = document[page - 1].render(scale=dpi / 72.0).to_pil()
+if image.mode != "RGB":
+    background = Image.new("RGB", image.size, "white")
+    mask = image.split()[-1] if "A" in image.mode else None
+    background.paste(image, mask=mask)
+    image = background
+image.save(out)
+"#;
+
+/// The external renderer: `PDF_COMPARE_ENGINE_KIND` picks the family,
+/// `PDF_COMPARE_ENGINE` the program; without them the kind is guessed from the
+/// path if that was given, and `pdftoppm` from `PATH` is the default.
+fn select_engine() -> Option<Engine> {
+    // The kind the caller asked for, if the variable was set and understood.
+    let requested = match std::env::var("PDF_COMPARE_ENGINE_KIND") {
+        Ok(name) if !name.trim().is_empty() => match EngineKind::parse(&name) {
+            Some(kind) => Some(kind),
+            None => {
+                eprintln!(
+                    "warning: unknown PDF_COMPARE_ENGINE_KIND={name:?} \
+                     (expected pdftoppm, gs, mutool or pdfium); guessing from the program name"
+                );
+                None
+            }
+        },
+        _ => None,
+    };
+
     if let Some(path) = std::env::var_os("PDF_COMPARE_ENGINE") {
-        let path = PathBuf::from(path);
-        return path.is_file().then_some(path);
+        let program = PathBuf::from(path);
+        let kind = requested.unwrap_or_else(|| EngineKind::from_program(&program));
+        return program_on_path(&program).map(|program| Engine { kind, program });
+    }
+
+    let kind = requested.unwrap_or(EngineKind::Pdftoppm);
+    let program = program_on_path(Path::new(kind.default_program()))?;
+    Some(Engine { kind, program })
+}
+
+/// Resolve a program name, or the name of a path that exists, without running
+/// it: `PDF_COMPARE_ENGINE` may be just `gs`.
+fn program_on_path(program: &Path) -> Option<PathBuf> {
+    if program.components().count() > 1 {
+        return program.is_file().then_some(program.to_path_buf());
     }
     let path_var: OsString = std::env::var_os("PATH")?;
     std::env::split_paths(&path_var)
-        .map(|dir| dir.join("pdftoppm"))
+        .map(|dir| dir.join(program))
         .find(|candidate| candidate.is_file())
 }
 
@@ -951,4 +1191,134 @@ fn env_u32(name: &str, default: u32) -> u32 {
         .and_then(|v| v.parse().ok())
         .filter(|v| *v > 0)
         .unwrap_or(default)
+}
+
+/// The adapters are pure argument building, so they can be checked without any
+/// renderer installed; the engines themselves are exercised by the comparison
+/// test above when one is present.
+#[test]
+fn engine_arguments_follow_the_kind() {
+    let pdf = Path::new("/tmp/in put.pdf");
+    let prefix = Path::new("/tmp/out-p3");
+    let out = Path::new("/tmp/out-p3.png");
+
+    let args = |kind: EngineKind, program: &str| -> Vec<String> {
+        kind.command(Path::new(program), pdf, 3, 150.0, prefix)
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    };
+    let strings =
+        |items: &[&str]| -> Vec<String> { items.iter().map(|s| (*s).to_string()).collect() };
+
+    assert_eq!(
+        args(EngineKind::Pdftoppm, "/usr/bin/pdftoppm"),
+        strings(&[
+            "-png",
+            "-r",
+            "150",
+            "-f",
+            "3",
+            "-l",
+            "3",
+            "-singlefile",
+            "/tmp/in put.pdf",
+            "/tmp/out-p3",
+        ]),
+    );
+
+    assert_eq!(
+        args(EngineKind::Ghostscript, "/usr/bin/gs"),
+        strings(&[
+            "-q",
+            "-dNOPAUSE",
+            "-dBATCH",
+            "-sDEVICE=png16m",
+            "-r150",
+            "-dTextAlphaBits=4",
+            "-dGraphicsAlphaBits=4",
+            "-dFirstPage=3",
+            "-dLastPage=3",
+            "-sOutputFile=/tmp/out-p3.png",
+            "/tmp/in put.pdf",
+        ]),
+    );
+
+    assert_eq!(
+        args(EngineKind::Mutool, "/usr/bin/mutool"),
+        strings(&[
+            "draw",
+            "-q",
+            "-r",
+            "150",
+            "-o",
+            "/tmp/out-p3.png",
+            "/tmp/in put.pdf",
+            "3",
+        ]),
+    );
+
+    // A Python interpreter gets the adapter inline, a wrapper script gets the
+    // same four arguments and runs its own code.
+    let python = args(EngineKind::Pdfium, "/usr/bin/python3");
+    assert_eq!(python[0], "-c");
+    assert!(python[1].contains("pypdfium2"));
+    assert_eq!(
+        &python[2..],
+        strings(&["/tmp/in put.pdf", "3", "150", "/tmp/out-p3.png"]),
+    );
+    let wrapper = args(EngineKind::Pdfium, "/usr/local/bin/render_pdfium.sh");
+    assert_eq!(
+        wrapper,
+        strings(&["/tmp/in put.pdf", "3", "150", "/tmp/out-p3.png"]),
+    );
+
+    // Every family writes the PNG where the test looks for it.
+    for kind in [
+        EngineKind::Pdftoppm,
+        EngineKind::Ghostscript,
+        EngineKind::Mutool,
+        EngineKind::Pdfium,
+    ] {
+        assert_eq!(kind.output_path(prefix), out, "{}", kind.name());
+    }
+}
+
+#[test]
+fn engine_kind_is_named_or_sniffed() {
+    assert_eq!(EngineKind::parse("pdftoppm"), Some(EngineKind::Pdftoppm));
+    assert_eq!(EngineKind::parse(" poppler "), Some(EngineKind::Pdftoppm));
+    assert_eq!(EngineKind::parse("GS"), Some(EngineKind::Ghostscript));
+    assert_eq!(
+        EngineKind::parse("ghostscript"),
+        Some(EngineKind::Ghostscript)
+    );
+    assert_eq!(EngineKind::parse("mupdf"), Some(EngineKind::Mutool));
+    assert_eq!(EngineKind::parse("pypdfium2"), Some(EngineKind::Pdfium));
+    assert_eq!(EngineKind::parse("inkscape"), None);
+
+    assert_eq!(
+        EngineKind::from_program(Path::new("/opt/bin/gs")),
+        EngineKind::Ghostscript
+    );
+    assert_eq!(
+        EngineKind::from_program(Path::new("/opt/bin/gs-10.02.1")),
+        EngineKind::Ghostscript
+    );
+    assert_eq!(
+        EngineKind::from_program(Path::new("/usr/bin/mutool")),
+        EngineKind::Mutool
+    );
+    assert_eq!(
+        EngineKind::from_program(Path::new("/usr/bin/render_pdfium.sh")),
+        EngineKind::Pdfium
+    );
+    // Unknown programs keep the old behaviour: Poppler flags.
+    assert_eq!(
+        EngineKind::from_program(Path::new("/usr/x/bin/xpdf")),
+        EngineKind::Pdftoppm
+    );
+    assert_eq!(EngineKind::Pdftoppm.default_program(), "pdftoppm");
+    assert_eq!(EngineKind::Ghostscript.default_program(), "gs");
+    assert_eq!(EngineKind::Pdfium.default_program(), "python3");
 }
