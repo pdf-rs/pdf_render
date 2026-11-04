@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 use font::{Font, CffFont, Encoder, FontVariant, GlyphId};
 
 #[cfg(feature="glyphmatcher")]
@@ -22,6 +23,67 @@ fn symbol_code(unicode: Option<&str>) -> Option<u32> {
         .and_then(|s| s.chars().next())
         .and_then(|c| Encoding::AdobeSymbol.reverse_map().and_then(|m| m.get(c as u32)))
         .map(|code| code as u32)
+}
+
+/// The glyph name pdf_encoding knows for a character. The free clones of the
+/// standard fonts carry glyph names but often no unicode map, so a name is the
+/// only handle on a glyph.
+fn glyphname_for_char(c: char) -> Option<&'static str> {
+    static BY_CHAR: OnceLock<HashMap<u32, &'static str>> = OnceLock::new();
+    let map = BY_CHAR.get_or_init(|| {
+        pdf_encoding::GLYPH_LIST.iter()
+            .filter_map(|&(name, unicode)| unicode.chars().next().map(|c| (c as u32, name)))
+            .collect()
+    });
+    map.get(&(c as u32)).copied()
+}
+
+/// The built-in encoding of a standard font that has no `/Encoding` entry in
+/// the PDF: Symbol and ZapfDingbats keep their glyphs at PostScript codes that
+/// are not ASCII, so a byte of the text has to go through the encoding.
+fn builtin_standard_encoding(name: Option<&str>) -> Option<Encoding> {
+    let name = name?;
+    let ps_name = name.split('+').last().unwrap_or(name);
+    match ps_name {
+        "Symbol" => Some(Encoding::AdobeSymbol),
+        "ZapfDingbats" | "ZapfDingbatsStd" => Some(Encoding::AdobeZdingbat),
+        _ => None,
+    }
+}
+
+/// The glyph name the ZapfDingbats built-in encoding gives a code. Those glyphs
+/// are named `a1`..`a191`, and no glyph list turns such a name into a character,
+/// so the name has to come from the code itself: the encoding assigns them in
+/// name order.
+fn zdingbat_glyph_name(b: u8) -> Option<String> {
+    match b {
+        0x20 => Some("space".to_string()),
+        0x21 ..= 0x7e => Some(format!("a{}", b as u32 - 0x20)),
+        0xa1 ..= 0xfe => Some(format!("a{}", b as u32 - 60)),
+        _ => None,
+    }
+}
+
+/// Map every byte of `enc` to a glyph of `font`, going through the glyph name
+/// where the font program has no unicode map of its own.
+fn fill_builtin_cmap<E: Encoder + 'static>(
+    cmap: &mut HashMap<u16, (GlyphId, Option<SmallString>)>,
+    font: &FontRc<E>,
+    enc: Encoding,
+) {
+    let Some(forward) = enc.forward_map() else { return };
+    for b in 0 ..= 255u8 {
+        let Some(c) = forward.get(b) else { continue };
+        let gid = font.gid_for_unicode_codepoint(c as u32)
+            .or_else(|| glyphname_for_char(c).and_then(|n| font.gid_for_name(n)))
+            .or_else(|| match enc {
+                Encoding::AdobeZdingbat => zdingbat_glyph_name(b).and_then(|n| font.gid_for_name(&n)),
+                _ => None,
+            });
+        if let Some(gid) = gid {
+            cmap.insert(b as u16, (gid, Some(c.into())));
+        }
+    }
 }
 
 pub struct FontEntry<E: Encoder> {
@@ -223,22 +285,36 @@ impl<E: Encoder + 'static> FontEntry<E> {
                     cmap.insert(cp as u16, (gid, unicode));
                 }
             } else {
-                if let Some(ref u) = to_unicode {
-                    debug!("using to_unicode to build cmap");
-                    for (cp, unicode) in u.iter() {
-                        if let Some(gid) = font.gid_for_unicode_codepoint(cp as u32) {
-                            cmap.insert(cp as u16, (gid, Some(unicode.into())));
+                // A font with no /Encoding uses its built-in one. Symbol and
+                // ZapfDingbats keep their glyphs at codes that are not ASCII,
+                // and their free clones leave nothing above that maps a byte
+                // to a glyph (no unicode map, all-zero codepoints), so build
+                // the map from the standard encoding of those two.
+                let mut from_builtin = false;
+                if let Some(enc) = builtin_standard_encoding(name.map(|n| n.as_str())) {
+                    cmap.clear();
+                    fill_builtin_cmap(&mut cmap, &font, enc);
+                    from_builtin = !cmap.is_empty();
+                    debug!("built-in {:?} encoding gave {} glyphs", enc, cmap.len());
+                }
+                if !from_builtin {
+                    if let Some(ref u) = to_unicode {
+                        debug!("using to_unicode to build cmap");
+                        for (cp, unicode) in u.iter() {
+                            if let Some(gid) = font.gid_for_unicode_codepoint(cp as u32) {
+                                cmap.insert(cp as u16, (gid, Some(unicode.into())));
+                            }
                         }
-                    }
-                } else if let Some(codepoints) = font_codepoints {
-                    for (&cp, &gid) in codepoints.iter() {
-                        cmap.insert(cp as u16, (GlyphId(gid), glyph_unicode.get(&GlyphId(gid)).cloned()));
-                    }
-                } else {
-                    debug!("assuming text has unicode codepoints");
-                    for (&gid, unicode) in glyph_unicode.iter() {
-                        if let Some(cp) = unicode.chars().next() {
-                            cmap.insert(cp as u16, (gid, Some(unicode.clone())));
+                    } else if let Some(codepoints) = font_codepoints {
+                        for (&cp, &gid) in codepoints.iter() {
+                            cmap.insert(cp as u16, (GlyphId(gid), glyph_unicode.get(&GlyphId(gid)).cloned()));
+                        }
+                    } else {
+                        debug!("assuming text has unicode codepoints");
+                        for (&gid, unicode) in glyph_unicode.iter() {
+                            if let Some(cp) = unicode.chars().next() {
+                                cmap.insert(cp as u16, (gid, Some(unicode.clone())));
+                            }
                         }
                     }
                 }
@@ -360,6 +436,7 @@ impl<E: Encoder> globalcache::ValueSize for FontEntry<E> {
 #[cfg(test)]
 mod tests {
     use super::symbol_code;
+    use pdf_encoding::Encoding;
 
     #[test]
     fn a_glyph_name_goes_through_the_symbol_code() {
@@ -370,5 +447,27 @@ mod tests {
         // Not a Symbol character: nothing to translate.
         assert_eq!(symbol_code(Some("A")), None);
         assert_eq!(symbol_code(None), None);
+    }
+
+    #[test]
+    fn the_symbolic_standard_fonts_use_their_builtin_encoding() {
+        assert_eq!(super::builtin_standard_encoding(Some("Symbol")), Some(Encoding::AdobeSymbol));
+        assert_eq!(super::builtin_standard_encoding(Some("ABCDEF+Symbol")), Some(Encoding::AdobeSymbol));
+        assert_eq!(super::builtin_standard_encoding(Some("ZapfDingbats")), Some(Encoding::AdobeZdingbat));
+        // The other standard fonts are not symbolic: their bytes are text.
+        assert_eq!(super::builtin_standard_encoding(Some("Helvetica")), None);
+        assert_eq!(super::builtin_standard_encoding(None), None);
+    }
+
+    #[test]
+    fn zapfdingbats_glyphs_are_named_after_their_code() {
+        // The encoding assigns a1..a94 to 0x21..0x7e and a101.. to 0xa1..
+        assert_eq!(super::zdingbat_glyph_name(0x20).as_deref(), Some("space"));
+        assert_eq!(super::zdingbat_glyph_name(0x21).as_deref(), Some("a1"));
+        assert_eq!(super::zdingbat_glyph_name(0x61).as_deref(), Some("a65"));
+        assert_eq!(super::zdingbat_glyph_name(0x7e).as_deref(), Some("a94"));
+        assert_eq!(super::zdingbat_glyph_name(0xa1).as_deref(), Some("a101"));
+        assert_eq!(super::zdingbat_glyph_name(0xfe).as_deref(), Some("a194"));
+        assert_eq!(super::zdingbat_glyph_name(0x90), None);
     }
 }
