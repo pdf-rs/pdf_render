@@ -47,10 +47,12 @@
 //! page that matches nowhere is a glyph or colour problem.
 //!
 //! Note that documents whose fonts are *not* embedded (`example.pdf`,
-//! `pdf-sample.pdf`) cannot match: both engines substitute their own clone of
-//! Times, Arial or Symbol, and clones differ in advance widths and glyph shapes.
-//! Theirs are the largest differences in the default corpus and they are the
-//! floor, not a bug.
+//! `pdf-sample.pdf`) can only match if both engines draw the same files.
+//! `point_standard_fonts_at_the_reference` gives the renderer a font directory
+//! and hands the external engine a private `fonts.conf` that attaches the same
+//! files to the standard 14 names, so what is left is our rasteriser. Poppler
+//! and mupdf follow it; Ghostscript ignores `FONTCONFIG_FILE` and substitutes
+//! its own Nimbus fonts, which keeps those numbers a font comparison.
 //!
 //! The default corpus is `wasm/logo.pdf` from this repository plus a handful of
 //! documents from the `pdf` checkout next to it (`../../pdf/files`), when that
@@ -59,6 +61,7 @@
 
 #![cfg(feature = "vello_cpu")]
 
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -305,9 +308,13 @@ fn write_report(
     lines: &[String],
 ) -> std::io::Result<PathBuf> {
     let header = format!(
-        "external engine: {}\ndpi: {dpi}\nstandard fonts: {}\n\n",
+        "external engine: {}\ndpi: {dpi}\nstandard fonts: {}\nreference engine fonts: {}\n\n",
         engine.describe(),
-        std::env::var("STANDARD_FONTS").unwrap_or_else(|_| "(unset)".into())
+        std::env::var("STANDARD_FONTS").unwrap_or_else(|_| "(unset)".into()),
+        REFERENCE_FONTCONFIG
+            .get()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "(engine default)".to_string())
     );
     let path = out_dir.join("report.txt");
     std::fs::create_dir_all(out_dir)?;
@@ -973,6 +980,9 @@ impl EngineKind {
     ) -> Command {
         let out = self.output_path(out_prefix);
         let mut command = Command::new(program);
+        if let Some(config) = REFERENCE_FONTCONFIG.get() {
+            command.env("FONTCONFIG_FILE", config);
+        }
         match self {
             Self::Pdftoppm => {
                 command
@@ -1194,6 +1204,10 @@ const URW_FONTS: &[(&str, &str)] = &[
     ("ZapfDingbats", "D050000L"),
 ];
 
+/// The `fonts.conf` that makes the external engine draw the same standard 14
+/// files as the renderer, once one has been written.
+static REFERENCE_FONTCONFIG: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
 /// Point `$STANDARD_FONTS` at a font directory that maps the standard 14 to the
 /// URW base 35 outlines — the ones Ghostscript, poppler and mupdf substitute for
 /// a `Helvetica` or `Times-Roman` that is not embedded.  The repository's own
@@ -1205,36 +1219,148 @@ const URW_FONTS: &[(&str, &str)] = &[
 /// keeps the repository substitutes, and a `$STANDARD_FONTS` that is already set
 /// is left untouched.
 fn point_standard_fonts_at_the_reference(out_dir: &Path) {
-    if let Some(dir) = std::env::var_os("STANDARD_FONTS") {
-        eprintln!(
-            "standard fonts: {} (from the environment)",
-            PathBuf::from(dir).display()
-        );
-        return;
-    }
-    if env_flag("PDF_COMPARE_REPO_FONTS") {
-        point_standard_fonts_at_the_repository();
-        eprintln!("standard fonts: repository substitutes");
-        return;
-    }
-    if let Some(dir) = std::env::var_os("PDF_COMPARE_FONTS") {
+    let dir = if let Some(dir) = std::env::var_os("STANDARD_FONTS") {
+        let dir = PathBuf::from(dir);
+        eprintln!("standard fonts: {} (from the environment)", dir.display());
+        dir
+    } else if env_flag("PDF_COMPARE_REPO_FONTS") {
+        let dir = repository_font_dir().unwrap_or_default();
+        std::env::set_var("STANDARD_FONTS", &dir);
+        eprintln!("standard fonts: {} (repository /fonts)", dir.display());
+        dir
+    } else if let Some(dir) = std::env::var_os("PDF_COMPARE_FONTS") {
+        let dir = PathBuf::from(dir);
+        std::env::set_var("STANDARD_FONTS", &dir);
+        eprintln!("standard fonts: {} (from PDF_COMPARE_FONTS)", dir.display());
+        dir
+    } else if let Some(dir) = write_reference_font_dir(out_dir) {
+        eprintln!("standard fonts: {} (URW base 35)", dir.display());
+        std::env::set_var("STANDARD_FONTS", &dir);
+        dir
+    } else {
+        let dir = repository_font_dir().unwrap_or_default();
         std::env::set_var("STANDARD_FONTS", &dir);
         eprintln!(
-            "standard fonts: {} (from PDF_COMPARE_FONTS)",
-            PathBuf::from(dir).display()
+            "standard fonts: {} (repository substitutes — non-embedded text differs in \
+             glyph shape; install the urw-base35 fonts to compare text pixel by pixel)",
+            dir.display()
         );
+        dir
+    };
+    point_reference_engine_at_fonts(&dir, out_dir);
+}
+
+/// Let the external engine resolve the standard 14 from the same files the
+/// renderer uses. Poppler and mupdf ask fontconfig for a `Helvetica` or
+/// `Times-Roman` that the document does not embed; a private `fonts.conf` that
+/// gives the file named in `fonts.json` that family name makes them draw the
+/// same outlines, so the diff measures our rasteriser and not our font choice.
+///
+/// The name is attached with a `target="scan"` rule rather than by assigning a
+/// file to a pattern, so a request for `Helvetica` *bold* still lands on
+/// `MyriadPro-Bold.otf`: every file of a family carries the bare family name and
+/// keeps its own weight and slant.
+///
+/// Ghostscript ignores `FONTCONFIG_FILE` and substitutes its own Nimbus fonts;
+/// its numbers stay a font comparison. A `FONTCONFIG_FILE` that is already set
+/// is left alone.
+fn point_reference_engine_at_fonts(dir: &Path, out_dir: &Path) {
+    if std::env::var_os("FONTCONFIG_FILE").is_some() {
+        eprintln!("reference engine fonts: FONTCONFIG_FILE already set, left alone");
         return;
     }
-    if let Some(dir) = write_reference_font_dir(out_dir) {
-        eprintln!("standard fonts: {} (URW base 35)", dir.display());
-        std::env::set_var("STANDARD_FONTS", dir);
+    let Ok(text) = std::fs::read_to_string(dir.join("fonts.json")) else {
+        return;
+    };
+    let Ok(serde_json::Value::Object(map)) = serde_json::from_str(&text) else {
+        return;
+    };
+
+    // file -> the family names that file answers to
+    let mut families: BTreeMap<PathBuf, Vec<String>> = BTreeMap::new();
+    for (name, file) in &map {
+        let Some(file) = file.as_str() else {
+            continue;
+        };
+        let file = PathBuf::from(file);
+        let file = if file.is_absolute() { file } else { dir.join(file) };
+        let Ok(file) = file.canonicalize() else {
+            continue;
+        };
+        let names = families.entry(file).or_default();
+        let mut add = |name: &str| {
+            let name = name.trim();
+            if !name.is_empty() && !names.iter().any(|known| known == name) {
+                names.push(name.to_owned());
+            }
+        };
+        add(name);
+        // `Helvetica-Bold` also answers to `Helvetica`, so a family request with
+        // a weight picks the bold file instead of whichever came first.
+        if let Some(base) = name.split(['-', ',']).next() {
+            add(base);
+        }
+    }
+    if families.is_empty() {
         return;
     }
-    point_standard_fonts_at_the_repository();
-    eprintln!(
-        "standard fonts: repository substitutes — non-embedded text differs in glyph \
-         shape; install the urw-base35 fonts to compare text pixel by pixel"
+
+    let mut rules = String::new();
+    for (file, names) in &families {
+        rules.push_str("  <match target=\"scan\">\n");
+        rules.push_str(&format!(
+            "    <test name=\"file\" compare=\"eq\"><string>{}</string></test>\n",
+            escape_xml(&file.to_string_lossy())
+        ));
+        for name in names {
+            rules.push_str(&format!(
+                "    <edit name=\"family\" mode=\"prepend\" binding=\"strong\"><string>{}</string></edit>\n",
+                escape_xml(name)
+            ));
+        }
+        rules.push_str("  </match>\n");
+    }
+
+    let cache = out_dir.join("fc-cache");
+    let config = out_dir.join("reference-fonts.conf");
+    // The scan rules are baked into the cache, so a stale one would keep the
+    // previous mapping.
+    let _ = std::fs::remove_dir_all(&cache);
+    // The system configuration is deliberately *not* included: its
+    // `30-urw-aliases.conf` maps `Helvetica` to Nimbus Sans and would stand in
+    // for the names added above. The system font directories are listed
+    // instead, so fonts that are not in `fonts.json` still resolve by name.
+    let xml = format!(
+        "<?xml version=\"1.0\"?>\n\
+         <!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n\
+         <fontconfig>\n\
+         \x20 <dir>/usr/share/fonts</dir>\n\
+         \x20 <dir>/usr/local/share/fonts</dir>\n\
+         \x20 <dir>{}</dir>\n\
+         \x20 <cachedir>{}</cachedir>\n\
+         {rules}\
+         </fontconfig>\n",
+        escape_xml(&dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf()).to_string_lossy()),
+        escape_xml(&cache.to_string_lossy())
     );
+    if std::fs::create_dir_all(out_dir).is_err() || std::fs::write(&config, xml).is_err() {
+        return;
+    }
+    let _ = REFERENCE_FONTCONFIG.set(config.clone());
+    eprintln!(
+        "reference engine fonts: {} ({} files, {} names)",
+        config.display(),
+        families.len(),
+        map.len()
+    );
+}
+
+/// `&`, `<` and `>` are the only characters that matter in the paths and font
+/// names a `fonts.conf` carries.
+fn escape_xml(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 /// Build a font directory under `out_dir` whose `fonts.json` names the installed
@@ -1276,16 +1402,10 @@ fn write_reference_font_dir(out_dir: &Path) -> Option<PathBuf> {
     Some(fonts)
 }
 
-/// The renderer resolves the standard 14 fonts from `$STANDARD_FONTS`; point that
-/// at the repository's font directory unless the caller set it.
-fn point_standard_fonts_at_the_repository() {
-    if std::env::var_os("STANDARD_FONTS").is_some() {
-        return;
-    }
+/// `<repo>/fonts`, the font directory the repository ships instructions for.
+fn repository_font_dir() -> Option<PathBuf> {
     let fonts = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fonts");
-    if fonts.is_dir() {
-        std::env::set_var("STANDARD_FONTS", fonts);
-    }
+    fonts.is_dir().then_some(fonts)
 }
 
 fn output_dir() -> PathBuf {
