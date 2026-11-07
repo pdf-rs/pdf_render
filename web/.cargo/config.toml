@@ -1,0 +1,34 @@
+# Default this directory's cargo invocations to the browser target: everything
+# under `web/` is the wasm half of the viewer. Native `cargo test -p pdf_web`
+# from the workspace root is unaffected — cargo reads config from the directory
+# it is invoked in, and the root has none.
+[build]
+target = "wasm32-unknown-unknown"
+
+# The module is fetched over the network before a page appears, so bytes matter
+# more than the last few percent of speed.
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+# Two crates in the tree want JavaScript on wasm32-unknown-unknown, and the
+# module must import nothing: `WebAssembly.Module.imports` on this file is the
+# whole audit surface, and it has to come back empty.
+#
+# - web-time: `std::time::Instant` panics on wasm32-unknown-unknown, so the
+#   real crate reads the browser clock through wasm-bindgen. `vendor/web-time`
+#   is a logical clock instead (one millisecond per timestamp).
+# - font (pdf-rs/font, branch vello): its Type 2 `random` operator used
+#   `rand::thread_rng`, which on wasm pulls `getrandom`, which asks
+#   `crypto.getRandomValues`. The patch replaces it with a fixed-seed generator
+#   in `src/type2.rs`, which also makes rendering reproducible.
+#
+# The font override points outside this repository until that one-file change
+# is upstream: the local checkout is at ../../font-vello from the repo root.
+[patch.crates-io]
+web-time = { path = "../vendor/web-time" }
+
+[patch."https://github.com/pdf-rs/font"]
+font = { path = "/home/hematite/task-clones/font-vello-b" }

@@ -14,6 +14,9 @@ pdf_render = { path = "../render", default-features = false, features = ["svg"] 
 # PNG for the raster layers, which are embedded in the page's SVG as data URLs.
 image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
+# Build-time only (`wasm_report --gz`): what the module costs on the wire, in
+# the encoding a server will send it in. Already in the tree through pdf.
+flate2 = "1"
 
 [dev-dependencies]
 # Only for the tests: a simulated network in front of the same code path.

@@ -5,6 +5,13 @@ target/
 **/perf.data
 **/perf.data.old
 
+# `**/\.*` above hides the dot-directories; this one is source, not litter: it
+# is where the wasm build gets its target, its profile and its two patches.
+# The directory has to be re-included before its file: git does not descend
+# into an excluded directory to find one.
+!/web/.cargo/
+!/web/.cargo/config.toml
+
 !.travis.yml
 
 /fonts

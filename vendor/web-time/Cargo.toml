@@ -1,0 +1,11 @@
+[package]
+name = "web-time"
+version = "1.1.0"
+edition = "2021"
+description = "std::time for wasm32-unknown-unknown without JavaScript — a logical clock"
+license = "MIT OR Apache-2.0"
+# A stand-in for the crates.io crate of the same name, patched in for the
+# browser build only (see `web/README.md`). No dependencies: that is the point.
+
+[lib]
+path = "src/lib.rs"

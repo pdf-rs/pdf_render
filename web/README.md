@@ -29,11 +29,40 @@ network, the DOM or `eval`, and what the host has to audit is the export list:
 
 ## Building
 
+The target must be installed, and this container had to do it by hand because
+`rustup` cannot run in its sandbox — if `rustup target add` works for you, it
+does. Otherwise: take `rust-std-<version>-wasm32-unknown-unknown.tar.gz` from
+<https://static.rust-lang.org/dist/>, unpack it, and copy its
+`lib/rustlib/wasm32-unknown-unknown` next to the host target's.
+
 ```sh
-rustup target add wasm32-unknown-unknown
-cargo build --release --target wasm32-unknown-unknown -p pdf_web
-cp target/wasm32-unknown-unknown/release/pdf_web.wasm web/www/
+cd web
+cargo build --release                 # web/.cargo/config.toml picks the target
+cargo run -p pdf_web --bin wasm_strip -- \
+    "$CARGO_TARGET_DIR/wasm32-unknown-unknown/release/pdf_web.wasm" \
+    www/pdf_web.wasm
 ```
+
+The last step drops the `name` section: 900 kB of identifiers that only a
+debugger reads, and free to remove because a custom section carries no
+semantics. `wasm_report` says what is left, and what it weighs on the wire:
+
+```sh
+cargo run -p pdf_web --bin wasm_report -- www/pdf_web.wasm
+```
+
+| | bytes |
+|---|---|
+| `cargo build --release`, plain | 3,504,617 |
+| … after removing `rand`/`getrandom`/`web-time` (see below) | 2,956,663 |
+| … after `opt-level = "z"`, LTO, `panic = "abort"` | 3,013,802 (the name section grows under inlining) |
+| … after dropping `name` — **this is the module** | **2,069,826** |
+| gzip (`Content-Encoding: gzip`) | **734,532** |
+
+Sections of the stripped module: `code` 1,487,103, `data` 573,948, everything
+else under 8 kB. The `data` is mostly `pdf_encoding`'s glyph-name and codec
+tables; a viewer that drops `/Differences` support could cut into it, which is
+a product decision, not a build flag.
 
 The font bundle it needs is the one `fonts_blob` writes:
 
@@ -51,6 +80,47 @@ can be cached forever.
 Cross-origin documents need CORS on the PDF's server: `Access-Control-Allow-
 Headers: Range`, `Access-Control-Expose-Headers: Content-Length,
 Content-Range`. Same-origin needs nothing.
+
+## Two patches, so that the module imports nothing
+
+The first build had 27 imports from `__wbindgen_placeholder__`: wasm-bindgen
+glue for a clock and for entropy. Both came from crates that assume a browser
+is something you call out to. Neither is needed to draw a page, and "imports
+nothing" is the property worth keeping, so `web/.cargo/config.toml` patches
+them — only for builds run from `web/`, the native build is untouched:
+
+* **`web-time`** (pulled in by `globalcache`, which is `pdf_render`'s cache):
+  `std::time::Instant` panics on `wasm32-unknown-unknown`, so the crate reads
+  `Date.now()` and `performance.now()` through wasm-bindgen. `vendor/web-time`
+  replaces it with a logical clock: one millisecond per timestamp, monotonic,
+  no imports. On every other target it *is* `std::time`, so native behaviour
+  is unchanged.
+* **`font`**, branch `vello`: its Type 2 `random` operator (12 23) used
+  `rand::thread_rng`, which on wasm seeds itself from
+  `crypto.getRandomValues`. The patch (`src/type2.rs`, one function) uses a
+  fixed-seed xorshift instead, which also makes rendering reproducible — the
+  same document draws the same shapes on every run, which the SVG comparisons
+  in the tests already assumed. **This one is not in the repository**: it is a
+  local checkout at `../font-vello-b` until it is upstream, because a path
+  patch to a directory outside the tree is not something to commit.
+
+After both: `imports: 0`. `www/doc.js` still checks, because a check that
+passes is worth more than a build that once passed.
+
+A patched build rewrites `Cargo.lock` to record the patched sources, because a
+patch is part of the resolution. Run `git restore Cargo.lock` after building
+from `web/` — the committed lock must describe an unpatched tree.
+
+## Running it without a browser
+
+```sh
+node web/test/smoke.mjs [file.pdf]
+```
+
+Instantiates `www/pdf_web.wasm` with an empty import object, fails if the
+module wants anything, hands it the font bundle, then opens the PDF and renders
+three pages by reading ranges out of the file in memory. It is the same code
+path as the page, minus `fetch` and the DOM.
 
 ## What it costs, measured
 
