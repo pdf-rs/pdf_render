@@ -428,9 +428,15 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         inner(&mut self.backend, &mut self.text_state, &mut self.graphics_state, &mut span);
 
         let transform = self.graphics_state.transform * tm * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
+        // Text space has one unit per em per font size: glyph advances are
+        // scaled by `font_size` (`textstate::draw_text`), and `transform`
+        // holds the text matrix, not the font size — a page that writes
+        // `1 Tf` and puts the size in the matrix is as common as the other
+        // way round. So an em is `font_size` units high here, not one.
+        let em = if self.text_state.font_size > 0.0 { self.text_state.font_size } else { 1.0 };
         // The glyphs may start after the text matrix origin (a TJ adjustment
         // before the first string), so the span starts where the ink does.
-        let p1 = Vector2F::new(span.leading, -1.0);
+        let p1 = Vector2F::new(span.leading, -em);
         let p2 = Vector2F::new(span.width.max(span.leading), 0.0);
         let clip = self.graphics_state.clip_path_id;
 
