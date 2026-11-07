@@ -25,10 +25,10 @@ panic = "abort"
 #   `crypto.getRandomValues`. The patch replaces it with a fixed-seed generator
 #   in `src/type2.rs`, which also makes rendering reproducible.
 #
-# The font override points outside this repository until that one-file change
-# is upstream: the local checkout is at ../../font-vello from the repo root.
+# The font override is a branch of the fork, not an upstream branch: the change
+# is proposed on s3bk/font `vello` and nothing here points outside the tree.
 [patch.crates-io]
 web-time = { path = "../vendor/web-time" }
 
 [patch."https://github.com/pdf-rs/font"]
-font = { path = "/home/hematite/task-clones/font-vello-b" }
+font = { git = "https://github.com/s3bk/font", branch = "vello" }

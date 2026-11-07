@@ -29,11 +29,7 @@ network, the DOM or `eval`, and what the host has to audit is the export list:
 
 ## Building
 
-The target must be installed, and this container had to do it by hand because
-`rustup` cannot run in its sandbox — if `rustup target add` works for you, it
-does. Otherwise: take `rust-std-<version>-wasm32-unknown-unknown.tar.gz` from
-<https://static.rust-lang.org/dist/>, unpack it, and copy its
-`lib/rustlib/wasm32-unknown-unknown` next to the host target's.
+`rustup target add wasm32-unknown-unknown` is all the toolchain needs.
 
 ```sh
 cd web
@@ -55,10 +51,10 @@ cargo run -p pdf_web --bin wasm_report -- www/pdf_web.wasm
 |---|---|
 | `cargo build --release`, plain | 3,504,617 |
 | … after removing `rand`/`getrandom`/`web-time` (see below) | 2,956,663 |
-| … after `opt-level = "z"`, LTO, `panic = "abort"` | 3,013,802 (the name section grows under inlining) |
-| … after dropping `name` — **this is the module** | **2,069,826** |
-| gzip (`Content-Encoding: gzip`) | **734,532** (35.5 %) |
-| brotli q11 (`Content-Encoding: br`) | **541,916** (26.2 %) |
+| … after `opt-level = "z"`, LTO, `panic = "abort"` | 3,014,623 (the name section grows under inlining) |
+| … after dropping `name` — **this is the module** | **2,070,647** |
+| gzip (`Content-Encoding: gzip`) | **734,582** (35.5 %) |
+| brotli q11 (`Content-Encoding: br`) | **≈ 542,000** (26.2 %) |
 
 Sections of the stripped module: `code` 1,487,103, `data` 573,948, everything
 else under 8 kB. The `data` is mostly `pdf_encoding`'s glyph-name and codec
@@ -133,9 +129,10 @@ them — only for builds run from `web/`, the native build is untouched:
   `crypto.getRandomValues`. The patch (`src/type2.rs`, one function) uses a
   fixed-seed xorshift instead, which also makes rendering reproducible — the
   same document draws the same shapes on every run, which the SVG comparisons
-  in the tests already assumed. **This one is not in the repository**: it is a
-  local checkout at `../font-vello-b` until it is upstream, because a path
-  patch to a directory outside the tree is not something to commit.
+  in the tests already assumed. **This one has no upstream home yet**: the
+  commit sits on `s3bk/font`, branch `vello`, so the patch below is a git patch
+  and nothing points outside this tree. When it lands upstream, delete the
+  `[patch."https://github.com/pdf-rs/font"]` block and nothing else changes.
 
 After both: `imports: 0`. `www/doc.js` still checks, because a check that
 passes is worth more than a build that once passed.
