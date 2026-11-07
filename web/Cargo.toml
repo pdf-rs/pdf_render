@@ -1,0 +1,20 @@
+[package]
+name = "pdf_web"
+version = "0.1.0"
+edition = "2021"
+description = "pdf_render in the browser: a document fetched by range, page by page"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# No `native`: no filesystem, no environment, no GPU stack. The SVG backend is
+# pure Rust and produces a document the browser can display without a canvas.
+pdf_render = { path = "../render", default-features = false, features = ["svg"] }
+# PNG for the raster layers, which are embedded in the page's SVG as data URLs.
+image = { version = "0.25", default-features = false, features = ["png"] }
+log = "0.4"
+
+[dev-dependencies]
+# Only for the tests: a simulated network in front of the same code path.
+pdf = { path = "../../pdf/pdf", default-features = false, features = ["cache", "dump"] }

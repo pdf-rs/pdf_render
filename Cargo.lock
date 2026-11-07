@@ -2959,6 +2959,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdf_web"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "log",
+ "pdf",
+ "pdf_render",
+]
+
+[[package]]
 name = "peniko"
 version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -50,11 +50,14 @@ pub use font::{FontRc, MemDir, StandardCache, DirRead, Codec};
 mod fontbundle_tests;
 
 pub use pdf;
+/// The transform type a caller has to name to render a page, re-exported so
+/// that a front end does not need its own pathfinder dependency.
+pub use pathfinder_geometry::transform2d::Transform2F;
 use pdf::{object::*, content::TextMode};
 use pdf::error::PdfError;
 use pathfinder_geometry::{
     vector::{Vector2F},
-    rect::RectF, transform2d::Transform2F,
+    rect::RectF,
 };
 use renderstate::RenderState;
 use std::ops::Range;

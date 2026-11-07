@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PDF</title>
+<style>
+    :root { color-scheme: light dark; }
+    body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: #f2f3f5; color: #222; }
+    @media (prefers-color-scheme: dark) { body { background: #16181c; color: #ddd; } }
+    header { display: flex; gap: .75rem; align-items: center; padding: .5rem .75rem;
+             background: canvas; position: sticky; top: 0; z-index: 1; border-bottom: 1px solid #8884; }
+    header input[type=url] { flex: 1; min-width: 8rem; }
+    #readout { font-variant-numeric: tabular-nums; opacity: .7; white-space: nowrap; }
+    main { display: grid; place-items: start center; padding: 1rem; }
+    #page { background: white; box-shadow: 0 1px 4px #0003; max-width: 100%; height: auto; }
+    #page svg { display: block; width: 100%; height: auto; }
+    #drop { border: 2px dashed #8886; border-radius: 8px; padding: 3rem; text-align: center; }
+    #drop.hot { border-color: #4a9; background: #4a91; }
+    #error { color: #b00; white-space: pre-wrap; padding: 0 1rem; }
+</style>
+</head>
+<body>
+<header>
+    <button id="prev" title="previous page (←)">←</button>
+    <span id="pager">–</span>
+    <button id="next" title="next page (→)">→</button>
+    <input id="url" type="url" placeholder="https://…/file.pdf">
+    <button id="go">open</button>
+    <span id="readout"></span>
+</header>
+<main>
+    <div id="page"></div>
+    <div id="drop" hidden>
+        <p>Drop a PDF here, or put one in the address bar: <code>?pdf=…</code></p>
+    </div>
+</main>
+<p id="error"></p>
+
+<script type="module">
+import { load, Doc } from './doc.js';
+
+// Where the wasm module and the font bundle live, relative to this page.
+const WASM = new URL('./pdf_web.wasm', location.href).href;
+const FONTS = new URL('./standard_fonts.brotli.bundle', location.href).href;
+
+const $ = (id) => document.getElementById(id);
+const state = { doc: null, page: 0, pages: 0, url: "" };
+
+function say(text) { $("readout").textContent = text; }
+function fail(e) { $("error").textContent = String(e && e.stack || e); console.error(e); }
+
+await load(WASM).catch(fail);
+
+/** Bytes of a PDF at `url`, without reading it: HEAD, else a one-byte range. */
+async function fileLength(url) {
+    const head = await fetch(url, { method: "HEAD" });
+    const len = head.headers.get("content-length");
+    if (head.ok && len) return Number(len);
+    const probe = await fetch(url, { headers: { Range: "bytes=0-0" } });
+    const range = probe.headers.get("content-range");   // "bytes 0-0/123456"
+    const total = range && range.split("/").pop();
+    if (!total || total === "*") throw new Error(`${url}: the server does not say how large it is`);
+    return Number(total);
+}
+
+async function open(url) {
+    $("error").textContent = "";
+    if (state.doc) state.doc.free();
+    state.doc = null;
+    state.url = url;
+    try {
+        say("opening …");
+        const length = await fileLength(url);
+        const doc = new Doc(url, length);
+        const fontBytes = await doc.fonts(FONTS);
+        state.pages = await doc.open();
+        state.doc = doc;
+        state.page = 0;
+        $("drop").hidden = true;
+        say(`${state.pages} page(s), ${fmt(length)}`);
+        console.log(`fonts: ${fmt(fontBytes)}; open: ${doc.requests} request(s), ${fmt(doc.bytes)}`);
+        await show(0);
+    } catch (e) { fail(e); }
+}
+
+function fmt(n) {
+    return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KiB` : `${(n / 1048576).toFixed(1)} MiB`;
+}
+
+async function show(i) {
+    const doc = state.doc;
+    if (!doc || i < 0 || i >= state.pages) return;
+    try {
+        say(`page ${i + 1} of ${state.pages} …`);
+        const before = doc.bytes, beforeRequests = doc.requests;
+        const svg = await doc.page(i);
+        state.page = i;
+        $("pager").textContent = `${i + 1} / ${state.pages}`;
+        // Inline, not as an <img>: inline keeps the page in the document, so
+        // text selection and find-in-page can see it once a text layer exists.
+        $("page").innerHTML = svg;
+        say(`page ${i + 1}: ${fmt(doc.bytes - before)} in ${doc.requests - beforeRequests} request(s); ${fmt(doc.bytes)} of ${state.length} read`);
+        history.replaceState(null, "", `?pdf=${encodeURIComponent(state.url)}&page=${i + 1}`);
+    } catch (e) { fail(e); }
+}
+
+// --- the chrome ---------------------------------------------------------
+
+$("prev").onclick = () => show(state.page - 1);
+$("next").onclick = () => show(state.page + 1);
+$("go").onclick = () => $("url").value && open($("url").value);
+$("url").addEventListener("keydown", (e) => { if (e.key === "Enter") $("go").click(); });
+addEventListener("keydown", (e) => {
+    if (e.target.matches("input, textarea")) return;
+    if (e.key === "ArrowLeft" || e.key === "PageUp") show(state.page - 1);
+    if (e.key === "ArrowRight" || e.key === "PageDown") show(state.page + 1);
+});
+
+// A local file cannot be range-fetched without a server, so a drop reads it
+// whole and hands it over in one piece: same module, one request's worth.
+$("drop").addEventListener("dragover", (e) => { e.preventDefault(); $("drop").classList.add("hot"); });
+$("drop").addEventListener("dragleave", () => $("drop").classList.remove("hot"));
+$("drop").addEventListener("drop", async (e) => {
+    e.preventDefault();
+    $("drop").classList.remove("hot");
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    await openLocal(file);
+});
+
+async function openLocal(file) {
+    try {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        $("error").textContent = "";
+        if (state.doc) state.doc.free();
+        const doc = new Doc("", bytes.length);
+        await doc.fonts(FONTS);
+        // No server: every byte is here already.
+        const mod = await load(WASM);
+        const ptr = mod.pdf_buf_alloc(bytes.length);
+        new Uint8Array(mod.memory.buffer, ptr, bytes.length).set(bytes);
+        mod.pdf_supply(doc, 0, ptr, bytes.length);
+        mod.pdf_buf_free(ptr, bytes.length);
+        state.pages = await doc.open();
+        state.doc = doc;
+        state.url = file.name;
+        $("drop").hidden = true;
+        say(`${file.name}: ${state.pages} page(s)`);
+        await show(0);
+    } catch (e) { fail(e); }
+}
+
+// `Doc` hides the module; a local file needs `pdf_supply` directly, hence the
+// re-export above. Nothing else reaches into the module.
+export { };
+
+const params = new URLSearchParams(location.search);
+const pdf = params.get("pdf");
+if (pdf) {
+    $("url").value = pdf;
+    await open(pdf);
+    const page = Number(params.get("page") || 1);
+    if (page > 1) await show(page - 1);
+} else {
+    $("drop").hidden = false;
+    say("no document");
+}
+</script>
+</body>
+</html>
