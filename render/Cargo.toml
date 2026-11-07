@@ -53,6 +53,20 @@ required-features = ["vello"]
 name = "fonts_blob"
 required-features = ["bundle-write"]
 
+# Where the bytes are, for deciding what a smaller bundle can afford to drop
+# (build time only, all three).
+[[bin]]
+name = "fonts_probe"
+required-features = ["bundle-write"]
+
+[[bin]]
+name = "fonts_cover"
+required-features = ["bundle-write"]
+
+[[bin]]
+name = "fonts_parts"
+required-features = ["bundle-write"]
+
 [dependencies.pdf]
 default-features = false
 features = ["cache", "dump"]
