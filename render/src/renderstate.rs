@@ -134,7 +134,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         self.current_outline.clear();
     }
     #[allow(unused_variables)]
-    pub fn draw_op(&mut self, op: &'a Op, op_nr: usize) -> Result<()> {
+    pub fn draw_op(&mut self, op: &Op, op_nr: usize) -> Result<()> {
         self.backend.inspect_op(op_nr, op);
         match *op {
             Op::BeginMarkedContent { .. } => {}
@@ -246,7 +246,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 self.graphics_state.transform = self.graphics_state.transform * matrix.cvt();
             }
             Op::LineWidth { width } => self.graphics_state.stroke_style.line_width = width,
-            Op::Dash { ref pattern, phase } => self.graphics_state.dash_pattern = Some((&*pattern, phase)),
+            Op::Dash { ref pattern, phase } => self.graphics_state.dash_pattern = Some((pattern.clone(), phase)),
             Op::LineJoin { join } => {},
             Op::LineCap { cap } => {},
             Op::MiterLimit { limit } => {},
@@ -475,7 +475,7 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             stroke_alpha: self.graphics_state.stroke_color_alpha,
             fill_alpha: self.graphics_state.fill_color_alpha,
             clip_path_id: self.graphics_state.clip_path_id,
-            .. self.graphics_state
+            .. self.graphics_state.clone()
         };
         let resources = match form.dict().resources {
             Some(ref r) => &*r,
@@ -494,10 +494,10 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             _debug: self._debug,
         };
 
-        let ops = t!(form.operations(self.resolve));
-        for (i, op) in ops.iter().enumerate() {
+        for (i, op) in form.ops(self.resolve).enumerate() {
+            let op = t!(op);
             debug!(" form op {}: {:?}", i, op);
-            inner.draw_op(op, i)?;
+            inner.draw_op(&op, i)?;
         }
 
         Ok(())

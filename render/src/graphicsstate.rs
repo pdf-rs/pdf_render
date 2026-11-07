@@ -17,7 +17,7 @@ pub struct GraphicsState<'a, B: Backend> {
     pub clip_path_rect: Option<RectF>,
     pub fill_color_space: &'a ColorSpace,
     pub stroke_color_space: &'a ColorSpace,
-    pub dash_pattern: Option<(&'a [f32], f32)>,
+    pub dash_pattern: Option<(Vec<f32>, f32)>,
 
     pub stroke_alpha: f32,
     pub fill_alpha: f32,
@@ -30,8 +30,24 @@ pub struct GraphicsState<'a, B: Backend> {
 impl<'a, B: Backend> Clone for GraphicsState<'a, B> {
     fn clone(&self) -> Self {
         GraphicsState {
-            //clip_path: self.clip_path.clone(),
-            .. *self
+            transform: self.transform,
+            stroke_style: self.stroke_style,
+            fill_color: self.fill_color,
+            fill_color_alpha: self.fill_color_alpha,
+            stroke_color: self.stroke_color,
+            stroke_color_alpha: self.stroke_color_alpha,
+            clip_path_id: self.clip_path_id,
+            clip_path_rect: self.clip_path_rect,
+            fill_color_space: self.fill_color_space,
+            stroke_color_space: self.stroke_color_space,
+            // no longer `Copy`: the dash pattern is owned so that operators can
+            // be parsed and dropped one at a time
+            dash_pattern: self.dash_pattern.clone(),
+            stroke_alpha: self.stroke_alpha,
+            fill_alpha: self.fill_alpha,
+            overprint_fill: self.overprint_fill,
+            overprint_stroke: self.overprint_stroke,
+            overprint_mode: self.overprint_mode,
         }
     }
 }
@@ -63,7 +79,7 @@ impl<'a, B: Backend> GraphicsState<'a, B> {
     pub fn stroke(&self) -> Stroke {
         Stroke {
             style: self.stroke_style,
-            dash_pattern: self.dash_pattern.map(|(a, p)| (a.into(), p))
+            dash_pattern: self.dash_pattern.clone()
         }
     }
 }

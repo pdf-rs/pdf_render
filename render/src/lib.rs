@@ -108,11 +108,12 @@ pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Pa
     let resources = t!(page.resources());
 
     let contents = try_opt!(page.contents.as_ref());
-    let ops = contents.operations(resolve)?;
     let mut renderstate = RenderState::new(backend, resolve, &resources, root_transformation);
-    for (i, op) in ops.iter().enumerate() {
+    // Parse lazily: a `Vec<Op>` for one page of the spec is several megabytes.
+    for (i, op) in contents.ops(resolve).enumerate() {
+        let op = op?;
         debug!("op {}: {:?}", i, op);
-        renderstate.draw_op(op, i)?;
+        renderstate.draw_op(&op, i)?;
     }
 
     Ok(root_transformation)
