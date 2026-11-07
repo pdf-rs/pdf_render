@@ -5,19 +5,26 @@ authors = ["Sebastian Köln <s3bk@protonmail.com>"]
 edition = "2021"
 
 [features]
-default = []
+default = ["native"]
 unstable = []
+# Everything that assumes an operating system: `$STANDARD_FONTS` from the
+# environment, dumping fonts to disk, the system font database, and the GPU
+# backends. A wasm build turns this off and hands the fonts in as a bundle
+# (`font::MemDir`), because a browser has no environment and no filesystem.
+native = []
+# SVG output: one document per vector layer, raw RGBA for images.
+svg = []
 # Embed the standard fonts into the binary instead of reading them from
 # $STANDARD_FONTS at run time.
 embed = ["dep:rust-embed"]
 # Load the system font database for glyph fallback.
-glyphmatcher = ["dep:glyphmatcher"]
+glyphmatcher = ["dep:glyphmatcher", "native"]
 # Legacy GPU backend built on pathfinder_renderer. Off by default: the vello
 # backends below replace it, and it pulls in the whole pathfinder renderer
 # stack.
-pathfinder = ["dep:pathfinder_renderer"]
+pathfinder = ["dep:pathfinder_renderer", "native"]
 # GPU rendering through vello (wgpu).
-vello = ["dep:vello"]
+vello = ["dep:vello", "native"]
 # Software rendering without a GPU, via the vello_cpu crate.
 vello_cpu = ["dep:vello_cpu"]
 
@@ -48,7 +55,7 @@ log = "0.4"
 font = { git = "https://github.com/pdf-rs/font", branch = "vello", features = ["cff"] }
 pdf_encoding = "0.4"
 itertools = "*"
-image = "0.25"
+image = { version = "0.25", default-features = false, features = ["bmp", "dds", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp"] }
 instant = "*"
 custom_debug_derive = "*"
 globalcache = { version = "0.3", features = ["sync"] }

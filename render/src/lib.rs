@@ -41,6 +41,9 @@ pub use ::font::Glyph;
 pub mod vello_backend;
 #[cfg(feature = "vello_cpu")]
 pub mod vello_cpu_backend;
+#[cfg(feature = "svg")]
+pub mod svg_backend;
+pub mod rangecache;
 pub use font::FontRc;
 
 pub use pdf;
