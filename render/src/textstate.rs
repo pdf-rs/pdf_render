@@ -181,6 +181,10 @@ pub struct Span {
     pub text: String,
     pub chars: Vec<TextChar>,
     pub width: f32,
+    /// Pen offset (text space) before the first glyph was drawn: a `TJ`
+    /// adjustment at the start of the array moves the glyphs right without
+    /// any text in front of them.
+    pub leading: f32,
     pub bbox: BBox,
     pub bytes: Vec<u8>,
     pub adjust: f32,

@@ -357,6 +357,11 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                                 let advance = text_state.advance(-0.001 * offset);
                                 span.width += advance;
                                 span.adjust += offset;
+                                if span.text.is_empty() {
+                                    // Nothing drawn yet: the glyphs start this
+                                    // far into the text space of the span.
+                                    span.leading += advance;
+                                }
                             }
                         }
                     }
@@ -420,18 +425,19 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         let mut span = Span::default();
         let tm = self.text_state.text_matrix;
 
-        let p1 = Vector2F::new(span.width, -1.0);
-
         inner(&mut self.backend, &mut self.text_state, &mut self.graphics_state, &mut span);
 
         let transform = self.graphics_state.transform * tm * Transform2F::from_scale(Vector2F::new(1.0, -1.0));
-        let p2 = Vector2F::new(span.width, 0.0);
+        // The glyphs may start after the text matrix origin (a TJ adjustment
+        // before the first string), so the span starts where the ink does.
+        let p1 = Vector2F::new(span.leading, -1.0);
+        let p2 = Vector2F::new(span.width.max(span.leading), 0.0);
         let clip = self.graphics_state.clip_path_id;
 
         debug!("text {}", span.text);
         self.backend.add_text(TextSpan {
             rect: RectF::from_points(p1, p2),
-            width: span.width,
+            width: span.width - span.leading,
             text: span.text,
             chars: span.chars,
             font: self.text_state.font_entry.clone(),
@@ -671,11 +677,24 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                     }
                 }
                 ColorSpace::Pattern => {
-                    let name = args[0].as_name()?;
-                    if let Some(&pat) = resources.pattern.get(name) {
-                        Ok(Fill::Pattern(pat))
-                    } else {
-                        unimplemented!("Pattern {} not found", name)
+                    // The pattern name is the last operand: for an uncolored
+                    // pattern the color components come first (PDF 32000-1,
+                    // 8.7.3.4 `c1 … cn name scn`), and files in the wild do
+                    // use `/Pattern cs` for those.
+                    let name = match args.last().map(|p| p.as_name()) {
+                        Some(Ok(name)) => name,
+                        _ => {
+                            return Err(PdfError::Other {
+                                msg: format!("pattern color space needs a pattern name, got {:?}", args),
+                            })
+                        }
+                    };
+                    match resources.pattern.get(name) {
+                        Some(&pat) => Ok(Fill::Pattern(pat)),
+                        None => {
+                            warn!("pattern {} not found, using black", name);
+                            Ok(Fill::Solid(0., 0., 0.))
+                        }
                     }
                 }
                 ColorSpace::Other(ref p) => unimplemented!("Other Color space {:?}", p),
