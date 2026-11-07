@@ -62,7 +62,11 @@ export class Doc {
     }
 
     /** Hand in the standard fonts: one bundle, every one of them, up front —
-     *  so which fonts a document uses is not visible on the wire. */
+     *  so which fonts a document uses is not visible on the wire.
+     *
+     *  `url` points at the brotli-compressed bundle and the server sends it with
+     *  `Content-Encoding: br`, so `arrayBuffer()` is already the plain bundle:
+     *  one 547 kB response, decoded by the network layer, not by the module. */
     async fonts(url) {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);

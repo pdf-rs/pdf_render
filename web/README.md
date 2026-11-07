@@ -52,11 +52,11 @@ cargo run -p pdf_web --bin wasm_report -- www/pdf_web.wasm
 | `cargo build --release`, plain | 3,504,617 |
 | … after removing `rand`/`getrandom`/`web-time` (see below) | 2,956,663 |
 | … after `opt-level = "z"`, LTO, `panic = "abort"` | 3,014,623 (the name section grows under inlining) |
-| … after dropping `name` — **this is the module** | **2,070,647** |
-| gzip (`Content-Encoding: gzip`) | **734,582** (35.5 %) |
-| brotli q11 (`Content-Encoding: br`) | **≈ 542,000** (26.2 %) |
+| … after dropping `name` — **this is the module** | **1,893,662** |
+| gzip (`Content-Encoding: gzip`) | **651,861** (34.4 %) |
+| brotli q11 (`Content-Encoding: br`) | **488,482** (25.8 %) |
 
-Sections of the stripped module: `code` 1,487,103, `data` 573,948, everything
+Sections of the stripped module: `code` 1,446,109, `data` 438,964, everything
 else under 8 kB. The `data` is mostly `pdf_encoding`'s glyph-name and codec
 tables; a viewer that drops `/Differences` support could cut into it, which is
 a product decision, not a build flag.
@@ -71,14 +71,15 @@ cargo run -p pdf_web --bin wasm_map -- <map> [top]     # bytes by crate
 cargo run -p pdf_web --bin wasm_strings -- <wasm> [filter]  # data-section strings
 ```
 
-The map attributes 1.38 MB of the 2.06 MB (linker stubs and the panic/format
-machinery stay unattributed):
+The map was taken while the brotli decoder was still linked (a 2,070,647 B
+module), so its row is the one that can be subtracted: it attributes 1.38 MB of
+the 2.06 MB, and linker stubs and the panic/format machinery stay unattributed.
 
 | crate | bytes | of which code | why |
 |---|---|---|---|
 | `pdf` | 272,052 | 256,379 | the parser itself |
 | `font` | 176,399 | 158,532 | Type 1/2, CFF, TrueType and the shapers |
-| `brotli_decompressor` | 173,922 | 38,843 | the font bundle is brotli: see below |
+| `brotli_decompressor` | 173,922 | 38,843 | **gone** — the bundle is decompressed by `Content-Encoding: br` |
 | `pdf_encoding` | 151,343 | 16,419 | glyph names, codecs — nearly all data |
 | `unicode_normalization` | 112,222 | 2,020 | Unicode tables, nearly all data |
 | `core` | 80,131 | | `fmt` — panic messages and `Display` |
@@ -87,24 +88,34 @@ machinery stay unattributed):
 | `image` + `zune_jpeg` + `png` + `weezl` | 92,072 | | image codecs |
 | 30 more crates | ~150,000 | | |
 
-The obvious cuts, and why they are not taken: `brotli_decompressor` costs
-174 kB but saves 292 kB on the font bundle (547 kB vs 839 kB gzip), so it pays
-for itself; collapsing the three inflate crates would save ~68 kB; dropping
-GIF (`weezl`) and `stringprep` ~33 kB. None of it changes the fact that the
-module is one cacheable 540 kB response.
+The cuts taken and left: `brotli_decompressor` (174 kB, 135 kB of it brotli's
+static dictionary) is gone — the server says `Content-Encoding: br` and the
+network layer does the decoding, which took the module from 2,070,647 to
+1,893,662 bytes and the response from 541,916 to 488,482. Collapsing the three
+inflate crates would save ~68 kB; dropping GIF (`weezl`) and `stringprep`
+~33 kB. None of it changes the fact that the module is one cacheable 488 kB
+response.
 
 The font bundle it needs is the one `fonts_blob` writes:
 
 ```sh
 cargo run --release --features bundle-write --bin fonts_blob -- \
-    standard_fonts ../fonts-blob      # -> standard_fonts.brotli.bundle
-cp ../fonts-blob/standard_fonts.brotli.bundle web/www/
+    standard_fonts web/www
+# -> standard_fonts.br (547,303 bytes) plus the framed bundles, for reference
 ```
 
+`standard_fonts.br` is the brotli stream on its own, to be served with
+`Content-Encoding: br`: the browser inflates it and `pdf_fonts` is handed the
+plain bundle, so the module carries no brotli decoder. nginx does this for a
+file with that name — `brotli_static on;` — and serves the framed
+`standard_fonts.gzip.bundle` just as well if only `gzip_static` is available
+(`Content-Encoding: gzip`); `filter` is not needed for either.
+
 `web/www/` is then a static site: `index.html`, `doc.js`, `pdf_web.wasm`,
-`standard_fonts.brotli.bundle`. Serve it with any server that answers `Range`
-requests — nginx does by default, and a hash-named wasm plus the font bundle
-can be cached forever.
+`standard_fonts.br`. Serve it with any server that answers `Range` requests —
+nginx does by default, and a hash-named wasm plus the font bundle can be cached
+forever. The bundle is the whole set on purpose: one request, and which fonts a
+document uses is not visible on the wire.
 
 Cross-origin documents need CORS on the PDF's server: `Access-Control-Allow-
 Headers: Range`, `Access-Control-Expose-Headers: Content-Length,

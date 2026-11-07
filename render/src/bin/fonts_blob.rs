@@ -13,10 +13,12 @@
 //! each one is read back and compared byte for byte against the files it came
 //! from, because a font bundle that is subtly wrong is worse than a missing one.
 //!
-//! Brotli is the one to ship: smallest, and `brotli-decompressor` (pure Rust)
-//! costs little more than the flate2 decoder the pdf crate already links. Gzip
-//! is the fallback for a host with no brotli decoder at all — a browser can
-//! inflate it with `DecompressionStream("gzip")` and hand the bytes to wasm.
+//! Brotli is the one to ship: smallest, and the browser decodes it for us. The
+//! file to serve is `standard_fonts.br` — the compressed stream with no `PDFF`
+//! framing — sent with `Content-Encoding: br`, so wasm is handed the plain
+//! bundle and the module carries no brotli decoder (that would be 177 kB). The
+//! framed bundles are written too: gzip and deflate for a host that can only
+//! say `Content-Encoding: gzip`, and all four for the round-trip check here.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -122,6 +124,27 @@ fn run(dir: &Path, out_dir: &Path) -> Result<(), String> {
             best = (blob.len(), codec);
         }
     }
+    // What a browser is actually sent: the compressed stream alone, as the body
+    // of a response whose header says `Content-Encoding: br`. Leaving the
+    // framing off is not a trick — HTTP already named the codec, and the browser
+    // hands `parse_bundle` the plain bundle, so no decoder has to travel.
+    let framed = mem.write_bundle(Codec::Brotli);
+    let body = framed.get(10..).ok_or("brotli bundle without its header")?;
+    let mut check = Vec::new();
+    brotli_decompressor::BrotliDecompress(&mut &body[..], &mut check).map_err(|e| e.to_string())?;
+    if check != plain {
+        return Err("the body does not decompress to the plain bundle".into());
+    }
+    verify(&plain, &files)?;
+    let path = out_dir.join("standard_fonts.br");
+    std::fs::write(&path, body).map_err(|e| format!("{}: {e}", path.display()))?;
+    println!(
+        "{:>9}  {:>6.1}%  body, Content-Encoding: br  ({})",
+        body.len(),
+        100.0 * body.len() as f64 / total as f64,
+        path.display(),
+    );
+
     println!("per-file gzip, for comparison: {per_file_gzip} bytes");
     println!("per-file brotli, for comparison: {per_file_brotli} bytes");
     println!();

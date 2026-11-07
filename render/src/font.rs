@@ -250,12 +250,17 @@ impl MemDir {
     /// pieces in one pass; the header is small enough that the browser may as
     /// well receive it first, but it does not have to.
     ///
-    /// Version 2 is that whole file compressed as one stream — what goes on the
-    /// wire:
+    /// Version 2 is that whole file compressed as one stream, for a host that
+    /// cannot say `Content-Encoding` on the response:
     ///
     /// ```text
     /// "PDFF" 2 (u8)  codec (u8)  raw_len (u32 LE)  <raw_len bytes of version 1>
     /// ```
+    ///
+    /// A browser is normally sent the compressed stream on its own, as the body
+    /// of a response whose header says `Content-Encoding: br`, and hands this
+    /// function version 1 — the framing would only repeat what HTTP already
+    /// said, and the module carries no decoder to read it with.
     ///
     /// One stream for all the fonts, not one per file. They share an alphabet,
     /// a set of outline operators and, between the weights of one family, a lot
@@ -358,9 +363,18 @@ impl MemDir {
 
 /// How the payload of a version 2 bundle is compressed.
 ///
-/// `Gzip` is the interesting one for a browser: `DecompressionStream("gzip")`
-/// decodes it with no wasm at all, so a host that would rather not carry a
-/// brotli decoder in the module can take a slightly larger resource instead.
+/// What a browser is sent is not a version 2 bundle at all: the payload is the
+/// response body and the header says `Content-Encoding: br`, so the network
+/// layer inflates it and [`parse_bundle`](MemDir::parse_bundle) sees the plain
+/// bundle — no decoder in the module, and the bytes are served as they were
+/// built instead of compressed per request. `fonts_blob` writes that payload
+/// (`standard_fonts.br`) next to the framed bundles.
+///
+/// The framing still earns its place where HTTP cannot say it: a bundle inside
+/// an archive, in a test that reads the file directly, or a host that can only
+/// set `Content-Encoding: gzip` — `Codec::Gzip` and `Codec::Deflate` exist for
+/// those, and decodable by any pdf build. Brotli inside the framing needs the
+/// `bundle-write` feature, since nothing in the browser path would.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Codec {
     Store = 0,
@@ -388,7 +402,7 @@ impl Codec {
                 out.extend_from_slice(src);
                 return Ok(out);
             }
-            Codec::Brotli => brotli_decompressor::BrotliDecompress(&mut &src[..], &mut out),
+            Codec::Brotli => Self::brotli_decompress(src, &mut out),
             Codec::Deflate => flate2::read::DeflateDecoder::new(src).read_to_end(&mut out).map(|_| ()),
             Codec::Gzip => flate2::read::GzDecoder::new(src).read_to_end(&mut out).map(|_| ()),
         };
@@ -422,6 +436,28 @@ impl Codec {
                 e.finish().expect("gzip")
             }
         }
+    }
+
+    /// Decode a brotli bundle payload.
+    ///
+    /// A browser never needs this: the payload is what the server sends as the
+    /// response body, and `Content-Encoding: br` has the network layer inflate
+    /// it before wasm is handed a byte. The decoder is therefore build tooling
+    /// (it reads back what `write_bundle` wrote), and leaving it out keeps 177 kB
+    /// of module — 135 kB of that brotli's static dictionary — out of the wasm.
+    #[cfg(feature = "bundle-write")]
+    fn brotli_decompress(src: &[u8], out: &mut Vec<u8>) -> std::io::Result<()> {
+        brotli_decompressor::BrotliDecompress(&mut &src[..], out)
+    }
+
+    #[cfg(not(feature = "bundle-write"))]
+    fn brotli_decompress(_src: &[u8], _out: &mut Vec<u8>) -> std::io::Result<()> {
+        // Not a failure of the data: this build has no brotli. Saying which
+        // bundle to send instead beats a decoder that is not there.
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "no brotli decoder in this build: send the plain bundle with `Content-Encoding: br`, or a gzip one",
+        ))
     }
 
     #[cfg(feature = "bundle-write")]

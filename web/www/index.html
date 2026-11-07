@@ -40,9 +40,12 @@
 <script type="module">
 import { load, Doc } from './doc.js';
 
-// Where the wasm module and the font bundle live, relative to this page.
+// Where the wasm module and the font bundle live, relative to this page. The
+// bundle is brotli-compressed on the wire (`Content-Encoding: br`, what a server
+// does for a `.br` file): `fetch` hands the module the plain bundle, so nothing
+// here has to decompress anything.
 const WASM = new URL('./pdf_web.wasm', location.href).href;
-const FONTS = new URL('./standard_fonts.brotli.bundle', location.href).href;
+const FONTS = new URL('./standard_fonts.br', location.href).href;
 
 const $ = (id) => document.getElementById(id);
 const state = { doc: null, page: 0, pages: 0, url: "" };

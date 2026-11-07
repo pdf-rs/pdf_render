@@ -7,6 +7,7 @@
 // document, fetches its ranges out of the file in memory, and renders pages.
 
 import { readFile } from "node:fs/promises";
+import { brotliDecompressSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -39,8 +40,11 @@ function text(ptr, len) {
 const file = await readFile(pdfPath);
 const doc = m.pdf_doc_new(file.length);
 
-// The standard fonts: the whole bundle, up front, as the page does it.
-const bundle = await readFile(join(www, "standard_fonts.brotli.bundle"));
+// The standard fonts: the whole bundle, up front, as the page does it. The file
+// is the brotli stream a server sends with `Content-Encoding: br`; node has the
+// same decoder the browser's network layer uses, so this is exactly what the
+// module would be handed — the module itself carries no brotli decoder.
+const bundle = brotliDecompressSync(await readFile(join(www, "standard_fonts.br")));
 {
     const ptr = m.pdf_buf_alloc(bundle.length);
     new Uint8Array(m.memory.buffer, ptr, bundle.length).set(bundle);

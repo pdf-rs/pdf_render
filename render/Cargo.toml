@@ -19,7 +19,10 @@ svg = []
 embed = ["dep:rust-embed"]
 # Write a font bundle (see `MemDir::write_bundle`). Build tooling only: reading
 # a bundle needs no feature, writing one needs the encoder.
-bundle-write = ["dep:brotli"]
+# Writing a font bundle needs an encoder. Reading one needs nothing: the bundle
+# is built brotli-compressed and the server sends it with `Content-Encoding: br`,
+# so the network layer hands wasm the plain bundle — see `Codec`.
+bundle-write = ["dep:brotli", "dep:brotli-decompressor"]
 # Load the system font database for glyph fallback.
 glyphmatcher = ["dep:glyphmatcher", "native"]
 # Legacy GPU backend built on pathfinder_renderer. Off by default: the vello
@@ -84,11 +87,13 @@ globalcache = { version = "0.3", features = ["sync"] }
 istring = { git = "https://github.com/s3bk/istring" }
 once_cell = "*"
 serde_json = "*"
-# Decoding a font bundle: both pure Rust, both already in the tree of a pdf
-# build (flate2 through pdf's stream filters).
-brotli-decompressor = "5"
+# Decoding a font bundle: flate2, which is already in the tree of a pdf build
+# (its stream filters). Brotli decoding is build-tooling only — a browser is
+# handed the plain bundle by `Content-Encoding: br` and never needs a decoder in
+# the module, which would cost 177 kB (135 kB of it brotli's dictionary).
 flate2 = "*"
 brotli = { version = "8", optional = true }
+brotli-decompressor = { version = "5", optional = true }
 glyphmatcher = { git = "https://github.com/s3bk/glyphmatcher", optional = true }
 rust-embed = { version = "*", optional = true, features = ["interpolate-folder-path"] }
 
