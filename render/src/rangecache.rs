@@ -14,9 +14,10 @@
 //! Two things make the batch worth it and one thing spoils it:
 //!
 //! * Worth it: the misses accumulate across a whole page, so a page costs one
-//!   or two round trips, not one per font, image and XObject.
-//! * Worth it: an open-ended read (`pos..`) is clamped to a window, so a
-//!   parser that would slurp the rest of the file is made to ask for a piece.
+//!   or two round trips, not one per font, image and XObject. A pass does not
+//!   stop at the first object it cannot read — `pdf` answers `null` for an
+//!   object whose bytes are not here (7.3.9), so one pass collects everything
+//!   the page asks for that it does not have.
 //! * Spoils it: the payload has to be addressable per range. A range of an
 //!   AES-GCM-encrypted blob decrypts the whole blob; the bundle format has to
 //!   be chunked first (64 KiB, nonce = counter, AAD = the header), otherwise
@@ -28,11 +29,6 @@ use std::rc::Rc;
 
 use pdf::backend::{Backend as PdfBackend, IndexRange};
 use pdf::error::Result;
-
-/// How much of the file an open-ended read is given before we ask again with a
-/// bigger window. Big enough for a typical object plus its stream header,
-/// small enough that a hundred of them are not a download.
-pub const DEFAULT_WINDOW: usize = 8 * 1024;
 
 /// Bytes of the document that are already here.
 ///
@@ -242,37 +238,35 @@ impl MissLog {
 
 /// A `pdf::Backend` that answers from a [`RangeCache`] and remembers what it
 /// could not answer.
+///
+/// Open-ended reads (`pos..`) are **not** clamped. Since every object read is
+/// bounded by the next offset in the cross-reference table, an open-ended read
+/// is what `pdf` only does when nothing is known to follow it — the last
+/// object, the final cross-reference section, the `%%EOF` marker — so it
+/// already costs the tail of the document and nothing more. Clamping used to
+/// protect against a parser slurping the file, and it made a trailing section
+/// never converge: the fetched window was still too short, the range then
+/// looked complete, and the loop could not tell that its own guess was the
+/// problem.
 pub struct LazyReader<'a> {
     cache: &'a RangeCache,
     len: usize,
-    window: usize,
     log: Rc<MissLog>,
 }
 
 impl<'a> LazyReader<'a> {
-    pub fn new(cache: &'a RangeCache, window: usize) -> (Self, Rc<MissLog>) {
+    pub fn new(cache: &'a RangeCache) -> (Self, Rc<MissLog>) {
         let log = Rc::new(MissLog::default());
         (
-            LazyReader { cache, len: cache.len(), window, log: log.clone() },
+            LazyReader { cache, len: cache.len(), log: log.clone() },
             log,
         )
-    }
-
-    /// An open-ended read from the middle of the file is clamped to `window`
-    /// bytes: the caller only ever needs an object, and a parser that reads to
-    /// the end would pull the whole document.
-    fn clamp(&self, r: Range<usize>) -> Range<usize> {
-        if r.start > 0 && r.end == self.len {
-            r.start..(r.start + self.window).min(self.len)
-        } else {
-            r
-        }
     }
 }
 
 impl<'a> PdfBackend for LazyReader<'a> {
     fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]> {
-        let r = self.clamp(range.to_range(self.len)?);
+        let r = range.to_range(self.len)?;
         match self.cache.get(r.clone()) {
             Some(data) => Ok(data),
             None => {
@@ -290,6 +284,14 @@ impl<'a> PdfBackend for LazyReader<'a> {
 
     fn len(&self) -> usize {
         self.len
+    }
+
+    /// A read is incomplete exactly when the cache can not answer its whole
+    /// range; `read` returned the prefix it has. `Storage::resolve_ref` asks
+    /// this after a parse fails, and calls the object null rather than broken
+    /// so the pass keeps walking.
+    fn is_incomplete(&self, range: Range<usize>) -> bool {
+        self.cache.get(range).is_none()
     }
 }
 
@@ -315,14 +317,13 @@ pub enum Pass<T> {
 /// that keeps finding new objects forever.
 pub fn render_with_ranges<T>(
     cache: &mut RangeCache,
-    window: usize,
     max_rounds: usize,
     mut pass: impl FnMut(&LazyReader) -> Result<T>,
     mut fetch: impl FnMut(&mut RangeCache, &[Range<usize>]) -> std::result::Result<(), String>,
 ) -> std::result::Result<T, String> {
     let mut last_err: Option<String> = None;
     for _ in 0..max_rounds {
-        let (reader, log) = LazyReader::new(cache, window);
+        let (reader, log) = LazyReader::new(cache);
         let outcome = pass(&reader);
         let misses = log.take();
         drop(reader);
@@ -331,6 +332,9 @@ pub fn render_with_ranges<T>(
             Ok(_) => {}
             Err(e) => last_err = Some(e.to_string()),
         }
+        // Only ask for what is not here: a round that needs an object again,
+        // or one that overlaps a range already fetched, costs nothing.
+        let misses = cache.missing(&misses);
         if misses.is_empty() {
             // Nothing left to fetch, so the failure was not about the bytes.
             return Err(last_err.unwrap_or_else(|| "render failed".into()));
@@ -377,32 +381,52 @@ mod tests {
     }
 
     #[test]
-    fn lazy_reader_clamps_open_ended_reads() {
+    fn open_ended_reads_ask_for_the_rest_of_the_file() {
         let mut c = RangeCache::new(1_000_000);
         c.insert(5000, vec![7; 100]);
-        let (reader, log) = LazyReader::new(&c, 100);
+        let (reader, log) = LazyReader::new(&c);
         assert_eq!(reader.read(5000..5100).unwrap(), &[7u8; 100][..]);
-        // 5000.. is clamped to 5000..5100, which we have
+        assert!(!reader.is_incomplete(5000..5100));
+        // 5000.. wants everything from 5000 to the end, which we do not have:
+        // the read is served with the 100 bytes that are here and the rest of
+        // the file is asked for.
         assert_eq!(reader.read(5000..).unwrap(), &[7u8; 100][..]);
-        assert!(log.is_empty());
-        // 6000.. is clamped to 6000..6100 and is a miss of exactly that
+        assert!(reader.is_incomplete(5000..1_000_000));
+        assert_eq!(log.take(), vec![5100..1_000_000]);
         assert!(reader.read(6000..).unwrap().is_empty());
-        assert_eq!(log.take(), vec![6000..6100]);
+        assert_eq!(log.take(), vec![6000..1_000_000]);
     }
 
     #[test]
     fn partial_hit_serves_the_prefix_and_asks_for_the_rest() {
         let mut c = RangeCache::new(1_000_000);
         c.insert(100, vec![1; 10]);
-        let (reader, log) = LazyReader::new(&c, 1000);
+        let (reader, log) = LazyReader::new(&c);
         // 100..200 straddles the end of the chunk: the parser gets ten bytes.
         assert_eq!(reader.read(100..200).unwrap(), &[1u8; 10][..]);
+        assert!(reader.is_incomplete(100..200));
         assert_eq!(log.take(), vec![110..200]);
         // Once the gap is filled the same read is answered in full.
         drop(reader);
         c.insert(110, vec![2; 90]);
-        let (reader, log) = LazyReader::new(&c, 1000);
+        let (reader, log) = LazyReader::new(&c);
         assert_eq!(reader.read(100..200).unwrap().len(), 100);
+        assert!(!reader.is_incomplete(100..200));
         assert!(log.is_empty());
+    }
+
+    #[test]
+    fn a_pass_keeps_asking_after_an_object_it_could_not_read() {
+        // The behaviour the round loop depends on: a read that comes back
+        // empty does not stop the caller, so one pass collects every range it
+        // was missing. (The log merges misses that are close together, which
+        // is why the two become one range.)
+        let mut c = RangeCache::new(64);
+        c.insert(0, b"%PDF-1.7\n".to_vec());
+        let (reader, log) = LazyReader::new(&c);
+        assert!(reader.read(10..20).unwrap().is_empty());
+        assert!(reader.is_incomplete(10..20));
+        assert_eq!(reader.read(30..40).unwrap(), &b""[..]);
+        assert_eq!(log.take(), vec![10..40]);
     }
 }
