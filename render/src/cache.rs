@@ -75,6 +75,26 @@ impl<E: Encoder + 'static> Cache<E> where E::GlyphRef: Send + Sync {
             encoder,
         }
     }
+
+    /// A cache whose standard fonts are already in memory — the browser case,
+    /// where the font bundle is fetched alongside the document and every font
+    /// in it is loaded whatever the document uses.
+    pub fn with_standard(encoder: E, std: StandardCache<E>) -> Cache<E> {
+        Cache {
+            fonts: SyncCache::new(),
+            images: SyncCache::new(),
+            std,
+            missing_fonts: Vec::new(),
+            encoder,
+        }
+    }
+
+    /// Replace the standard fonts, e.g. when the bundle arrives after the
+    /// cache was made. Fonts already looked up are looked up again.
+    pub fn set_standard(&mut self, std: StandardCache<E>) {
+        self.std = std;
+        self.fonts = SyncCache::new();
+    }
     pub fn get_font(&mut self, pdf_font: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry<E>>>> {
         let mut error = None;
         let val = self.fonts.get(&**pdf_font as *const PdfFont as usize, |_| 

@@ -44,7 +44,10 @@ pub mod vello_cpu_backend;
 #[cfg(feature = "svg")]
 pub mod svg_backend;
 pub mod rangecache;
-pub use font::FontRc;
+pub use font::{FontRc, MemDir, StandardCache, DirRead, Codec};
+
+#[cfg(test)]
+mod fontbundle_tests;
 
 pub use pdf;
 use pdf::{object::*, content::TextMode};

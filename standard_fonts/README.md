@@ -25,6 +25,39 @@ Sources, unmodified:
   `mozilla/pdf.js/external/standard_fonts/` (`LICENSE_FOXIT`, "Copyright 2014
   PDFium Authors", "Original code copyright 2014 Foxit Software Inc.")
 
+## The bundle
+
+A viewer in a browser cannot read a directory, and it must not fetch one font at
+a time: which fonts a document uses would then be visible on the wire. So this
+whole directory goes out as one resource, built by
+
+    cargo run --features bundle-write --bin fonts_blob -- standard_fonts <out-dir>
+
+and read by `MemDir::parse_bundle` → `StandardCache::with_dir`. It contains
+`fonts.json` and the files it names — not the licence texts, not the `FoxitSerif`
+/ `FoxitFixed` files nothing references.
+
+`standard_fonts/` is 1,507,379 bytes. Compressed:
+
+| codec | bytes | of raw | decoder in wasm |
+|---|---|---|---|
+| brotli q11, lgwin 22 | **547,313** | 36.3 % | `brotli-decompressor`, pure Rust |
+| gzip -9 | 838,943 | 55.7 % | free: `DecompressionStream("gzip")` in the host |
+| deflate -9 | 838,925 | 55.7 % | free, as above |
+| none | 1,507,883 | 100 % | — |
+
+The whole file is compressed as one stream, which is the point: brotli's 4 MiB
+window covers every font at once, so the outlines that one weight shares with
+the next are coded once. Per file, brotli reaches 700,389 bytes and gzip 834,200
+— with gzip's 32 KiB window, smaller than one font, a bundle buys nothing at all.
+Brotli's font mode (the WOFF2 one) is 547,946: no better than generic here,
+because these are CFF fonts, and the mode's gain comes from glyph transforms
+this blob does not apply.
+
+Squeezing further means subsetting, and a standard-14 substitute cannot be
+subset: a PDF may name any glyph in `/Differences`, and a missing glyph is a
+blank box. The file is what it has to be; the compression is as far as it goes.
+
 ## Why these and not PDFium's other fonts
 
 PDFium ships Foxit outlines for serif, monospaced, symbol and dingbats, but no

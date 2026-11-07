@@ -238,6 +238,8 @@ impl MemDir {
 
     /// Read a bundle: a tiny table of contents, then the files.
     ///
+    /// Version 1 is plain:
+    ///
     /// ```text
     /// "PDFF" 1 (u8)  count (u32 LE)
     /// count × { name_len (u16 LE), name (utf8), offset (u32 LE), len (u32 LE) }
@@ -247,7 +249,40 @@ impl MemDir {
     /// Offsets are absolute so the host can build the file by concatenating
     /// pieces in one pass; the header is small enough that the browser may as
     /// well receive it first, but it does not have to.
-    pub fn parse_bundle(data: &Arc<[u8]>) -> Result<MemDir> {
+    ///
+    /// Version 2 is that whole file compressed as one stream — what goes on the
+    /// wire:
+    ///
+    /// ```text
+    /// "PDFF" 2 (u8)  codec (u8)  raw_len (u32 LE)  <raw_len bytes of version 1>
+    /// ```
+    ///
+    /// One stream for all the fonts, not one per file. They share an alphabet,
+    /// a set of outline operators and, between the weights of one family, a lot
+    /// of outlines. Fonts are compressed one file at a time only because a font
+    /// has to be readable on its own; a bundle does not, since every font in it
+    /// is fetched ([`with_dir`](StandardCache::with_dir)).
+    ///
+    /// What that is worth depends on the window: with gzip's 32 KiB — smaller
+    /// than one font — a bundle saves nothing (838,943 bytes against 834,200
+    /// for the files gzipped one at a time). With brotli's 4 MiB, which covers
+    /// the whole set, it is 547,313 against 700,389: a quarter off, for one
+    /// request instead of fifteen.
+    ///
+    /// A `raw_len` that disagrees with the stream stops the read: a font bundle
+    /// that silently loses bytes would render wrong glyphs.
+    pub fn parse_bundle(data: &[u8]) -> Result<MemDir> {
+        let raw: Vec<u8>;
+        let mut data = data;
+        if data.get(..4) == Some(&b"PDFF"[..]) && data.get(4) == Some(&2) {
+            let bad = |what: &str| PdfError::Other { msg: format!("font bundle: {what}") };
+            let codec = data.get(5).and_then(|b| Codec::from_u8(*b)).ok_or_else(|| bad("unknown codec"))?;
+            let len = u32::from_le_bytes(data.get(6..10).ok_or_else(|| bad("truncated"))?.try_into().unwrap()) as usize;
+            let body = data.get(10..).ok_or_else(|| bad("truncated"))?;
+            raw = codec.decompress(body, len)?;
+            data = &raw;
+        }
+
         let bad = |what: &str| PdfError::Other { msg: format!("font bundle: {what}") };
         let mut pos = 0usize;
         let take = |pos: &mut usize, n: usize| -> Result<&[u8]> {
@@ -259,8 +294,9 @@ impl MemDir {
         if take(&mut pos, 4)? != b"PDFF" {
             return Err(bad("not a font bundle"));
         }
-        if take(&mut pos, 1)?[0] != 1 {
-            return Err(bad("unsupported version"));
+        let version = take(&mut pos, 1)?[0];
+        if version != 1 {
+            return Err(bad(&format!("unsupported version {version}")));
         }
         let count = u32::from_le_bytes(take(&mut pos, 4)?.try_into().unwrap()) as usize;
         let mut files = HashMap::with_capacity(count);
@@ -274,6 +310,135 @@ impl MemDir {
             files.insert(name, Arc::from(bytes));
         }
         Ok(MemDir { files })
+    }
+
+    /// This set as a plain bundle (version 1): a table of contents, then the
+    /// files, all readable in place.
+    pub fn write_plain(&self) -> Vec<u8> {
+        let mut names: Vec<&String> = self.files.keys().collect();
+        names.sort();
+
+        let toc_len: usize = names.iter().map(|n| 2 + n.len() + 4 + 4).sum();
+        let mut offset = 4 + 1 + 4 + toc_len;
+
+        let mut out = Vec::with_capacity(offset + self.bytes());
+        out.extend_from_slice(b"PDFF");
+        out.push(1);
+        out.extend_from_slice(&(names.len() as u32).to_le_bytes());
+        for name in &names {
+            out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            out.extend_from_slice(name.as_bytes());
+            let data = &self.files[*name];
+            out.extend_from_slice(&(offset as u32).to_le_bytes());
+            out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            offset += data.len();
+        }
+        for name in &names {
+            out.extend_from_slice(&self.files[*name]);
+        }
+        out
+    }
+
+    /// This set as a bundle in `codec` (version 2), for the network.
+    ///
+    /// The plain file is the input: compress what is read back, so there is
+    /// only one writer of the layout.
+    pub fn write_bundle(&self, codec: Codec) -> Vec<u8> {
+        let plain = self.write_plain();
+        let body = codec.compress(&plain);
+        let mut out = Vec::with_capacity(10 + body.len());
+        out.extend_from_slice(b"PDFF");
+        out.push(2);
+        out.push(codec as u8);
+        out.extend_from_slice(&(plain.len() as u32).to_le_bytes());
+        out.extend_from_slice(&body);
+        out
+    }
+}
+
+/// How the payload of a version 2 bundle is compressed.
+///
+/// `Gzip` is the interesting one for a browser: `DecompressionStream("gzip")`
+/// decodes it with no wasm at all, so a host that would rather not carry a
+/// brotli decoder in the module can take a slightly larger resource instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Codec {
+    Store = 0,
+    Brotli = 1,
+    Deflate = 2,
+    Gzip = 3,
+}
+
+impl Codec {
+    pub fn from_u8(v: u8) -> Option<Codec> {
+        Some(match v {
+            0 => Codec::Store,
+            1 => Codec::Brotli,
+            2 => Codec::Deflate,
+            3 => Codec::Gzip,
+            _ => return None,
+        })
+    }
+
+    fn decompress(self, src: &[u8], raw_len: usize) -> Result<Vec<u8>> {
+        use std::io::Read;
+        let mut out = Vec::with_capacity(raw_len);
+        let r = match self {
+            Codec::Store => {
+                out.extend_from_slice(src);
+                return Ok(out);
+            }
+            Codec::Brotli => brotli_decompressor::BrotliDecompress(&mut &src[..], &mut out),
+            Codec::Deflate => flate2::read::DeflateDecoder::new(src).read_to_end(&mut out).map(|_| ()),
+            Codec::Gzip => flate2::read::GzDecoder::new(src).read_to_end(&mut out).map(|_| ()),
+        };
+        r.map_err(|e| PdfError::Other { msg: format!("font bundle: {self:?}: {e}") })?;
+        if out.len() != raw_len {
+            return Err(PdfError::Other {
+                msg: format!("font bundle: {self:?}: {} bytes, expected {raw_len}", out.len()),
+            });
+        }
+        Ok(out)
+    }
+
+    /// Compress `src` with this codec.
+    ///
+    /// Only brotli needs a dependency a wasm module would not otherwise carry,
+    /// so only brotli is behind a feature; the rest is flate2, which a pdf
+    /// build links anyway.
+    fn compress(self, src: &[u8]) -> Vec<u8> {
+        use std::io::Write;
+        match self {
+            Codec::Store => src.to_vec(),
+            Codec::Brotli => Self::brotli(src),
+            Codec::Deflate => {
+                let mut e = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::best());
+                e.write_all(src).expect("deflate");
+                e.finish().expect("deflate")
+            }
+            Codec::Gzip => {
+                let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+                e.write_all(src).expect("gzip");
+                e.finish().expect("gzip")
+            }
+        }
+    }
+
+    #[cfg(feature = "bundle-write")]
+    fn brotli(src: &[u8]) -> Vec<u8> {
+        // Quality 11, window 22 (4 MiB, more than a font set needs): the blob
+        // is built once and fetched by every viewer.
+        let mut params = brotli::enc::BrotliEncoderParams::default();
+        params.quality = 11;
+        params.lgwin = 22;
+        let mut out = Vec::new();
+        brotli::BrotliCompress(&mut &src[..], &mut out, &params).expect("brotli");
+        out
+    }
+
+    #[cfg(not(feature = "bundle-write"))]
+    fn brotli(_src: &[u8]) -> Vec<u8> {
+        panic!("a brotli bundle needs the `bundle-write` feature")
     }
 }
 
