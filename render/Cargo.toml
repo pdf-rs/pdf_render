@@ -88,14 +88,19 @@ required-features = ["bundle-write"]
 name = "fonts_parts"
 required-features = ["bundle-write"]
 
+# Sebastian's fork, fetched over ssh: upstream master has not caught up with
+# the API this crate uses, and a path to a sibling checkout cannot be resolved
+# by anything that depends on pdf_render (cargo reads this manifest, not the
+# checkout). Seb, 2026-11-08: "publish pdf2md and reference via ssh link".
 [dependencies.pdf]
 default-features = false
 features = ["cache", "dump"]
-git = "https://github.com/pdf-rs/pdf"
+git = "ssh://git@github.com/s3bk/pdf.git"
+branch = "master"
 
 [dependencies]
 log = "0.4"
-font = { git = "https://github.com/pdf-rs/font", branch = "vello", features = ["cff"] }
+font = { git = "https://github.com/pdf-rs/font", rev = "d7b579afd94c983af6e0f218e13d4095209b9be2", features = ["cff"] }
 pdf_encoding = "0.4"
 itertools = "*"
 image = { version = "0.25", default-features = false, features = ["bmp", "dds", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp"] }

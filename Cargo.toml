@@ -24,8 +24,10 @@ pathfinder_simd = { git = "https://github.com/servo/pathfinder" }
 #[patch."https://github.com/s3bk/pathfinder_view"]
 #pathfinder_view = { path = "../pathfinder_view", features=["icon"] }
 
-[patch."https://github.com/pdf-rs/pdf"]
-pdf = { path = "../pdf/pdf", default-features=false }
+# The `pdf` dependency is Sebastian's fork over ssh (see render/Cargo.toml);
+# a sibling-checkout [patch] used to sit here, but a [patch] is only honoured
+# in the root manifest of a build, so it never applied to anything that used
+# this crate as a dependency. Kept out rather than left to look load-bearing.
 
 #[patch."https://github.com/pdf-rs/font"]
 #font = { path = "../font" }
