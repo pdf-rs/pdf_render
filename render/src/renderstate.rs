@@ -246,7 +246,17 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 self.graphics_state.transform = self.graphics_state.transform * matrix.cvt();
             }
             Op::LineWidth { width } => self.graphics_state.stroke_style.line_width = width,
-            Op::Dash { ref pattern, phase } => self.graphics_state.dash_pattern = Some((pattern.clone(), phase)),
+            // `[] 0 d` is how a content stream says "solid" again: an empty
+            // array is not a dash pattern. Stored as `None`, because a backend
+            // that dashes with an empty pattern draws nothing at all — that is
+            // how the fraction bars of nasa.pdf page 35 went missing.
+            Op::Dash { ref pattern, phase } => {
+                self.graphics_state.dash_pattern = if pattern.iter().any(|&v| v > 0.0) {
+                    Some((pattern.clone(), phase))
+                } else {
+                    None
+                }
+            }
             Op::LineJoin { join } => {},
             Op::LineCap { cap } => {},
             Op::MiterLimit { limit } => {},

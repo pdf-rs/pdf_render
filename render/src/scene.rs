@@ -94,19 +94,7 @@ impl<'a> Backend for SceneBackend<'a> {
         match mode {
             DrawMode::Stroke { stroke, stroke_mode }| DrawMode::FillStroke { stroke, stroke_mode, .. } => {
                 let paint = self.paint(stroke.color, stroke.alpha);
-                let contour = match stroke_mode.dash_pattern {
-                    Some((ref pat, phase)) => {
-                        let dashed = OutlineDash::new(outline, &*pat, phase).into_outline();
-                        let mut stroke = OutlineStrokeToFill::new(&dashed, stroke_mode.style);
-                        stroke.offset();
-                        stroke.into_outline()
-                    }
-                    None => {
-                        let mut stroke = OutlineStrokeToFill::new(outline, stroke_mode.style);
-                        stroke.offset();
-                        stroke.into_outline()
-                    }
-                };
+                let contour = crate::stroke::stroke_to_fill(outline, stroke_mode);
                 let mut draw_path = DrawPath::new(contour.transformed(&transform), paint);
                 draw_path.set_clip_path(clip);
                 draw_path.set_fill_rule(fill_rule);

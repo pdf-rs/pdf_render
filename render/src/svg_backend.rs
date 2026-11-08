@@ -28,11 +28,9 @@ use std::sync::Arc;
 use font::{pathfinder_impl::PathBuilder, Encoder, Glyph};
 use pathfinder_color::{ColorF, ColorU};
 use pathfinder_content::{
-    dash::OutlineDash,
     fill::FillRule,
     outline::{ContourIterFlags, Outline},
     segment::SegmentKind,
-    stroke::OutlineStrokeToFill,
 };
 use pathfinder_geometry::{rect::RectF, transform2d::Transform2F, vector::Vector2F};
 
@@ -520,21 +518,10 @@ impl<'a> crate::Backend for SvgBackend<'a> {
     }
 }
 
-/// Stroke to fill, the way the other backends do it: dashes first.
+/// Stroke to fill, the way the other backends do it: dashes first, then the
+/// outline stroker. See [`crate::stroke::stroke_to_fill`].
 fn stroke_outline(outline: &Outline, stroke_mode: &Stroke) -> Outline {
-    match stroke_mode.dash_pattern {
-        Some((ref pat, phase)) => {
-            let dashed = OutlineDash::new(outline, &*pat, phase).into_outline();
-            let mut stroke = OutlineStrokeToFill::new(&dashed, stroke_mode.style);
-            stroke.offset();
-            stroke.into_outline()
-        }
-        None => {
-            let mut stroke = OutlineStrokeToFill::new(outline, stroke_mode.style);
-            stroke.offset();
-            stroke.into_outline()
-        }
-    }
+    crate::stroke::stroke_to_fill(outline, stroke_mode)
 }
 
 /// Unit square of the image (y down) onto the page (y up).
@@ -616,7 +603,8 @@ fn path_data(outline: &Outline, t: Transform2F, out: &mut String) {
     }
 }
 
-/// Append `v` with at most three decimals and no trailing zeros.
+/// Append `v` with at most three decimals and no trailing zeros — seven
+/// below one, because those are matrices, not coordinates.
 ///
 /// `format!("{v:.3}")` is what this used to do, and it was most of the time a
 /// page took to render: Rust's float formatting is an exact-decimal algorithm
@@ -624,16 +612,21 @@ fn path_data(outline: &Outline, t: Transform2F, out: &mut String) {
 /// thousand coordinates. Three decimals of a page coordinate fit an integer
 /// easily, so this rounds to thousandths and writes digits directly — same
 /// output, a small fraction of the work.
+///
+/// A glyph is placed by a matrix whose scale is about 0.002, and three
+/// decimals turned that into 0.002: every glyph 3% too small and the page 7%
+/// lighter than it should be. Below 1, seven decimals keep the scale.
 fn fmt_f(v: f32, out: &mut String) {
     if !v.is_finite() {
         out.push('0');
         return;
     }
-    // f32 -> f64 is exact, and the product then rounds to a thousandth of a
-    // unit correctly. Past 2^53 thousandths (9e12 units, far beyond any page
-    // box) the rounding is no longer exact; those values are rounded to whole
-    // units instead of being worth a special case.
-    let scaled = (v as f64 * 1000.0).round();
+    let decimals: u32 = if v.abs() >= 1.0 { 3 } else { 7 };
+    let div = 10u64.pow(decimals) as f64;
+    // f32 -> f64 is exact, and the product then rounds to a fraction of a unit
+    // correctly. Past 2^53 units the rounding is no longer exact; those values
+    // are rounded to whole units instead of being worth a special case.
+    let scaled = (v as f64 * div).round();
     if scaled.abs() >= 9_007_199_254_740_992.0 {
         write_whole(v as f64, out);
         return;
@@ -647,16 +640,17 @@ fn fmt_f(v: f32, out: &mut String) {
     if neg {
         out.push('-');
     }
-    write_u64((n / 1000) as u64, out);
-    let frac = (n % 1000) as u32;
+    let div = div as u64;
+    write_u64((n / div as i64) as u64, out);
+    let frac = (n % div as i64) as u64;
     if frac == 0 {
         return;
     }
     out.push('.');
     let start = out.len();
-    out.push((b'0' + (frac / 100) as u8) as char);
-    out.push((b'0' + (frac / 10 % 10) as u8) as char);
-    out.push((b'0' + (frac % 10) as u8) as char);
+    for i in (0..decimals).rev() {
+        out.push((b'0' + ((frac / 10u64.pow(i)) % 10) as u8) as char);
+    }
     let mut end = out.len();
     while end > start && out.as_bytes()[end - 1] == b'0' {
         end -= 1;

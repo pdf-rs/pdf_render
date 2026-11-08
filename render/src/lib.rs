@@ -44,6 +44,8 @@ pub mod vello_cpu_backend;
 #[cfg(feature = "svg")]
 pub mod svg_backend;
 pub mod rangecache;
+/// Stroke to fill, shared by the backends that cannot stroke natively.
+pub mod stroke;
 pub use font::{FontRc, MemDir, StandardCache, DirRead, Codec};
 
 #[cfg(test)]
