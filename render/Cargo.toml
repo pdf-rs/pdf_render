@@ -56,6 +56,11 @@ required-features = ["vello"]
 name = "svg_page"
 required-features = ["svg"]
 
+# The SVG the viewer gets, rasterised and diffed against a reference image.
+[[example]]
+name = "svg_cmp"
+required-features = ["svg"]
+
 [[example]]
 name = "net_sim"
 required-features = ["svg"]
@@ -126,3 +131,8 @@ vello_cpu = { version = "0.3", optional = true, default-features = false, featur
 criterion = "0.3"
 env_logger = "*"
 rand = "0.6"
+# `examples/svg_cmp`: rasterise our own SVG output so it can be compared with
+# any other engine's raster of the same page. Dev only — nothing in the library
+# or in the browser build touches it.
+resvg = "0.44"
+usvg = "0.44"
