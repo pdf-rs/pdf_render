@@ -44,13 +44,16 @@
 <script type="module">
 import { load, Doc, HttpSource, parseTable } from './doc.js';
 import { Sealed, keyFromFragment } from './seal.js';
+import { resolve as assetUrl } from './assets.js';
 
-// Where the wasm module and the font bundle live, relative to this page. The
-// bundle is brotli-compressed on the wire (`Content-Encoding: br`, what a server
-// does for a `.br` file): `fetch` hands the module the plain bundle, so nothing
-// here has to decompress anything.
-const WASM = new URL('./pdf_web.wasm', location.href).href;
-const FONTS = new URL('./standard_fonts.br', location.href).href;
+// Where the wasm module and the font bundle live, relative to this page, or —
+// in a share — wherever `assets.json` says: those two files are the same in
+// every bundle, so the share service keeps them once, under a name that carries
+// their hash. The font bundle arrives brotli-compressed (`Content-Encoding:
+// br`, what a server does for a `.br` file): `fetch` hands the module the plain
+// bundle, so nothing here has to decompress anything.
+const WASM = await assetUrl('pdf_web.wasm');
+const FONTS = await assetUrl('standard_fonts.br');
 
 const $ = (id) => document.getElementById(id);
 const state = { doc: null, page: 0, pages: 0, url: "", length: 0 };
