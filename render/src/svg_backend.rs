@@ -157,6 +157,11 @@ pub struct SvgBackend<'a> {
     /// times, and `#rrggbb` formatting is not free either.
     fill_attr: String,
     fill_key: Option<[u32; 4]>,
+    /// `id` namespace of the layer being built: `l0_`, `l1_`, … Layers are
+    /// separate documents that a host may splice into one, and `id`s are
+    /// document-global, so numbering them per layer keeps two layers apart
+    /// without a rename pass over the finished text.
+    prefix: String,
 }
 
 impl<'a> SvgBackend<'a> {
@@ -165,6 +170,7 @@ impl<'a> SvgBackend<'a> {
             cache,
             view_box: RectF::default(),
             body: String::new(),
+            prefix: String::from("l0_"),
             clips: Vec::new(),
             used_clips: Vec::new(),
             layers: Vec::new(),
@@ -262,11 +268,12 @@ impl<'a> SvgBackend<'a> {
         svg.push(' ');
         fmt_f(h, &mut svg);
         svg.push_str("\" shape-rendering=\"geometricPrecision\">");
+        let prefix = &self.prefix;
         if !self.used_clips.is_empty() || !self.used_symbols.is_empty() {
             svg.push_str("<defs>");
             for &id in &self.used_clips {
                 let clip = &self.clips[id];
-                let _ = write!(svg, "<clipPath id=\"c{id}\" clipPathUnits=\"userSpaceOnUse\">");
+                let _ = write!(svg, "<clipPath id=\"{prefix}c{id}\" clipPathUnits=\"userSpaceOnUse\">");
                 let _ = write!(
                     svg,
                     "<path d=\"{}\" clip-rule=\"{}\"/></clipPath>",
@@ -277,7 +284,7 @@ impl<'a> SvgBackend<'a> {
             // Each distinct glyph outline once, in glyph space; a `<use>` per
             // occurrence carries the position and the colour.
             for &id in &self.used_symbols {
-                let _ = write!(svg, "<g id=\"g{id}\"><path d=\"{}\"/></g>", self.symbols[id as usize]);
+                let _ = write!(svg, "<g id=\"{prefix}g{id}\"><path d=\"{}\"/></g>", self.symbols[id as usize]);
             }
             svg.push_str("</defs>");
         }
@@ -288,6 +295,7 @@ impl<'a> SvgBackend<'a> {
         svg.push_str(&self.body);
         svg.push_str("</g></svg>");
         self.layers.push(Layer::Vector(svg));
+        self.prefix = format!("l{}_", self.layers.len());
         self.body.clear();
         self.used_clips.clear();
         self.used_symbols.clear();
@@ -307,7 +315,7 @@ impl<'a> SvgBackend<'a> {
             if !self.used_clips.contains(&id) {
                 self.used_clips.push(id);
             }
-            let _ = write!(self.body, "<g clip-path=\"url(#c{id})\">");
+            let _ = write!(self.body, "<g clip-path=\"url(#{p}c{id})\">", p = self.prefix);
         }
         n
     }
@@ -389,8 +397,9 @@ impl<'a> SvgBackend<'a> {
         // its own.
         let _ = write!(
             self.body,
-            "<use href=\"#g{id}\" transform=\"matrix({})\"{} />",
+            "<use href=\"#{p}g{id}\" transform=\"matrix({})\"{} />",
             self.matrix_buf, self.fill_attr,
+            p = self.prefix,
         );
         self.close_clips(opened);
         self.paths_emitted += 1;

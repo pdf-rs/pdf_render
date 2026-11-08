@@ -5,8 +5,9 @@
 //! emitted as SVG, rasters as raw RGBA, and the two can interleave with a
 //! `flush` between them. A host that wants one image to hand to `<img>` — or
 //! to save — needs them put back together, which is what this does: the image
-//! goes in as a PNG data URL, the layers keep their order, and every `id` is
-//! prefixed per layer so two layers of one page cannot collide.
+//! go in as a PNG data URL, the layers keep their order, and the backend has
+//! already scoped every `id` to its layer (`l0_g17`), so two layers of one page
+//! cannot collide and nothing has to be renamed here.
 //!
 //! The alternative would be a canvas and `drawImage` per raster layer. That
 //! needs JavaScript to touch pixels and loses "the page is a file you can
@@ -44,8 +45,10 @@ pub fn combine(page: SvgPage) -> String {
     for (i, layer) in page.layers.iter().enumerate() {
         let prefix = format!("l{i}_");
         match layer {
+            // The backend already numbers its ids per layer (`l0_g17`), so the
+            // text goes in as it is: two layers cannot collide.
             Layer::Vector(doc) => match body_of(doc) {
-                Some(body) => out.push_str(&prefix_ids(body, &prefix)),
+                Some(body) => out.push_str(body),
                 // A layer that is not the document it claims to be is left
                 // out rather than spliced in broken.
                 None => continue,
@@ -65,69 +68,6 @@ fn body_of(svg: &str) -> Option<&str> {
     let start = svg.find('>')? + 1;
     let end = svg.rfind("</svg>")?;
     (start <= end).then(|| &svg[start..end])
-}
-
-/// Rename every `id` a layer defines, and every reference to one, so layers
-/// can share a document. Only the three forms the backend emits are touched:
-/// `id="…"`, `href="#…"` and `url(#…)`.
-///
-/// One pass, with each marker's next position looked up once: searching for all
-/// three markers at every hit made this quadratic. A page with four thousand
-/// `<use href="#gN">` and a marker that occurs twice scanned the rest of the
-/// page thousands of times, and that search was 93 % of the time a page took to
-/// render — 400 ms of a 430 ms page.
-fn prefix_ids(fragment: &str, prefix: &str) -> String {
-    const MARKERS: [&str; 3] = ["id=\"", "href=\"#", "url(#"];
-    fn is_ident_byte(b: u8) -> bool {
-        b.is_ascii_alphanumeric() || b == b'_'
-    }
-    let bytes = fragment.as_bytes();
-    let mut out = String::with_capacity(fragment.len() + 64);
-    let mut next: [Option<usize>; 3] = [
-        fragment.find(MARKERS[0]),
-        fragment.find(MARKERS[1]),
-        fragment.find(MARKERS[2]),
-    ];
-    let mut i = 0;
-    while i < bytes.len() {
-        // The earliest marker still ahead of us.
-        let mut hit: Option<(usize, usize)> = None;
-        for (k, at) in next.iter().enumerate() {
-            if let Some(p) = *at {
-                if p >= i && hit.is_none_or(|(q, _)| p < q) {
-                    hit = Some((p, k));
-                }
-            }
-        }
-        let Some((p, k)) = hit else {
-            out.push_str(&fragment[i..]);
-            return out;
-        };
-        out.push_str(&fragment[i..p + MARKERS[k].len()]);
-        i = p + MARKERS[k].len();
-        // The identifier as the backend writes it: `g<number>` or `c<number>`.
-        let mut end = i;
-        while end < bytes.len() && is_ident_byte(bytes[end]) {
-            end += 1;
-        }
-        if is_backend_id(&fragment[i..end]) {
-            out.push_str(prefix);
-        }
-        out.push_str(&fragment[i..end]);
-        i = end;
-        // Only the positions we walked past are looked up again.
-        for (k, at) in next.iter_mut().enumerate() {
-            if at.is_some_and(|p| p < i) {
-                *at = fragment[i..].find(MARKERS[k]).map(|q| q + i);
-            }
-        }
-    }
-    out
-}
-
-fn is_backend_id(ident: &str) -> bool {
-    let mut chars = ident.chars();
-    matches!(chars.next(), Some('g') | Some('c')) && chars.next().is_some_and(|c| c.is_ascii_digit())
 }
 
 /// A raster layer as an `<image>`: PNG bytes as a data URL, placed by the
@@ -216,17 +156,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ids_get_a_layer_prefix_and_nothing_else_changes() {
-        let layer = "<defs><g id=\"g0\"><path d=\"M0 0\"/></g><clipPath id=\"c1\"><path d=\"M1 1\"/></clipPath></defs>\
-                     <path d=\"M0 0\" fill=\"#abcdef\"/><use href=\"#g0\" transform=\"matrix(1)\"/>\
-                     <g clip-path=\"url(#c1)\"><use xlink:href=\"#g0\"/></g>";
-        let got = prefix_ids(layer, "l3_");
-        assert!(got.contains("id=\"l3_g0\""), "{got}");
-        assert!(got.contains("id=\"l3_c1\""), "{got}");
-        assert!(got.contains("href=\"#l3_g0\""), "{got}");
-        assert!(got.contains("url(#l3_c1)"), "{got}");
-        // A colour is not an id and must survive untouched.
-        assert!(got.contains("fill=\"#abcdef\""), "{got}");
+    fn a_page_assembles_its_layers_in_order() {
+        let page = SvgPage {
+            view_box: [0.0, 0.0, 10.0, 20.0],
+            layers: vec![
+                Layer::Vector("<svg xmlns=\"x\" viewBox=\"0 0 10 20\"><g><path d=\"M0 0\"/></g></svg>".into()),
+                Layer::Vector("<svg xmlns=\"x\" viewBox=\"0 0 10 20\"><use href=\"#l1_g0\"/></svg>".into()),
+            ],
+        };
+        let got = combine(page);
+        assert!(got.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""), "{got}");
+        assert!(got.contains("<path d=\"M0 0\"/>"), "{got}");
+        // The body of a layer goes in whole: the backend already scoped its ids.
+        assert!(got.contains("<use href=\"#l1_g0\"/>"), "{got}");
+        // Layer order is paint order.
+        assert!(got.find("M0 0").unwrap() < got.find("#l1_g0").unwrap(), "{got}");
+        // Each layer's outer element is not repeated.
+        assert_eq!(got.matches("<svg").count(), 1, "{got}");
     }
 
     #[test]

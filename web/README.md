@@ -193,17 +193,24 @@ milliseconds go. On `nasa.pdf`, over all 521 pages:
 
 | | before | after |
 |---|---|---|
-| mean page | 83.6 ms | 7.8 ms |
+| mean page | 83.6 ms | 7.6 ms |
 | worst page | 524 ms | 32 ms |
 | page turn in the browser | 102 ms | 31 ms (9 module + 7 DOM + 14 layout + 5 paint) |
 
-93 % of the old cost was one function: `svg::prefix_ids` renames every `id`,
-`href="#…"` and `url(#…)` of a layer so layers can share a document, and it
-searched for all three markers again at every hit. On a page with 4,320 glyphs
+93 % of the old cost was one function: `svg::prefix_ids`, which renamed every
+`id`, `href="#…"` and `url(#…)` of a layer so layers could share a document, and
+searched for all three markers again at every hit. On a page with 4,320 glyph
 `<use>`s and a marker that occurs twice, every hit after the last occurrence
-scanned the rest of the page — quadratic, and the page's whole render time. It
-now keeps each marker's next position and looks one up only when it walks past
-it.
+scanned the rest of the page — quadratic, and the page's whole render time.
+
+That pass is gone rather than merely fixed: the backend numbers its `id`s per
+layer itself (`l0_g17`), so the layers of a page are put together by
+concatenation and nothing is read back. A definition is emitted in every layer
+that uses it — 13 of the 521 pages in `nasa.pdf` would repeat one otherwise —
+and the ids keep those copies apart. `node web/test/dupids.mjs <file.pdf>
+<file.pdf>.tbl` is the check: no page may define an `id` twice or reference one
+it does not define (521 pages, 31,072 definitions, 576,832 `<use>`, none
+repeated, none dangling).
 
 The rest of the rendering is where it should be: the SVG backend formats
 coordinates itself (rounding to thousandths and writing digits, rather than
