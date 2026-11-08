@@ -273,6 +273,51 @@ BOM, or PDFDocEncoding — Latin-1 except 0x18–0x1F and 0x80–0xA0, where a b
 curly quotes and dashes live. Reading those bytes as UTF-8 is what turns
 "Editors' Introduction" into "Editors\u{fffd} Introduction".
 
+## Page 1 first, without a sidecar
+
+The range table is an index shipped *next to* the file. Linearization
+(ISO 32000 Annex F) is the same idea written *into* it, so a viewer that has
+never heard of us — Acrobat, a browser doing a plain GET — can put page 1 on
+screen after reading the first few kilobytes instead of the whole document.
+`cargo run --bin linearize -- <in.pdf> <out.pdf>` writes one:
+
+```text
+%PDF-1.7
+<linearization dict>        /L, /T, /E, /O, /N
+<first-page xref stream>    its /Prev is the main xref at the end
+catalog, page tree, page 1's ancestors, page 1 and everything it reads
+everything else
+<main xref stream>          every object, no /Prev
+startxref / %%EOF
+```
+
+Two things make the layout cheap. The numbers that depend on offsets — `/L`,
+`/T`, `/E`, `/Prev` — are written into fixed-width fields, so the file's
+lengths do not depend on their values: one pass measures, the next writes, and
+the offsets do not move. And the first-page `xref` is a stream of fixed 7-byte
+entries as well, so it is the same length before and after the offsets are
+known. No iteration to a fixed point, no patching in place.
+
+`nasa.pdf` (521 pages, 4.97 MB): page 1 reads 26 objects inside the first
+**57 KB** — 1.2% of the file — and everything else follows after it. `pdfinfo`
+on the result says `Optimized: yes`, and poppler renders page 1 bit-identically
+to the original. `odf-intro.pdf` is the other extreme — 51 objects, 61 KB of
+151 KB, because its embedded fonts are the page's own business.
+
+What it does not have yet is the hint streams (`/H`): a bit-packed page offset
+table and shared-object table that tell a client the byte ranges of *any* page
+without walking the page tree. They are optional to a reader — poppler prints
+`Syntax Warning: Hints table offset in linearization table is invalid` and then
+says `Optimized: yes` — and they are the fiddly half: variable bit widths, a
+header per table, and the hint stream's own offset in `/H` feeding back into
+the layout. Also missing, and easier: `/Info` and `/ID` are not carried over,
+and an object whose generation number is not 0 is written as 0.
+
+For our own viewer this buys nothing — `doc.js` asks for exactly what it needs
+and the table says what that is. What it buys is everyone else's reader, and it
+is the thing to reach for when a PDF is served by a plain web server with no
+sidecar and no `Range` in sight.
+
 ## How long a page takes
 
 `node web/test/timing.mjs <file.pdf> [<file.pdf>.tbl] [all | page …]` runs the
