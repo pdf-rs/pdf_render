@@ -316,7 +316,9 @@ import { resolve as assetUrl } from './assets.js';
 // br`, what a server does for a `.br` file): `fetch` hands the module the plain
 // bundle, so nothing here has to decompress anything.
 const WASM = await assetUrl('pdf_web.wasm');
-const FONTS = await assetUrl('standard_fonts.br');
+// `?fonts=` puts another standard-font bundle in place of the shipped one: two
+// packs can be compared page for page without publishing two viewers.
+const FONTS = new URLSearchParams(location.search).get('fonts') || await assetUrl('standard_fonts.br');
 
 const $ = (id) => document.getElementById(id);
 const stage = $("stage"), paper = $("paper");
@@ -439,6 +441,23 @@ function fmt(n) {
     return n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KiB` : `${(n / 1048576).toFixed(1)} MiB`;
 }
 
+/** The next and previous page, fetched while the reader is still on this one.
+ *  With a table that is the whole cost of a page turn: the bytes are here
+ *  before the click, so the turn is one render and nothing else. `?preload=0`
+ *  turns it off, for a link where every byte of traffic counts — it is real
+ *  traffic, twice the bytes of a page you never visit. */
+const PRELOAD = new URLSearchParams(location.search).get("preload") !== "0";
+function preloadNeighbours() {
+    const doc = state.doc;
+    if (!doc || !PRELOAD) return;
+    const before = doc.preload.bytes;
+    const jobs = [state.page + 1, state.page - 1].map((i) => doc.prefetch(i).catch(() => 0));
+    Promise.all(jobs).then((got) => {
+        const bytes = doc.preload.bytes - before;
+        if (bytes > 0) console.log(`preloaded neighbours: ${fmt(bytes)} in ${got.filter(Boolean).length} page(s)`);
+    });
+}
+
 async function show(i) {
     const doc = state.doc;
     if (!doc || i < 0 || i >= state.pages) return;
@@ -462,11 +481,15 @@ async function show(i) {
         $("prev").disabled = i === 0;
         $("next").disabled = i === state.pages - 1;
         say(`page ${i + 1}: ${fmt(doc.bytes - before)} in ${doc.requests - beforeRequests} request(s) · ${fmt(doc.bytes)} of ${fmt(state.length)} read`);
+        preloadNeighbours();
         // A sandboxed frame (opaque origin) refuses this; the page still works.
-        // The fragment is kept: it is where a sealed share's key lives, and a
-        // link copied from the address bar has to keep working.
+        // Every other parameter is kept — a link copied from the address bar
+        // has to keep working, and `?fonts=` / `?preload=` are part of it.
         try {
-            history.replaceState(null, "", `?pdf=${encodeURIComponent(state.url)}&page=${i + 1}${location.hash}`);
+            const query = new URLSearchParams(location.search);
+            query.set("pdf", state.url);
+            query.set("page", String(i + 1));
+            history.replaceState(null, "", `?${query}${location.hash}`);
         } catch {}
     } catch (e) { fail(e); } finally { busy(false); }
 }

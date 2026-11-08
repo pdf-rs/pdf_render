@@ -163,6 +163,36 @@ module wants anything, hands it the font bundle, then opens the PDF and renders
 three pages by reading ranges out of the file in memory. It is the same code
 path as the page, minus `fetch` and the DOM.
 
+## Preloading the neighbours
+
+With a range table a page turn is pure compute, so the viewer starts the next
+and the previous page before anyone asks for them: `doc.prefetch(n)` fetches
+what page `n` will read — bytes only, no rendering — and `index.html` calls it
+for `page ± 1` as soon as a page is shown. Measured on `nasa.pdf` (521 pages):
+
+| step | requests | traffic |
+|---|---|---|
+| open | 1 | 37,917 B |
+| page 1 | 2 | 78,908 B |
+| prefetch page 2 | 2 | 16,079 B — the part page 1 had not already brought |
+| page 2 | **0** | **0 B** |
+
+It is real traffic for a page nobody may visit — twice the bytes of a page per
+page read — so `?preload=0` turns it off.
+
+`node web/test/prefetch.mjs <file.pdf> [<file.pdf>.tbl]` checks it: `fetch` and
+the two out-parameters are stubbed around `www/doc.js`, and the test fails if a
+preloaded page still asks for a byte, if the same page is prefetched twice at
+once, or if an edge page makes a request. (A document small enough to arrive in
+the first request says so instead of passing.)
+
+## Swapping the font pack
+
+`?fonts=<url>` puts another standard-font bundle in place of the shipped one.
+Two packs then compare page for page through one viewer — and one
+`standard_fonts.br` per pack in the asset store, since the name carries the
+hash.
+
 ## What it costs, measured
 
 `web/src/tests.rs` puts a simulated network in front of the same code path:

@@ -108,6 +108,13 @@ export class Doc {
     /** What the page has read, for the readout. */
     bytes = 0;
     requests = 0;
+    /** What was fetched ahead of the page being shown, kept apart so the cost
+     *  of a page stays the cost of *that* page. */
+    preload = { bytes: 0, requests: 0 };
+    /** Pages whose bytes are being fetched right now: page index -> promise. */
+    #warm = new Map();
+    /** One fetch pass at a time; see `#fetch`. */
+    #turn = Promise.resolve();
 
     constructor(source) {
         this.#source = source;
@@ -171,6 +178,27 @@ export class Doc {
         return takeText(ptr, len);
     }
 
+    /** Start fetching what page `index` will need, without rendering it, so a
+     *  click on ←/→ costs no round trip. Bytes only: rendering a page is local
+     *  work (tens of ms), the network is what a page turn waits for.
+     *
+     *  Needs the sender's table — without one the ranges are only known by
+     *  asking, which is the render itself. Safe to call for the same page
+     *  twice: the second call joins the first. */
+    prefetch(index) {
+        if (!this.#doc || !(index >= 0) || index >= this.numPages) return Promise.resolve(0);
+        const known = this.#table && this.#table.get(index + 1);
+        if (!known) return Promise.resolve(0);
+        const running = this.#warm.get(index);
+        if (running) return running;
+        const before = this.preload.bytes;
+        const job = this.#fetch(known, false)
+            .then(() => this.preload.bytes - before)
+            .finally(() => this.#warm.delete(index));
+        this.#warm.set(index, job);
+        return job;
+    }
+
     /** Run passes until the module stops asking for bytes. */
     async #settle(page) {
         for (let round = 0; round < 32; round++) {
@@ -229,16 +257,29 @@ export class Doc {
 
     /** Every range of one pass, in parallel. They are separate requests —
      *  a browser HTTP/2 connection carries them together — and the module is
-     *  told about each as it arrives. */
-    async #fetch(ranges) {
-        this.requests++;
-        const bodies = await Promise.all(ranges.map(async ([start, len]) => {
-            const bytes = await this.#source.read(start, len);
-            this.bytes += bytes.length;
-            this.#remember(start, bytes.length);
-            return [start, bytes];
-        }));
-        for (const [start, bytes] of bodies) supply(this.#doc, start, bytes);
+     *  told about each as it arrives.
+     *
+     *  One pass at a time: a prefetch of the next page and a render of this one
+     *  would otherwise ask the server for the same bytes twice. `cost` keeps a
+     *  prefetch out of the numbers the readout shows for the page itself. */
+    #fetch(ranges, cost = true) {
+        const run = async () => {
+            const missing = this.#missing(ranges);
+            if (!missing.length) return;
+            if (cost) this.requests++;
+            else this.preload.requests++;
+            const bodies = await Promise.all(missing.map(async ([start, len]) => {
+                const bytes = await this.#source.read(start, len);
+                if (cost) this.bytes += bytes.length;
+                else this.preload.bytes += bytes.length;
+                this.#remember(start, bytes.length);
+                return [start, bytes];
+            }));
+            for (const [start, bytes] of bodies) supply(this.#doc, start, bytes);
+        };
+        const pass = this.#turn.then(run, run);
+        this.#turn = pass.then(() => {}, () => {});
+        return pass;
     }
 
     #lastError() {
