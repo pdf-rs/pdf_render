@@ -151,6 +151,13 @@ export class Doc {
         return mod.pdf_num_pages(this.#doc);
     }
 
+    /** Whether the sender shipped a range table. With one, a page can be
+     *  fetched before it is asked for — which is what lets the contents warm
+     *  the heading the reader is pointing at. */
+    get hasTable() {
+        return this.#table !== null;
+    }
+
     /** How many pages, and what that cost. */
     async open() {
         // The table has a line for the document itself, so even the first

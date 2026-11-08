@@ -235,6 +235,12 @@ Three things are deliberate:
 * **A row that points out of the document is shown, not dropped.** An external
   file or a script is still a heading; a table of contents with holes in it
   reads worse than one with a few rows that do not move.
+* **With a page table, a heading is fetched before it is clicked.** The table
+  says exactly what each page reads, so a row warms its page once the pointer
+  has rested on it for 90 ms (or on touch-down, or on keyboard focus): the
+  click then arrives to find the range already in hand and costs no request at
+  all. Without a table `Doc#prefetch` is a no-op — the ranges are only known by
+  asking, which is the render itself — so the rows cost nothing there.
 
 Most documents have no outline, and the sidebar says so instead of inventing a
 list of page numbers. `t` toggles it, the header button does the same, and the

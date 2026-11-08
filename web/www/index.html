@@ -848,6 +848,10 @@ const side = $("side"), toc = $("toc");
 let tocRows = [];      // [{ page, el }], in document order
 let tocPage = -1;      // the page the highlight is on, so it moves only on a turn
 let tocPick = null;    // the row the reader clicked, while they are still on its page
+/** Pages the contents has already started fetching, so pointing along a long
+ *  outline does not queue the same request twice. */
+const tocWarm = new Set();
+let tocWarmTimer = 0;
 let sideOpen = true;
 try {
     const saved = localStorage.getItem(SIDE_KEY);
@@ -869,12 +873,40 @@ function clearToc(note) {
     tocRows = [];
     tocPage = -1;
     tocPick = null;
+    tocWarm.clear();
+    clearTimeout(tocWarmTimer);
     if (note) {
         const div = document.createElement("div");
         div.className = "toc-note";
         div.textContent = note;
         toc.appendChild(div);
     }
+}
+
+/** Start fetching the page a heading points at, before it is clicked.
+ *
+ *  This is what the sender's page table is good for here: it says exactly what
+ *  a page reads, so one request can be in flight while the pointer is still on
+ *  the row, and the click arrives to find the range already in hand. Without a
+ *  table `prefetch` is a no-op — the ranges are only known by asking, which is
+ *  the render itself — so the contents behaves exactly as it did before, and
+ *  costs nothing. */
+function warmToc(page) {
+    clearTimeout(tocWarmTimer);
+    const doc = state.doc;
+    if (!doc || !doc.hasTable || !(page >= 0) || page >= state.pages) return;
+    if (tocWarm.has(page)) return;
+    tocWarm.add(page);
+    doc.prefetch(page).then((got) => {
+        if (got) console.log(`contents: page ${page + 1} already fetched (${fmt(got)})`);
+    }).catch(() => tocWarm.delete(page));
+}
+
+/** The same, after the pointer has rested on a row: dragging down a long
+ *  outline should not fetch every heading it passes. */
+function warmSoon(page) {
+    clearTimeout(tocWarmTimer);
+    tocWarmTimer = setTimeout(() => warmToc(page), 90);
 }
 
 /** Draw the outline: one row per heading, indented by its depth, the page on
@@ -903,6 +935,13 @@ function drawToc(entries) {
             row.appendChild(num);
             const entry = { page, el: row };
             row.onclick = () => { tocPick = entry; show(page); narrowClose(); };
+            // What the page table buys the contents: the heading under the
+            // pointer is fetched before it is clicked. A tap has no dwell, so
+            // a finger starts it on touch-down.
+            row.addEventListener("pointerenter", () => warmSoon(page));
+            row.addEventListener("pointerleave", () => clearTimeout(tocWarmTimer));
+            row.addEventListener("pointerdown", () => warmToc(page));
+            row.addEventListener("focus", () => warmToc(page));
             tocRows.push(entry);
         } else {
             row.disabled = true;
