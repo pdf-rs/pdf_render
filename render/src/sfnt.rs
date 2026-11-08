@@ -112,12 +112,22 @@ pub fn shifts_from_program(font: &[u8]) -> Option<HashMap<GlyphId, f32>> {
         if end <= start || end > glyf_len || start + 4 > glyf_len {
             continue;
         }
-        // monospaced tail: glyphs past numberOfHMetrics reuse the last entry
-        let m = gid.min(num_hmetrics.saturating_sub(1));
-        if m * 4 + 2 > hmtx_len {
-            break;
-        }
-        let lsb = bei16(font, hmtx + m * 4 + 2) as f32;
+        // Glyphs past `numberOfHMetrics` keep only their advance (from the last
+        // long metric) — their left side bearing still has its own entry, in an
+        // array of int16 right after the long metrics (OT §hmtx). Reading the
+        // last long metric's bearing for those glyphs is what put the middle
+        // piece of the closing brace in Equation 11 of `nasa.pdf` page 35 a
+        // side bearing too far left: gid 190 has lsb 420 in the trailing array,
+        // while `numberOfHMetrics` is 190 and the last long metric says 28.
+        let lsb = if gid < num_hmetrics {
+            bei16(font, hmtx + gid * 4 + 2) as f32
+        } else {
+            let rel = num_hmetrics * 4 + (gid - num_hmetrics) * 2;
+            if rel + 2 > hmtx_len {
+                break;
+            }
+            bei16(font, hmtx + rel) as f32
+        };
         let x_min = bei16(font, glyf + start + 2) as f32;
         let shift = lsb - x_min;
         if shift != 0.0 {
@@ -167,6 +177,11 @@ mod tests {
         glyf[10 + 2 .. 10 + 4].copy_from_slice(&x_min.to_be_bytes());
         tables.push(glyf);
 
+        assemble(&tags, tables)
+    }
+
+    /// Wrap `tables` in an sfnt header.
+    fn assemble(tags: &[&[u8; 4]], tables: Vec<Vec<u8>>) -> Vec<u8> {
         let n = tags.len();
         let mut out = Vec::new();
         out.extend_from_slice(&[0, 1, 0, 0]);
@@ -186,6 +201,37 @@ mod tests {
         out
     }
 
+    /// A three-glyph sfnt with one long metric: glyphs 1 and 2 carry only a
+    /// left side bearing, in the int16 array after the long metrics
+    /// (`numberOfHMetrics = 1`, OT §hmtx). Both outlines sit at `xMin = 0`.
+    fn program_trailing(lsb: [i16; 2]) -> Vec<u8> {
+        let tags: [&[u8; 4]; 6] = [b"head", b"maxp", b"hhea", b"hmtx", b"loca", b"glyf"];
+        let mut head = vec![0u8; 54];
+        head[50] = 0; // short loca
+        head[18] = 8; // unitsPerEm 2048
+        let mut maxp = vec![0u8; 6];
+        maxp[4] = 0;
+        maxp[5] = 3; // numGlyphs = 3
+        let mut hhea = vec![0u8; 36];
+        hhea[34] = 0;
+        hhea[35] = 1; // numberOfHMetrics = 1
+        let mut hmtx = Vec::new();
+        hmtx.extend_from_slice(&500i16.to_be_bytes()); // advance of glyph 0
+        hmtx.extend_from_slice(&0i16.to_be_bytes());
+        for l in lsb {
+            hmtx.extend_from_slice(&l.to_be_bytes());
+        }
+        // gid 1: 2-byte words 5..10, gid 2: 10..15 -> a 30-byte glyf table.
+        let mut loca = vec![0u8; 8];
+        loca[3] = 5;
+        loca[5] = 10;
+        loca[7] = 15;
+        let mut glyf = vec![0u8; 30];
+        glyf[12..14].copy_from_slice(&0i16.to_be_bytes());
+        glyf[22..24].copy_from_slice(&0i16.to_be_bytes());
+        assemble(&tags, vec![head, maxp, hhea, hmtx, loca, glyf])
+    }
+
     #[test]
     fn side_bearing_mismatch_is_reported() {
         let shifts = shifts_from_program(&program(0, 420)).unwrap();
@@ -196,6 +242,15 @@ mod tests {
     #[test]
     fn matching_side_bearing_is_not_reported() {
         assert!(shifts_from_program(&program(420, 420)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn trailing_side_bearings_are_read() {
+        // gid 1 and 2 have no long metric; their bearings are in the array
+        // after it, not in the last long metric.
+        let shifts = shifts_from_program(&program_trailing([420, 0])).unwrap();
+        assert_eq!(shifts.get(&GlyphId(1)), Some(&420.0));
+        assert_eq!(shifts.get(&GlyphId(2)), None);
     }
 
     #[test]
