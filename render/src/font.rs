@@ -19,6 +19,15 @@ use globalcache::{sync::SyncCache, ValueSize};
 use std::hash::{Hash, Hasher};
 
 pub struct FontRc<E: Encoder>(Arc<font::FontVariant<E>>);
+impl<E: Encoder> FontRc<E> {
+    /// Identity of the font, for caches that outlive one page: the address of
+    /// the shared variant. Two `FontRc`s of the same font are the same address,
+    /// and it stays valid as long as any of them is alive.
+    #[inline]
+    pub fn address(&self) -> usize {
+        Arc::as_ptr(&self.0) as usize
+    }
+}
 impl<E: Encoder> Clone for FontRc<E> {
     #[inline]
     fn clone(&self) -> Self {

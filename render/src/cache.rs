@@ -64,6 +64,32 @@ pub struct Cache<E: Encoder> {
     std: StandardCache<E>,
     missing_fonts: Vec<Name>,
     encoder: E,
+    /// Glyph outlines already turned into SVG path data, by the address of the
+    /// font entry and of the outline inside it. Both live as long as the font
+    /// is in the cache, which is longer than any one page. Rendering a page of
+    /// text offers the same glyph dozens of times and the old code built its
+    /// path string every single time: this is where a page turn's milliseconds
+    /// were going.
+    glyph_paths: std::collections::HashMap<(usize, usize), Arc<str>>,
+}
+
+/// Past this many glyphs the strings are worth more than the lookups. Two
+/// thousand distinct glyphs is a huge font set; a document that passes it
+/// starts again with an empty table.
+const GLYPH_PATHS_MAX: usize = 20_000;
+
+impl<E: Encoder> Cache<E> {
+    /// `d` for the glyph at `font`/`outline`, if it was built before.
+    pub fn glyph_path(&self, font: usize, outline: usize) -> Option<Arc<str>> {
+        self.glyph_paths.get(&(font, outline)).cloned()
+    }
+
+    pub fn put_glyph_path(&mut self, font: usize, outline: usize, d: Arc<str>) {
+        if self.glyph_paths.len() >= GLYPH_PATHS_MAX {
+            self.glyph_paths.clear();
+        }
+        self.glyph_paths.insert((font, outline), d);
+    }
 }
 impl<E: Encoder + 'static> Cache<E> where E::GlyphRef: Send + Sync {
     pub fn new(encoder: E) -> Cache<E> {
@@ -73,6 +99,7 @@ impl<E: Encoder + 'static> Cache<E> where E::GlyphRef: Send + Sync {
             std: StandardCache::new(),
             missing_fonts: Vec::new(),
             encoder,
+            glyph_paths: std::collections::HashMap::new(),
         }
     }
 
@@ -86,6 +113,7 @@ impl<E: Encoder + 'static> Cache<E> where E::GlyphRef: Send + Sync {
             std,
             missing_fonts: Vec::new(),
             encoder,
+            glyph_paths: std::collections::HashMap::new(),
         }
     }
 

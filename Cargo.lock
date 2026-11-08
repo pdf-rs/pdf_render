@@ -1249,8 +1249,8 @@ dependencies = [
 
 [[package]]
 name = "font"
-version = "0.1.0"
-source = "git+https://github.com/pdf-rs/font#545715eaa5214b15210bae9ac933cd43584d85d2"
+version = "0.1.1"
+source = "git+https://github.com/pdf-rs/font#11da16ab53cf48d83e6ff525176a29ae762ac9a3"
 dependencies = [
  "decorum",
  "indexmap 1.9.3",
@@ -1261,7 +1261,7 @@ dependencies = [
  "pathfinder_color",
  "pathfinder_content",
  "pathfinder_geometry",
- "pdf_encoding 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "pdf_encoding 0.4.0",
  "rand 0.7.3",
  "slotmap",
  "tuple 0.5.1",
@@ -1601,12 +1601,12 @@ name = "glyphmatcher"
 version = "0.1.0"
 source = "git+https://github.com/s3bk/glyphmatcher#1958392699b875695a22b332f1e495f886c9db37"
 dependencies = [
- "font 0.1.0 (git+https://github.com/pdf-rs/font)",
+ "font 0.1.1",
  "istring 0.3.4 (git+https://github.com/s3bk/istring)",
  "itertools 0.13.0",
  "pathfinder_content",
  "pathfinder_geometry",
- "pdf_encoding 0.3.0 (git+https://github.com/pdf-rs/encoding)",
+ "pdf_encoding 0.3.0",
  "postcard",
  "serde",
  "serde_json",
@@ -2872,15 +2872,6 @@ dependencies = [
 [[package]]
 name = "pdf_encoding"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed7468173909bb32dbc74ca454c82dfdfe994ad1133ddf78d6c31715c9b88c40"
-dependencies = [
- "lazy_static",
-]
-
-[[package]]
-name = "pdf_encoding"
-version = "0.3.0"
 source = "git+https://github.com/pdf-rs/encoding#2f4f225eaddda0d7543cda1a699f9eaf6c628b38"
 dependencies = [
  "lazy_static",
@@ -2905,7 +2896,7 @@ dependencies = [
  "custom_debug_derive",
  "env_logger 0.10.0",
  "flate2",
- "font 0.1.0 (git+https://github.com/pdf-rs/font?branch=vello)",
+ "font 0.1.0",
  "globalcache",
  "glyphmatcher",
  "image",
@@ -2937,7 +2928,7 @@ dependencies = [
  "console_log",
  "criterion",
  "env_logger 0.8.4",
- "font 0.1.0 (git+https://github.com/pdf-rs/font)",
+ "font 0.1.1",
  "getrandom 0.2.10",
  "image",
  "itertools 0.13.0",
@@ -2962,6 +2953,7 @@ dependencies = [
 name = "pdf_web"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "image",
  "log",
  "pdf",

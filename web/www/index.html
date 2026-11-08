@@ -465,13 +465,17 @@ async function show(i) {
     try {
         say(`page ${i + 1} of ${state.pages} …`);
         const before = doc.bytes, beforeRequests = doc.requests;
+        const t0 = performance.now();
         const svg = await doc.page(i);
+        const t1 = performance.now();
         state.page = i;
         // Inline, not as an <img>: inline keeps the page in the document, so
         // text selection and find-in-page can see it once a text layer exists.
         paper.innerHTML = svg;
+        const t2 = performance.now();
         measure();
         fit();
+        const t3 = performance.now();
         paper.classList.remove("enter");
         void paper.offsetWidth;         // restart the animation
         paper.classList.add("enter");
@@ -480,7 +484,21 @@ async function show(i) {
         $("pageno").value = String(i + 1);
         $("prev").disabled = i === 0;
         $("next").disabled = i === state.pages - 1;
-        say(`page ${i + 1}: ${fmt(doc.bytes - before)} in ${doc.requests - beforeRequests} request(s) · ${fmt(doc.bytes)} of ${fmt(state.length)} read`);
+        // Where the milliseconds went: the module's own time, the browser's
+        // parse/style/paint after it, and the frame that actually landed.
+        const t4 = performance.now();
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+            const t5 = performance.now();
+            document.body.dataset.timing = JSON.stringify({
+                page: i + 1,
+                fetchModule: Math.round(t1 - t0),
+                dom: Math.round(t2 - t1),
+                layout: Math.round(t3 - t2),
+                css: Math.round(t4 - t3),
+                paint: Math.round(t5 - t4),
+            });
+        }));
+        say(`page ${i + 1}: ${fmt(doc.bytes - before)} in ${doc.requests - beforeRequests} request(s) · ${fmt(doc.bytes)} of ${fmt(state.length)} read · ${Math.round(t4 - t0)} ms`);
         preloadNeighbours();
         // A sandboxed frame (opaque origin) refuses this; the page still works.
         // Every other parameter is kept — a link copied from the address bar

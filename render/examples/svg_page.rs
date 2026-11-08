@@ -39,8 +39,10 @@ fn main() {
     let page = file.get_page(page_nr - 1).expect("page index out of range");
 
     let mut backend = SvgBackend::new(&mut cache);
+    let start = std::time::Instant::now();
     render_page(&mut backend, &resolver, &page, Transform2F::default())
         .unwrap_or_else(|e| panic!("page {page_nr} failed: {e:?}"));
+    let render_ms = start.elapsed().as_secs_f64() * 1000.0;
     let spans = backend.text_span_count();
     let skipped = backend.inline_images_skipped();
     let (glyphs, paths) = backend.counts();
@@ -48,13 +50,14 @@ fn main() {
     println!("  glyphs {glyphs}, paths {paths}");
 
     println!(
-        "page {}: {}x{} pt, {} layer(s), {} text spans, {} inline image(s) skipped",
+        "page {}: {}x{} pt, {} layer(s), {} text spans, {} inline image(s) skipped, {:.1} ms",
         page_nr,
         page.width(),
         page.height(),
         page.layers.len(),
         spans,
-        skipped
+        skipped,
+        render_ms
     );
 
     let stem = out.strip_suffix(".svg").unwrap_or(out);

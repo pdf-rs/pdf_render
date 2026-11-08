@@ -142,11 +142,21 @@ pub struct SvgBackend<'a> {
     /// Paths actually written, for diagnostics.
     paths_emitted: usize,
     /// Every distinct glyph outline on the page, in glyph space, by symbol id.
-    symbols: Vec<String>,
+    symbols: Vec<Arc<str>>,
     /// `d` -> symbol id, so a repeated glyph costs one `<use>`.
-    symbol_ids: std::collections::HashMap<String, u32>,
+    symbol_ids: std::collections::HashMap<Arc<str>, u32>,
     /// Symbols the layer being built refers to.
     used_symbols: Vec<u32>,
+    /// Scratch for the path data of a glyph, so a page of text does not
+    /// allocate a string per glyph just to look it up.
+    glyph_buf: String,
+    /// Scratch for `matrix(…)`.
+    matrix_buf: String,
+    /// `fill`/`fill-opacity` attributes for the last paint used, and the paint
+    /// they were built from: a page of text repeats one paint thousands of
+    /// times, and `#rrggbb` formatting is not free either.
+    fill_attr: String,
+    fill_key: Option<[u32; 4]>,
 }
 
 impl<'a> SvgBackend<'a> {
@@ -167,6 +177,10 @@ impl<'a> SvgBackend<'a> {
             symbols: Vec::new(),
             symbol_ids: std::collections::HashMap::new(),
             used_symbols: Vec::new(),
+            glyph_buf: String::new(),
+            matrix_buf: String::new(),
+            fill_attr: String::new(),
+            fill_key: None,
         }
     }
 
@@ -311,21 +325,47 @@ impl<'a> SvgBackend<'a> {
             return;
         }
         self.paths_emitted += 1;
-        let (color, opacity) = fill_attrs(fill);
+        self.update_fill(fill);
         let opened = self.open_clips(clip);
-        let _ = write!(
-            self.body,
-            "<path d=\"{d}\" fill=\"{color}\" fill-opacity=\"{opacity}\" fill-rule=\"{}\"/>",
-            if fill_rule == FillRule::EvenOdd { "evenodd" } else { "nonzero" },
-        );
+        let rule = if fill_rule == FillRule::EvenOdd { "evenodd" } else { "nonzero" };
+        let _ = write!(self.body, "<path d=\"{d}\"{} fill-rule=\"{rule}\"/>", self.fill_attr);
         self.close_clips(opened);
+    }
+
+    /// Cache ` fill="…" fill-opacity="…"` for the paint in force. Text is one
+    /// colour for page after page, so this is nearly always a cache hit.
+    fn update_fill(&mut self, fill: &FillMode) {
+        let key = match fill.color {
+            crate::Fill::Solid(r, g, b) => [r.to_bits(), g.to_bits(), b.to_bits(), fill.alpha.to_bits()],
+            // Pattern fills are rasterised by some other path; flagged, not painted.
+            crate::Fill::Pattern(_) => [u32::MAX, 0, 0, fill.alpha.to_bits()],
+        };
+        if self.fill_key == Some(key) {
+            return;
+        }
+        self.fill_key = Some(key);
+        let (color, opacity) = fill_attrs(fill);
+        self.fill_attr.clear();
+        let _ = write!(self.fill_attr, " fill=\"{color}\" fill-opacity=\"{opacity}\"");
     }
 
     /// One occurrence of a glyph outline: register it in `<defs>` the first
     /// time, then a `<use>` that places and colours it.
-    fn emit_glyph(&mut self, outline: &Outline, transform: Transform2F, fill: &FillMode, clip: Option<usize>) {
-        let mut d = String::new();
-        path_data(outline, Transform2F::default(), &mut d);
+    ///
+    /// The glyph's path data is cached across pages by its address in the font
+    /// cache (`font`); a page of text offers the same glyph dozens of times.
+    fn emit_glyph(&mut self, font: usize, outline: &Outline, transform: Transform2F, fill: &FillMode, clip: Option<usize>) {
+        let key = outline as *const Outline as usize;
+        let d: Arc<str> = match self.cache.glyph_path(font, key) {
+            Some(d) => d,
+            None => {
+                self.glyph_buf.clear();
+                path_data(outline, Transform2F::default(), &mut self.glyph_buf);
+                let d: Arc<str> = Arc::from(self.glyph_buf.as_str());
+                self.cache.put_glyph_path(font, key, d.clone());
+                d
+            }
+        };
         if d.is_empty() {
             return;
         }
@@ -334,22 +374,23 @@ impl<'a> SvgBackend<'a> {
             None => {
                 let id = self.symbols.len() as u32;
                 self.symbols.push(d.clone());
-                self.symbol_ids.insert(d, id);
+                self.symbol_ids.insert(d.clone(), id);
                 id
             }
         };
         if !self.used_symbols.contains(&id) {
             self.used_symbols.push(id);
         }
-        let (color, opacity) = fill_attrs(fill);
+        self.update_fill(fill);
+        self.matrix_buf.clear();
+        matrix_data(transform, &mut self.matrix_buf);
         let opened = self.open_clips(clip);
-        let mut m = String::new();
-        matrix_data(transform, &mut m);
         // `fill` inherits into the referenced <path>, which sets no paint of
         // its own.
         let _ = write!(
             self.body,
-            "<use href=\"#g{id}\" transform=\"matrix({m})\" fill=\"{color}\" fill-opacity=\"{opacity}\"/>",
+            "<use href=\"#g{id}\" transform=\"matrix({})\"{} />",
+            self.matrix_buf, self.fill_attr,
         );
         self.close_clips(opened);
         self.paths_emitted += 1;
@@ -450,14 +491,15 @@ impl<'a> crate::Backend for SvgBackend<'a> {
             return self.draw_glyph_paths(font, glyph, mode, transform, clip);
         }
         let Some(fill) = mode.fill() else { return };
+        let font_key = font.address();
         match glyph.shape {
             Shape::Empty => {}
-            Shape::Simple(ref outline) => self.emit_glyph(outline, transform, fill, clip),
+            Shape::Simple(ref outline) => self.emit_glyph(font_key, outline, transform, fill, clip),
             Shape::Compound(ref parts) => {
                 use font::Font;
                 for &(id, tr) in parts.iter() {
                     if let Some(Glyph { shape: Shape::Simple(ref outline), .. }) = font.glyph(id) {
-                        self.emit_glyph(outline, transform * tr, fill, clip);
+                        self.emit_glyph(font_key, outline, transform * tr, fill, clip);
                     }
                 }
             }
@@ -567,27 +609,77 @@ fn path_data(outline: &Outline, t: Transform2F, out: &mut String) {
 
 /// Append `v` with at most three decimals and no trailing zeros.
 ///
-/// Cheaper and more predictable than `format!`: one `write!` into the target
-/// string, then a trim. Three decimals is ~0.35 µm on a 1000 mm page.
+/// `format!("{v:.3}")` is what this used to do, and it was most of the time a
+/// page took to render: Rust's float formatting is an exact-decimal algorithm
+/// with a big-integer fallback, and a text-heavy page formats a few hundred
+/// thousand coordinates. Three decimals of a page coordinate fit an integer
+/// easily, so this rounds to thousandths and writes digits directly — same
+/// output, a small fraction of the work.
 fn fmt_f(v: f32, out: &mut String) {
     if !v.is_finite() {
         out.push('0');
         return;
     }
+    // f32 -> f64 is exact, and the product then rounds to a thousandth of a
+    // unit correctly. Past 2^53 thousandths (9e12 units, far beyond any page
+    // box) the rounding is no longer exact; those values are rounded to whole
+    // units instead of being worth a special case.
+    let scaled = (v as f64 * 1000.0).round();
+    if scaled.abs() >= 9_007_199_254_740_992.0 {
+        write_whole(v as f64, out);
+        return;
+    }
+    let n = scaled as i64;
+    if n == 0 {
+        out.push('0');
+        return;
+    }
+    let (neg, n) = if n < 0 { (true, -n) } else { (false, n) };
+    if neg {
+        out.push('-');
+    }
+    write_u64((n / 1000) as u64, out);
+    let frac = (n % 1000) as u32;
+    if frac == 0 {
+        return;
+    }
+    out.push('.');
     let start = out.len();
-    let _ = write!(out, "{v:.3}");
+    out.push((b'0' + (frac / 100) as u8) as char);
+    out.push((b'0' + (frac / 10 % 10) as u8) as char);
+    out.push((b'0' + (frac % 10) as u8) as char);
     let mut end = out.len();
     while end > start && out.as_bytes()[end - 1] == b'0' {
         end -= 1;
     }
-    if end > start && out.as_bytes()[end - 1] == b'.' {
-        end -= 1;
+    out.truncate(end);
+}
+
+/// Decimal digits of a non-negative integer, most significant first.
+fn write_u64(mut n: u64, out: &mut String) {
+    let mut buf = [0u8; 20];
+    let mut i = buf.len();
+    loop {
+        i -= 1;
+        buf[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+        if n == 0 {
+            break;
+        }
     }
-    if end > start && out.as_bytes()[end - 1] == b'-' {
-        end -= 1; // "-" alone would be invalid; leave "0"
-        out.truncate(end);
-        out.push('0');
+    out.push_str(std::str::from_utf8(&buf[i..]).unwrap_or("0"));
+}
+
+/// The rare oversized value: whole units, still no float formatting.
+fn write_whole(v: f64, out: &mut String) {
+    if v.abs() >= 1.8e19 {
+        out.push('0'); // beyond u64: nothing sane to say, and no page is there
         return;
     }
-    out.truncate(end);
+    let n = v.round();
+    let (neg, n) = if n < 0.0 { (true, (-n) as u64) } else { (false, n as u64) };
+    if neg {
+        out.push('-');
+    }
+    write_u64(n, out);
 }
