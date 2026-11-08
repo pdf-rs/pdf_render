@@ -70,12 +70,11 @@ fn main() {
                 let name = format!("{stem}.{i}.rgba");
                 std::fs::write(&name, &im.rgba[..]).expect("cannot write rgba");
                 images.push_str(&format!(
-                    "layer {i}: {}x{} rgba -> {name} matrix {:?} clip {} blend {:?}\n",
+                    "layer {i}: {}x{} rgba -> {name} matrix {:?} clip {}\n",
                     im.width,
                     im.height,
                     im.matrix,
                     im.clip.is_some(),
-                    im.blend
                 ));
                 println!("  layer {i}: image {}x{} -> {name}", im.width, im.height);
             }

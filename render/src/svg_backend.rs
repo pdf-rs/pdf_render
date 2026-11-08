@@ -89,7 +89,6 @@ pub struct ImageLayer {
     /// Clip in force, as path data in page coordinates, `None` for unclipped.
     /// Numbers only; the host applies it with `Path2D` if it wants it.
     pub clip: Option<String>,
-    pub blend: BlendMode,
 }
 
 /// The result of rendering one page.
@@ -261,11 +260,10 @@ impl<'a> SvgBackend<'a> {
             }
             svg.push_str("</defs>");
         }
-        // PDF space has y pointing up, SVG's y points down: flip the content
-        // inside the viewBox instead of flipping every coordinate.
-        svg.push_str("<g transform=\"matrix(1 0 0 -1 0 ");
-        fmt_f(y + y + h, &mut svg);
-        svg.push_str(")\">");
+        // The backend's coordinates are already y-down: the font matrix flips
+        // glyphs, and the CTM does the same for paths, so the content goes in
+        // as it is. A flip here would rotate every page by 180°.
+        svg.push_str("<g>");
         svg.push_str(&self.body);
         svg.push_str("</g></svg>");        self.layers.push(Layer::Vector(svg));
         self.body.clear();
@@ -309,9 +307,8 @@ impl<'a> SvgBackend<'a> {
         let opened = self.open_clips(clip);
         let _ = write!(
             self.body,
-            "<path d=\"{d}\" fill=\"{color}\" fill-opacity=\"{opacity}\" fill-rule=\"{}\"{}/>",
+            "<path d=\"{d}\" fill=\"{color}\" fill-opacity=\"{opacity}\" fill-rule=\"{}\"/>",
             if fill_rule == FillRule::EvenOdd { "evenodd" } else { "nonzero" },
-            blend_attr(fill.mode)
         );
         self.close_clips(opened);
     }
@@ -344,8 +341,7 @@ impl<'a> SvgBackend<'a> {
         // its own.
         let _ = write!(
             self.body,
-            "<use href=\"#g{id}\" transform=\"matrix({m})\" fill=\"{color}\" fill-opacity=\"{opacity}\"{}/>",
-            blend_attr(fill.mode)
+            "<use href=\"#g{id}\" transform=\"matrix({m})\" fill=\"{color}\" fill-opacity=\"{opacity}\"/>",
         );
         self.close_clips(opened);
         self.paths_emitted += 1;
@@ -421,7 +417,6 @@ impl<'a> crate::Backend for SvgBackend<'a> {
             height,
             matrix: image_matrix(transform),
             clip,
-            blend: mode,
         }));
     }
 
@@ -514,11 +509,9 @@ fn matrix_data(t: Transform2F, out: &mut String) {
     }
 }
 
-fn blend_attr(mode: BlendMode) -> &'static str {    match mode {
-        BlendMode::Darken => " style=\"mix-blend-mode:multiply\"",
-        BlendMode::Overlay => " style=\"mix-blend-mode:overlay\"",
-    }
-}
+// `BlendMode` is misnamed: it carries the *overprint* flag, not a blend mode
+// (`Overlay` = overprint off). It must not become `mix-blend-mode` — that made
+// every normal fill `overlay`, painting black text invisible on white.
 
 /// SVG path data for `outline`, with `t` applied.
 fn path_data(outline: &Outline, t: Transform2F, out: &mut String) {

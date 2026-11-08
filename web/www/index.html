@@ -48,7 +48,7 @@ const WASM = new URL('./pdf_web.wasm', location.href).href;
 const FONTS = new URL('./standard_fonts.br', location.href).href;
 
 const $ = (id) => document.getElementById(id);
-const state = { doc: null, page: 0, pages: 0, url: "" };
+const state = { doc: null, page: 0, pages: 0, url: "", length: 0 };
 
 function say(text) { $("readout").textContent = text; }
 function fail(e) { $("error").textContent = String(e && e.stack || e); console.error(e); }
@@ -75,6 +75,7 @@ async function open(url) {
     try {
         say("opening …");
         const length = await fileLength(url);
+        state.length = length;
         const doc = new Doc(url, length);
         const fontBytes = await doc.fonts(FONTS);
         state.pages = await doc.open();
@@ -103,8 +104,11 @@ async function show(i) {
         // Inline, not as an <img>: inline keeps the page in the document, so
         // text selection and find-in-page can see it once a text layer exists.
         $("page").innerHTML = svg;
-        say(`page ${i + 1}: ${fmt(doc.bytes - before)} in ${doc.requests - beforeRequests} request(s); ${fmt(doc.bytes)} of ${state.length} read`);
-        history.replaceState(null, "", `?pdf=${encodeURIComponent(state.url)}&page=${i + 1}`);
+        say(`page ${i + 1}: ${fmt(doc.bytes - before)} in ${doc.requests - beforeRequests} request(s); ${fmt(doc.bytes)} of ${fmt(state.length)} read`);
+        // A sandboxed frame (opaque origin) refuses this; the page still works.
+        try {
+            history.replaceState(null, "", `?pdf=${encodeURIComponent(state.url)}&page=${i + 1}`);
+        } catch {}
     } catch (e) { fail(e); }
 }
 
@@ -138,6 +142,7 @@ async function openLocal(file) {
         $("error").textContent = "";
         if (state.doc) state.doc.free();
         const doc = new Doc("", bytes.length);
+        state.length = bytes.length;
         await doc.fonts(FONTS);
         // No server: every byte is here already.
         const mod = await load(WASM);
