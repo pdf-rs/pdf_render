@@ -61,9 +61,23 @@ function supply(doc, start, bytes) {
 export function parseTable(text) {
     const lines = text.split("\n");
     if (lines[0].trim() !== "pdfranges 1") throw new Error("not a pdfranges table");
-    const table = new Map();
+    const pages = new Map();
+    const toc = [];
+    let inToc = false;
     for (const line of lines.slice(2)) {
-        const field = line.trim().split(/\s+/).filter(Boolean).map(Number);
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        // The sender's table may end with the document's contents, whose page
+        // numbers it resolved while it had the whole file open. Read it here
+        // and no page tree has to be walked to number the sidebar.
+        if (!inToc && trimmed.startsWith("toc")) { inToc = true; continue; }
+        if (inToc) {
+            const m = /^(\d+)\s+(\d+|-)\s*(.*)$/.exec(trimmed);
+            if (!m) continue;
+            toc.push([Number(m[1]), m[2] === "-" ? null : Number(m[2]) - 1, m[3]]);
+            continue;
+        }
+        const field = trimmed.split(/\s+/).filter(Boolean).map(Number);
         if (field.length < 2 || !Number.isSafeInteger(field[0])) continue;
         const [page, count] = field;
         const ranges = [];
@@ -72,9 +86,9 @@ export function parseTable(text) {
             if (!Number.isSafeInteger(start) || !Number.isSafeInteger(len)) break;
             ranges.push([start, len]);
         }
-        if (ranges.length) table.set(page, ranges);
+        if (ranges.length) pages.set(page, ranges);
     }
-    return table;
+    return { pages, toc };
 }
 
 /** A plain file, read by range over HTTP. */
@@ -105,6 +119,8 @@ export class Doc {
     #source = null;
     /** The sender's table, if any: page index -> ranges. */
     #table = null;
+    /** The contents that came with that table: `[depth, page, title]` rows. */
+    #toc = [];
     /** What we hold, sorted and disjoint: `[start, end)` pairs. */
     #have = [];
     /** What the page has read, for the readout. */
@@ -125,8 +141,18 @@ export class Doc {
 
     /** Hand the page tables in: one round trip per page, no discovery loop. */
     setTable(table) {
-        this.#table = table;
-        return table.size;
+        this.#table = table.pages;
+        this.#toc = table.toc || [];
+        return table.pages.size;
+    }
+
+    /** The contents the sender numbered, if it shipped them with its table:
+     *  `[[depth, page, title], …]`, the same shape the module returns. Having
+     *  them means neither the outline nor the page tree gets walked on the
+     *  client at all — the sidebar is drawn from the file that was already
+     *  fetched to make page turns cheap. */
+    get tableToc() {
+        return this.#toc;
     }
 
     /** Hand in the standard fonts: one bundle, every one of them, up front —
@@ -195,6 +221,8 @@ export class Doc {
      *  empty list is an answer, not a failure: most documents have none. */
     async outline() {
         if (!this.#doc) return [];
+        // Shipped with the table: already resolved, and free.
+        if (this.#toc.length) return this.#toc;
         await this.#settle(OUTLINE_ALL);
         const ptr = mod.pdf_outline(this.#doc, outLen);
         const len = u32(outLen)[0];

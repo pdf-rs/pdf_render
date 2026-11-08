@@ -219,10 +219,31 @@ walks it over raw primitives: a row is a title and a place to go, and a row
 whose action this crate cannot model is still a row (it just has nowhere to go),
 where parsing it as an `OutlineItem` would lose the heading and its children.
 
-The output is JSON — `[[depth, page, "title"], …]`, page 0-based — and it costs
-one pass: the page tree, the destinations, the outline dictionaries. That is a
-fraction of a page, and it is fetched *after* the first page is on screen, so
-opening a document is never slower for having a sidebar.
+**When the sender shipped a range table, it ships the contents too** — the same
+`page_table` that records what each page reads has the whole file open and is
+already walking the page tree, so resolving the outline against that walk costs
+one walk more and saves the client all of it. The rows go into the table file:
+
+```text
+toc 7
+0 5 1 Introduction
+1 5 1.1 IPR Policy
+1 6 1.4 Normative References
+```
+
+`<depth> <1-based page or -> <title>`. They are read where the table is read, so
+the sidebar is complete from bytes that were already fetched, before the first
+page is painted — no outline pass, no page-tree traversal, one file. A reader
+that does not know the section skips it, which is why the format tag did not
+change: `toc` is not a page line and neither are the rows under it. A document
+with no outline adds nothing, and the client then reads the outline the slow
+way (`OUTLINE_ALL`, below).
+
+The module's own output is JSON — `[[depth, page, "title"], …]`, page 0-based —
+and it costs one pass: the page tree, the destinations, the outline
+dictionaries. That is a fraction of a page, and it is fetched *after* the first
+page is on screen, so opening a document is never slower for having a sidebar.
+It is only needed when the sender shipped no table, or a table without rows.
 
 Three things are deliberate:
 

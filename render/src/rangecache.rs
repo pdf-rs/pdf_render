@@ -348,8 +348,28 @@ impl PdfBackend for Recorder<'_> {
 /// Page 0 is the document itself — what has to be read to know how many pages
 /// there are — so a client can start with one request instead of four.
 /// Numbers are decimal and ranges are disjoint, ascending and already merged.
-pub fn format_table(page_count: u32, pages: &[(u32, Vec<Range<usize>>)]) -> String {
-    let mut out = String::with_capacity(64 * pages.len().max(1));
+///
+/// After the page lines may come the document's table of contents:
+///
+/// ```text
+/// toc 2
+/// 0 - Foreword
+/// 1 5 Editing PDFs
+/// ```
+///
+/// `<depth> <1-based page or -> <title>`. Whoever builds the table has the whole
+/// file open and already walks the page tree, so resolving the outline against
+/// that walk costs almost nothing here — and the client then needs no page-tree
+/// walk of its own to number the headings in its sidebar. A reader that does
+/// not know the section skips it: `toc` does not parse as a page line, and the
+/// lines under it need a title field to be one. That is why this did not need a
+/// new format tag.
+pub fn format_table(
+    page_count: u32,
+    pages: &[(u32, Vec<Range<usize>>)],
+    toc: &[TocEntry],
+) -> String {
+    let mut out = String::with_capacity(64 * (pages.len() + toc.len()).max(1));
     out.push_str("pdfranges 1\n");
     let _ = writeln!(out, "{page_count}");
     for (page, ranges) in pages {
@@ -359,7 +379,38 @@ pub fn format_table(page_count: u32, pages: &[(u32, Vec<Range<usize>>)]) -> Stri
         }
         out.push('\n');
     }
+    if !toc.is_empty() {
+        let _ = writeln!(out, "toc {}", toc.len());
+        for entry in toc {
+            match entry.page {
+                Some(page) => {
+                    let _ = write!(out, "{} {} ", entry.depth, page + 1);
+                }
+                None => {
+                    let _ = write!(out, "{} - ", entry.depth);
+                }
+            }
+            // A title is the rest of the line, so it can hold spaces; a break
+            // in it would end the row early.
+            for c in entry.title.chars() {
+                out.push(if c.is_control() { ' ' } else { c });
+            }
+            out.push('\n');
+        }
+    }
     out
+}
+
+/// One row of a document's table of contents, as a table file carries it.
+///
+/// `page` is 0-based, the numbering the viewer's `?page=` uses; `None` is a
+/// heading that points out of the document (another file, a script). Such a row
+/// is kept: dropping it would silently empty a chapter.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TocEntry {
+    pub depth: u8,
+    pub page: Option<u32>,
+    pub title: String,
 }
 
 /// A borrowed backend.
@@ -503,8 +554,21 @@ mod tests {
 
     #[test]
     fn a_table_is_written_and_read_the_same_way() {
-        let table = format_table(3, &[(1, vec![0..10, 20..40]), (3, vec![4096..8192])]);
+        let table = format_table(3, &[(1, vec![0..10, 20..40]), (3, vec![4096..8192])], &[]);
         assert_eq!(table, "pdfranges 1\n3\n1 2 0 10 20 20\n3 1 4096 4096\n");
+    }
+
+    #[test]
+    fn the_contents_rides_along_with_the_table() {
+        let toc = vec![
+            TocEntry { depth: 0, page: None, title: "Foreword".into() },
+            TocEntry { depth: 1, page: Some(4), title: "Edit\ning PDFs".into() },
+        ];
+        let table = format_table(9, &[(1, vec![0..10])], &toc);
+        assert_eq!(
+            table,
+            "pdfranges 1\n9\n1 1 0 10\ntoc 2\n0 - Foreword\n1 5 Edit ing PDFs\n"
+        );
     }
 
     #[test]

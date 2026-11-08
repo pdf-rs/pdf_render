@@ -136,7 +136,20 @@ fn main() {
         pages.push((i + 1, ranges));
     }
 
-    let table = format_table(page_count, &pages);
+    // The document's own contents, from the same file. The sender has every
+    // byte and has already walked the page tree for the ranges above; numbering
+    // the headings is that walk, once more — and it saves the client a walk of
+    // its own, which is the page-tree traversal that costs a cold reader the
+    // most. A document without an outline adds one header line.
+    let toc = match File::load_data(&data[..], b"", ParseOptions::strict(), NoCache, NoCache, NoLog) {
+        Ok(file) => pdf_web::outline::entries(&file.resolver(), file.get_root()),
+        Err(e) => {
+            eprintln!("{path}: no contents: {e}");
+            Vec::new()
+        }
+    };
+
+    let table = format_table(page_count, &pages, &toc);
     if let Err(e) = std::fs::write(&out, &table) {
         eprintln!("{out}: {e}");
         std::process::exit(1);
@@ -157,7 +170,8 @@ fn main() {
     let ranges: usize = pages.iter().map(|(_, r)| r.len()).sum();
 
     println!(
-        "{path}: {page_count} page(s), {} in the table, {ranges} range(s), {cold} byte(s) for a cold pass over every page, {:.1}s{}",
+        "{path}: {page_count} page(s), {} heading(s), {} in the table, {ranges} range(s), {cold} byte(s) for a cold pass over every page, {:.1}s{}",
+        toc.len(),
         table.len(),
         started.elapsed().as_secs_f32(),
         if failed > 0 { format!(", {failed} page(s) failed") } else { String::new() },

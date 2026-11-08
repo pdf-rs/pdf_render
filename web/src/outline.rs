@@ -28,6 +28,7 @@ use std::fmt::Write as _;
 
 use pdf_render::pdf::object::{Catalog, Dest, PagesNode, PageTree, PlainRef, Resolve};
 use pdf_render::pdf::primitive::{PdfString, Primitive};
+use pdf_render::rangecache::TocEntry;
 
 /// Entries beyond this are not a table of contents. The smallest real ones
 /// (a 200-page report) are a few hundred rows.
@@ -68,19 +69,13 @@ fn page_refs(r: &impl Resolve, tree: &PageTree, out: &mut Vec<Option<PlainRef>>,
     }
 }
 
-struct Item {
-    depth: usize,
-    /// 0-based page, or `None` when the row points at something else.
-    page: Option<usize>,
-    title: String,
-}
-
-/// Build the outline of `catalog` as JSON.
+/// Build the outline of `catalog` as rows: a heading's depth, the page it
+/// points at, and its title.
 ///
 /// Page numbers are the viewer's: the leaves of `/Pages`, counted in order,
 /// which is what `File::get_page` numbers. A page that will not parse is left
 /// out of the map and simply cannot be a target.
-pub fn build(r: &impl Resolve, catalog: &Catalog) -> String {
+pub fn entries(r: &impl Resolve, catalog: &Catalog) -> Vec<TocEntry> {
     // One walk of the page tree, not one `get_page` per page: the page index
     // is the position of a leaf ref, and a tree walk visits every node once
     // where `get_page(n)` for every n walks it from the root each time.
@@ -116,9 +111,14 @@ pub fn build(r: &impl Resolve, catalog: &Catalog) -> String {
         }
     }
 
-    let mut out = String::with_capacity(2 + walk.items.len() * 56);
+    walk.items
+}
+
+/// `entries` as JSON: `[[depth, page or null, "title"], …]`, `page` 0-based.
+pub fn json(items: &[TocEntry]) -> String {
+    let mut out = String::with_capacity(2 + items.len() * 56);
     out.push('[');
-    for (i, item) in walk.items.iter().enumerate() {
+    for (i, item) in items.iter().enumerate() {
         if i > 0 {
             out.push(',');
         }
@@ -165,7 +165,7 @@ struct Walk<'a, R> {
     r: &'a R,
     pages: &'a HashMap<PlainRef, usize>,
     named: &'a HashMap<String, usize>,
-    items: Vec<Item>,
+    items: Vec<TocEntry>,
     /// Dictionaries already entered: `/Next` and `/First` may form a cycle,
     /// and a chain that does would otherwise never end.
     seen: HashSet<PlainRef>,
@@ -196,7 +196,11 @@ impl<R: Resolve> Walk<'_, R> {
                     dict.get("A")
                         .and_then(|a| action_page(self.r, self.pages, self.named, a))
                 });
-            self.items.push(Item { depth, page, title });
+            self.items.push(TocEntry {
+                depth: depth.min(u8::MAX as usize) as u8,
+                page: page.map(|p| p as u32),
+                title,
+            });
 
             if let Some(Primitive::Reference(first)) = dict.get("First") {
                 self.level(*first, depth + 1);

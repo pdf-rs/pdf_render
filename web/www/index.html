@@ -435,7 +435,7 @@ async function loadTable(url) {
         const response = await fetch(`${url}.tbl`);
         if (!response.ok) return null;
         const table = parseTable(await response.text());
-        console.log(`table: ${table.size} page(s)`);
+        console.log(`table: ${table.pages.size} page(s), ${table.toc.length} heading(s)`);
         return table;
     } catch (e) {
         console.log(`no range table: ${e.message || e}`);
@@ -493,6 +493,9 @@ async function open(url, startAt = 1) {
         state.page = 0;
         $("pagecount").textContent = String(state.pages);
         $("pageno").max = String(state.pages);
+        // The contents, when the table carried them: drawn here, from bytes
+        // already fetched, so the sidebar is full before page one is painted.
+        if (table && table.toc.length) drawToc(table.toc);
         $("welcome").hidden = true;
         document.body.classList.add("ready");
         // A zoom needs a page size and only a rendered page has one: lay the
@@ -501,7 +504,7 @@ async function open(url, startAt = 1) {
         $("openform").hidden = true;
         $("openbtn").hidden = false;
         say(`${state.pages} page(s), ${fmt(length)}`);
-        console.log(`fonts: ${fmt(fontBytes)}; table: ${table ? `${table.size} page(s)` : "none"}; open: ${doc.requests} request(s), ${fmt(doc.bytes)}`);
+        console.log(`fonts: ${fmt(fontBytes)}; table: ${table ? `${table.pages.size} page(s), ${table.toc.length} heading(s)` : "none"}; open: ${doc.requests} request(s), ${fmt(doc.bytes)}`);
         // Straight to the page asked for: the point of the range table is that
         // landing on page 20 costs page 20, not pages 1–20.
         await show(Math.min(Math.max(1, startAt), state.pages) - 1);
@@ -983,6 +986,9 @@ function markToc(force = false) {
 function refreshToc() {
     const doc = state.doc;
     if (!doc) { clearToc("no document"); return Promise.resolve(); }
+    // Already drawn from the sender's table: there is nothing left to read,
+    // and redrawing would drop the row the reader is on.
+    if (tocRows.length && doc.tableToc.length) return Promise.resolve();
     clearToc("reading the contents …");
     const mine = gen;
     const run = renderTurn.then(async () => {

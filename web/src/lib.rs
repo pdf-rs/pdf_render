@@ -33,7 +33,7 @@ use pdf_render::svg_backend::{OutlineBuilder, SvgBackend};
 use pdf_render::{render_page, Cache, MemDir, StandardCache, Transform2F};
 
 mod abi;
-mod outline;
+pub mod outline;
 mod svg;
 
 #[cfg(test)]
@@ -277,7 +277,7 @@ impl Doc {
                 return Ok(Passed::Opened(file.num_pages()));
             }
             if page == OUTLINE_ONLY {
-                let json = outline::build(&file.resolver(), file.get_root());
+                let json = outline::json(&outline::entries(&file.resolver(), file.get_root()));
                 return Ok(Passed::Outline(json));
             }
             let page_obj = file.get_page(page).map_err(|e| e.to_string())?;
