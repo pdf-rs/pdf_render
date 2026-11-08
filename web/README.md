@@ -286,11 +286,42 @@ Two things those numbers say, and one thing they hide:
      published the file (`render/examples/net_sim.rs` measures both), which
      makes a page one round trip.
 
+## Figures
+
+A raster layer reaches the page as a PNG data URL: the backend hands out
+`width * height * 4` bytes of straight RGBA, `svg::combine` encodes them and
+places them with the matrix the image's CTM gives. Three things have to be
+right, and all three were wrong at once (nasa.pdf page 58, figures 3-10 and
+3-11, invisible since the backend grew an image layer):
+
+* **The length.** `ImageResult::rgba_data` read a `Blob<u8>` as if it were a
+  slice of `ColorU` and handed out four times too many bytes. The layer kept
+  its size and position, `encode_png` refused the buffer, and `combine` dropped
+  the layer without a word. Any page with a photograph lost it.
+* **The placement.** The image matrix composed the CTM's fields by hand and got
+  the column order wrong, so one column came out zero: the picture collapsed to
+  a line. It is now derived from three transformed points.
+* **The flip.** `combine` wrapped image layers in `matrix(1 0 0 -1 0 h)` "so
+  both speak page coordinates", but the vector layers never flip and the
+  backend's space is already y down. Every figure was mirrored about the middle
+  of its page, which is exactly the kind of wrong that looks plausible until
+  someone compares it with the caption.
+
+The limits are the fourth trap: `ParseOptions::strict` caps a decoded stream at
+1 MiB and an image at 1024 px a side, which is a parser's defence against a
+hostile document and not a viewer's. A 906×530 JPEG is 1.4 MB of pixels, so it
+fails silently. `web/src/lib.rs` opens with `viewer_options()`: 64 MiB of
+pixels, 8192 px a side. `cargo run --example images -- <file.pdf> <page>` (see
+`web/examples/images.rs`) prints, for the viewer's own dependency set, whether
+each image of a page decodes and whether its PNG encodes.
+
 ## Known gaps
 
 * **The cover page renders empty.** `WG73-WriterGuide.pdf` page 1 draws
   nothing, and it does so from the whole file too — not a range problem. The
-  2.86 MB it fetches is an image the SVG backend then drops.
+  2.86 MB it fetches is an image that still fails to decode or encode; the
+  page's SVG then carries an `<!-- … could not be decoded … -->` note, and
+  `examples/images.rs` says why.
 * Inline images are counted, not drawn (`SvgBackend::draw_inline_image`).
 * A raster layer is embedded as a PNG data URL, a third larger than the
   pixels. For a scanned page that is worth replacing with a second entry

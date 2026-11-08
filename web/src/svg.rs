@@ -22,10 +22,6 @@ use pdf_render::svg_backend::{ImageLayer, Layer, SvgPage};
 /// own.
 pub fn combine(page: SvgPage, scope: &str) -> String {
     let [x, y, w, h] = page.view_box;
-    // PDF space has y up, SVG's y down. Every vector layer flips its own
-    // content inside a group; an image layer is put in the same group so both
-    // speak page coordinates.
-    let flip = y + y + h;
 
     let mut out = String::with_capacity(4096);
     // `view_box` is in millimetres (the render space), so the intrinsic size is
@@ -56,7 +52,7 @@ pub fn combine(page: SvgPage, scope: &str) -> String {
                 // out rather than spliced in broken.
                 None => continue,
             },
-            Layer::Image(image) => match image_element(image, &prefix, flip) {
+            Layer::Image(image) => match image_element(image, &prefix) {
                 Some(element) => out.push_str(&element),
                 None => continue,
             },
@@ -74,8 +70,15 @@ fn body_of(svg: &str) -> Option<&str> {
 }
 
 /// A raster layer as an `<image>`: PNG bytes as a data URL, placed by the
-/// matrix the backend computed, inside the page's y flip.
-fn image_element(layer: &ImageLayer, prefix: &str, flip: f32) -> Option<String> {
+/// matrix the backend computed.
+///
+/// The matrix is in the page's own coordinates — the space the vector layers
+/// are written in — so it goes in as it is. It used to be wrapped in a
+/// `matrix(1 0 0 -1 0 h)` group "so both speak page coordinates", which was
+/// wrong twice over: the vector layers do not flip, and the result put every
+/// figure on the page mirrored about its middle. Nothing showed, because the
+/// images were dropped a step earlier for a wrong pixel length.
+fn image_element(layer: &ImageLayer, prefix: &str) -> Option<String> {
     let png = encode_png(&layer.rgba, layer.width, layer.height)?;
     let data = base64(&png);
 
@@ -88,9 +91,6 @@ fn image_element(layer: &ImageLayer, prefix: &str, flip: f32) -> Option<String> 
         out.push_str(clip);
         out.push_str("\"/></clipPath></defs>");
     }
-    out.push_str("<g transform=\"matrix(1 0 0 -1 0 ");
-    num(flip, &mut out);
-    out.push_str(")\">");
     if layer.clip.is_some() {
         out.push_str("<g clip-path=\"url(#");
         out.push_str(&clip_id);
@@ -111,7 +111,6 @@ fn image_element(layer: &ImageLayer, prefix: &str, flip: f32) -> Option<String> 
     if layer.clip.is_some() {
         out.push_str("</g>");
     }
-    out.push_str("</g>");
     Some(out)
 }
 

@@ -46,6 +46,25 @@ pub const OPEN_ONLY: u32 = u32::MAX;
 /// of the object that caused it and its neighbours.
 const FETCH_SLACK: usize = 16 * 1024;
 
+/// The parse limits a viewer uses. `ParseOptions::strict` is a parser facing
+/// hostile input, and two of its bounds are sized for that, not for a page:
+/// `object_size_limit` counts *decoded* bytes, so a 906×530 JPEG (1.4 MB of
+/// pixels) is over the 1 MiB line, and `max_img_dim` 1024 refuses anything
+/// wider than a thumbnail. Both failures are silent — a picture that cannot be
+/// decoded is a picture the backend skips — so a page keeps its text and loses
+/// its figures (nasa.pdf page 58: figures 3-10 and 3-11, the first over both
+/// limits, the second over the width).
+///
+/// The bounds stay: a viewer must still not let a document decode unbounded
+/// data. 64 MiB of pixels and 8192 px on a side is a poster, not a bomb.
+pub fn viewer_options() -> ParseOptions {
+    ParseOptions {
+        object_size_limit: 64 * 1024 * 1024,
+        max_img_dim: 8192,
+        ..ParseOptions::strict()
+    }
+}
+
 /// What the host should do next.
 pub enum Ready {
     /// Fetch these, supply them, ask again. Sorted, merged, disjoint.
@@ -227,7 +246,7 @@ impl Doc {
             let file = File::load_data(
                 Borrowed(&reader),
                 b"",
-                ParseOptions::strict(),
+                viewer_options(),
                 NoCache,
                 NoCache,
                 NoLog,
@@ -245,7 +264,22 @@ impl Doc {
             backend.set_id_scope(&scope);
             render_page(&mut backend, &resolver, &page_obj, Transform2F::default())
                 .map_err(|e| e.to_string())?;
-            Ok(Passed::Page(svg::combine(backend.finish(), &scope)))
+            let failures = backend.image_failures().to_vec();
+            let page = backend.finish();
+            let svg = svg::combine(page, &scope);
+            if failures.is_empty() {
+                return Ok(Passed::Page(svg));
+            }
+            // A figure that cannot be decoded is left out rather than drawn
+            // wrong, and a viewer that says nothing leaves the reader looking at
+            // a gap with no explanation. The note is invisible, costs 40 bytes,
+            // and is what a test can look for.
+            let note = format!(
+                "<!-- {} image(s) could not be decoded: {} -->",
+                failures.len(),
+                failures.join(" | ")
+            );
+            Ok(Passed::Page(svg.replacen("</svg>", &format!("{note}</svg>"), 1)))
         })();
         drop(reader);
         (out, log.take())

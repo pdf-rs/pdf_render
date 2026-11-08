@@ -164,6 +164,8 @@ pub struct SvgBackend<'a> {
     /// resolve each other's `<use href="#…">`.
     prefix: String,
     scope: String,
+    /// Why an image was left out, for a host that wants to say so.
+    image_failures: Vec<String>,
 }
 
 impl<'a> SvgBackend<'a> {
@@ -190,6 +192,7 @@ impl<'a> SvgBackend<'a> {
             matrix_buf: String::new(),
             fill_attr: String::new(),
             fill_key: None,
+            image_failures: Vec::new(),
         }
     }
 
@@ -217,6 +220,12 @@ impl<'a> SvgBackend<'a> {
     /// How many inline images were skipped, see `draw_inline_image`.
     pub fn inline_images_skipped(&self) -> usize {
         self.inline_images_skipped
+    }
+
+    /// Why images were left out, in paint order. Empty for a page whose
+    /// pictures all decoded.
+    pub fn image_failures(&self) -> &[String] {
+        &self.image_failures
     }
 
     /// Glyphs the renderer offered and paths written, for diagnostics: a page
@@ -475,6 +484,9 @@ impl<'a> crate::Backend for SvgBackend<'a> {
     fn draw_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resources: &Resources, transform: Transform2F, mode: BlendMode, clip: Option<usize>, resolve: &impl Resolve) {
         let image = self.cache.get_image(xobject_ref, im, resources, resolve, mode);
         let Some((rgba, width, height)) = image.rgba_data() else {
+            if let Err(ref e) = *image.0 {
+                self.image_failures.push(e.to_string());
+            }
             return;
         };
         let clip = self.clip_path_data(clip);
@@ -538,12 +550,35 @@ fn stroke_outline(outline: &Outline, stroke_mode: &Stroke) -> Outline {
     crate::stroke::stroke_to_fill(outline, stroke_mode)
 }
 
-/// Unit square of the image (y down) onto the page (y up).
+/// The image's unit square onto the page, as an SVG matrix, in the page's own
+/// coordinates — the ones the vector layers are written in, y down.
+///
+/// Two flips meet here and only one is wanted. PDF image space has its first
+/// row of samples at unit y = 0 while user space has y up, which is why a
+/// figure placed with a negative `d` is upright; the page the backend draws on
+/// is y down, like SVG, so the row order has to be flipped once — `1 - v` —
+/// and then no more. `combine` used to flip the layer a second time, which put
+/// every figure on the page mirrored about its middle, and no test noticed
+/// because the pixels never got there.
+///
+/// The matrix is derived from three points rather than from the fields of a
+/// composed transform, because getting that composition wrong is silent: the
+/// `<image>` keeps its right size and position and paints as a line, since one
+/// column of the matrix comes out zero.
 fn image_matrix(transform: Transform2F) -> [f32; 6] {
-    let m = transform * Transform2F::row_major(1.0, 0.0, 0.0, -1.0, 0.0, 1.0);
-    // SVG's `matrix(a b c d e f)` is column-major on the last row:
-    // x' = a x + c y + e, y' = b x + d y + f.
-    [m.m11(), m.m21(), m.m12(), m.m22(), m.m13(), m.m23()]
+    let at = |u: f32, v: f32| transform * Vector2F::new(u, 1.0 - v);
+    let origin = at(0.0, 0.0);
+    let across = at(1.0, 0.0);
+    let down = at(0.0, 1.0);
+    // SVG's `matrix(a b c d e f)` is x' = a x + c y + e, y' = b x + d y + f.
+    [
+        across.x() - origin.x(),
+        across.y() - origin.y(),
+        down.x() - origin.x(),
+        down.y() - origin.y(),
+        origin.x(),
+        origin.y(),
+    ]
 }
 
 fn fill_attrs(fill: &FillMode) -> (String, f32) {

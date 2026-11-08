@@ -27,7 +27,7 @@ pub struct ImageResult(pub Arc<Result<ImageBrush>>);
 impl ValueSize for ImageResult {
     fn size(&self) -> usize {
         match *self.0 {
-            Ok(ref im) => im.image.data.len() * 4,
+            Ok(ref im) => im.image.data.len(),
             Err(_) => 1,
         }
     }
@@ -35,12 +35,20 @@ impl ValueSize for ImageResult {
 
 impl ImageResult
 {
+    /// The pixels as straight RGBA8, `width * height * 4` bytes, first row on
+    /// top — what an SVG host needs to make a PNG of.
+    ///
+    /// `image.data` is already a byte blob (`w * h * 4`); it is not a slice of
+    /// `ColorU` any more, and reading it as one would hand out a slice four
+    /// times too long, pointing past the end of the allocation. That is how
+    /// every raster layer of every page came out of `svg::combine` as a failed
+    /// PNG encode: the layer was right, its length was not.
     pub fn rgba_data(&self) -> Option<(Arc<&'static [u8]>, u32, u32)> {
         match *self.0 {
             Ok(ref im) => {
-                let len = im.image.data.len();
+                let bytes: &[u8] = im.image.data.data();
                 let data = unsafe {
-                    std::slice::from_raw_parts(im.image.data.data().as_ptr() as *const u8, 4 * len)
+                    std::slice::from_raw_parts(bytes.as_ptr(), bytes.len())
                 };
 
                 Some((Arc::from(data), im.image.width, im.image.height))
@@ -170,5 +178,40 @@ impl<E: Encoder> Drop for Cache<E> {
         for name in self.missing_fonts.iter() {
             info!("{}", name.as_str());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn image_brush(rgba: Vec<u8>, width: u32, height: u32) -> ImageBrush {
+        ImageBrush::new(ImageData {
+            alpha_type: ImageAlphaType::Alpha,
+            data: Blob::new(Arc::new(rgba)),
+            format: ImageFormat::Rgba8,
+            height,
+            width,
+        })
+    }
+
+    /// The pixels handed to an SVG host are `width * height * 4` bytes — not
+    /// four times that, which is what a `ColorU` slice would have been and what
+    /// made every raster layer in the browser a PNG that would not encode.
+    #[test]
+    fn an_image_hands_out_its_pixels_and_nothing_more() {
+        let pixels = [255u8, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 9, 9, 9, 0];
+        let result = ImageResult(Arc::new(Ok(image_brush(pixels.to_vec(), 2, 2))));
+        let (data, width, height) = result.rgba_data().expect("rgba");
+        assert_eq!((width, height), (2, 2));
+        assert_eq!(&*data, &pixels);
+        assert_eq!(result.size(), pixels.len());
+    }
+
+    #[test]
+    fn a_failed_image_has_no_pixels() {
+        let result = ImageResult(Arc::new(Err(pdf::error::PdfError::Other { msg: "no".into() })));
+        assert!(result.rgba_data().is_none());
+        assert_eq!(result.size(), 1);
     }
 }
