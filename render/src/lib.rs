@@ -44,6 +44,8 @@ pub mod vello_cpu_backend;
 #[cfg(feature = "svg")]
 pub mod svg_backend;
 pub mod rangecache;
+/// Where a TrueType glyph's outline has to be moved to match `hmtx`.
+pub mod sfnt;
 /// Stroke to fill, shared by the backends that cannot stroke natively.
 pub mod stroke;
 pub use font::{FontRc, MemDir, StandardCache, DirRead, Codec};

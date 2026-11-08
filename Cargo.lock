@@ -1229,7 +1229,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 [[package]]
 name = "font"
 version = "0.1.0"
-source = "git+https://github.com/s3bk/font?branch=vello#5be88398fa158329755d0171e6562fa8ea4455ca"
+source = "git+https://github.com/pdf-rs/font?branch=vello#d7b579afd94c983af6e0f218e13d4095209b9be2"
 dependencies = [
  "decorum",
  "indexmap 1.9.3",
@@ -1241,6 +1241,7 @@ dependencies = [
  "pathfinder_content",
  "pathfinder_geometry",
  "pdf_encoding 0.4.0",
+ "rand 0.7.3",
  "slotmap",
  "tuple 0.5.1",
  "vello_encoding",
@@ -4631,6 +4632,12 @@ dependencies = [
 [[package]]
 name = "web-time"
 version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "weezl"

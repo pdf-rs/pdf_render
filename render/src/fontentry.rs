@@ -93,6 +93,21 @@ pub struct FontEntry<E: Encoder> {
     pub widths: Option<Widths>,
     pub is_cid: bool,
     pub name: String,
+    /// Per glyph, how far its outline has to move in font units before it sits
+    /// at the pen position: `hmtx`'s side bearing minus the glyph's own `xMin`,
+    /// which is zero for a well formed font and not zero for the converted
+    /// subsets that keep the `hsbw` of the charstring they came from. See
+    /// [`crate::sfnt`] for why a viewer has to apply it.
+    pub x_shift: HashMap<GlyphId, f32>,
+}
+
+impl<E: Encoder> FontEntry<E> {
+    /// The x offset, in font units, that has to be added to this glyph's
+    /// outline before it is placed at the pen position. Zero for a glyph whose
+    /// outline already starts at its side bearing.
+    pub fn x_shift(&self, gid: GlyphId) -> f32 {
+        self.x_shift.get(&gid).copied().unwrap_or(0.0)
+    }
 }
 
 
@@ -416,6 +431,8 @@ impl<E: Encoder + 'static> FontEntry<E> {
 
         }
 
+        let x_shift = crate::sfnt::glyph_x_shifts(&pdf_font, resolve);
+
         Ok(FontEntry {
             font,
             pdf_font,
@@ -423,6 +440,7 @@ impl<E: Encoder + 'static> FontEntry<E> {
             is_cid,
             widths,
             name,
+            x_shift,
         })
     }
 }

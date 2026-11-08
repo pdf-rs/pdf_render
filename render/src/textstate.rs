@@ -142,7 +142,14 @@ impl<E: Encoder + 'static> TextState<E> {
                 continue;
             }
             if let Some(glyph) = glyph {
-                let transform = gs.transform * self.text_matrix * tr;
+                // FreeType (and so poppler and pdf.js) moves a TrueType outline
+                // by `hmtx` side bearing minus `xMin` before drawing it, which
+                // is nothing for a normal font and the whole placement for a
+                // converted subset whose outlines start at x = 0. See
+                // [`crate::sfnt`].
+                let shift = e.x_shift(gid);
+                let transform = gs.transform * self.text_matrix * tr
+                    * Transform2F::from_translation(Vector2F::new(shift, 0.));
 
                 if let Some(ref draw_mode) = draw_mode {
                     backend.draw_glyph(&e.font, glyph, draw_mode, transform, gs.clip_path_id);
