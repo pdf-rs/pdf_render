@@ -9,6 +9,8 @@
 
 /** `0` is not the "whole document" page number: this is. */
 const PAGE_ALL = 0xffffffff;
+/** …and this is "not a page number either: the table of contents". */
+export const OUTLINE_ALL = 0xfffffffe;
 
 let mod = null;
 /** Two `u32` out-parameters in the module's memory, allocated once. */
@@ -176,6 +178,27 @@ export class Doc {
         const len = u32(outLen)[0];
         if (!ptr) throw new Error(this.#lastError() || `page ${index + 1} is not ready`);
         return takeText(ptr, len);
+    }
+
+    /** The document's own table of contents: `[[depth, page, title], …]`,
+     *  page 0-based, `page` null for a row that points out of the document.
+     *
+     *  One pass over the outline, so it costs one round trip on top of what
+     *  the page tree and the destinations need — a fraction of a page. An
+     *  empty list is an answer, not a failure: most documents have none. */
+    async outline() {
+        if (!this.#doc) return [];
+        await this.#settle(OUTLINE_ALL);
+        const ptr = mod.pdf_outline(this.#doc, outLen);
+        const len = u32(outLen)[0];
+        if (!ptr || !len) return [];
+        const text = takeText(ptr, len);
+        try {
+            return JSON.parse(text);
+        } catch (e) {
+            console.log(`outline: ${e.message}`);
+            return [];
+        }
     }
 
     /** Start fetching what page `index` will need, without rendering it, so a

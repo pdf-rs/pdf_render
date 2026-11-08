@@ -17,15 +17,17 @@ svg = pdf_page_svg(doc, page)            // UTF-8, free with pdf_buf_free
 ```
 
 `pdf_page_needs(doc, 0xFFFF_FFFF)` is the same thing without a page: it opens
-the document and says how many pages it has.
+the document and says how many pages it has. `0xFFFF_FFFE` is the same thing
+again for the sidebar: it prepares the document's own table of contents, which
+`pdf_outline` then hands out as JSON.
 
 The ABI is plain `extern "C"` with **no imports at all**. `www/doc.js` checks
 that — `WebAssembly.Module.imports(mod).length === 0` — and refuses a module
 that wants anything. So the code that parses a stranger's PDF cannot reach the
 network, the DOM or `eval`, and what the host has to audit is the export list:
 `pdf_abi`, `pdf_doc_new/free`, `pdf_buf_alloc/free`, `pdf_supply`, `pdf_fonts`,
-`pdf_page_needs`, `pdf_ranges_free`, `pdf_page_svg`, `pdf_num_pages`,
-`pdf_held`, `pdf_error`.
+`pdf_page_needs`, `pdf_ranges_free`, `pdf_page_svg`, `pdf_outline`,
+`pdf_num_pages`, `pdf_held`, `pdf_error`.
 
 ## Building
 
@@ -208,6 +210,41 @@ the two out-parameters are stubbed around `www/doc.js`, and the test fails if a
 preloaded page still asks for a byte, if the same page is prefetched twice at
 once, or if an edge page makes a request. (A document small enough to arrive in
 the first request says so instead of passing.)
+
+## The contents, in the sidebar
+
+The left column is the document's own outline — `/Outlines` in the catalog, the
+headings its author wrote, with the nesting the file gives them. `web/src/outline.rs`
+walks it over raw primitives: a row is a title and a place to go, and a row
+whose action this crate cannot model is still a row (it just has nowhere to go),
+where parsing it as an `OutlineItem` would lose the heading and its children.
+
+The output is JSON — `[[depth, page, "title"], …]`, page 0-based — and it costs
+one pass: the page tree, the destinations, the outline dictionaries. That is a
+fraction of a page, and it is fetched *after* the first page is on screen, so
+opening a document is never slower for having a sidebar.
+
+Three things are deliberate:
+
+* **A page number, not a position.** Rows carry the page the destination names,
+  so clicking one is `show(page)` — no jump, no second render.
+* **The highlight follows the reader.** The marked row is the last heading at or
+  above the page in view, unless they clicked a row and stayed on its page: with
+  several headings on one page, marking the last of them would answer a click on
+  the first with a different row.
+* **A row that points out of the document is shown, not dropped.** An external
+  file or a script is still a heading; a table of contents with holes in it
+  reads worse than one with a few rows that do not move.
+
+Most documents have no outline, and the sidebar says so instead of inventing a
+list of page numbers. `t` toggles it, the header button does the same, and the
+choice is remembered in `localStorage["pdf-viewer-toc"]`; under 720 px it is an
+overlay that closes when a row is clicked.
+
+Titles are decoded as what a PDF string is: UTF-16BE with a BOM, UTF-8 with a
+BOM, or PDFDocEncoding — Latin-1 except 0x18–0x1F and 0x80–0xA0, where a book's
+curly quotes and dashes live. Reading those bytes as UTF-8 is what turns
+"Editors' Introduction" into "Editors\u{fffd} Introduction".
 
 ## How long a page takes
 

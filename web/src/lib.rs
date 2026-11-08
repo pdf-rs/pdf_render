@@ -33,6 +33,7 @@ use pdf_render::svg_backend::{OutlineBuilder, SvgBackend};
 use pdf_render::{render_page, Cache, MemDir, StandardCache, Transform2F};
 
 mod abi;
+mod outline;
 mod svg;
 
 #[cfg(test)]
@@ -40,6 +41,10 @@ mod tests;
 
 /// Not a page number: opening the document is all this asks for.
 pub const OPEN_ONLY: u32 = u32::MAX;
+
+/// Not a page number: the table of contents, as
+/// [`Doc::take_outline`] hands it out.
+pub const OUTLINE_ONLY: u32 = u32::MAX - 1;
 
 /// How far a missing range is widened on both sides, in bytes. Small enough
 /// that a guess costs little on a slow link, large enough to swallow the rest
@@ -73,6 +78,8 @@ pub enum Ready {
     Page,
     /// `OPEN_ONLY` succeeded: the document has this many pages.
     Opened(u32),
+    /// The outline is in `Doc::ready_outline`; take it with [`Doc::take_outline`].
+    Outline,
     /// Nothing is missing and it still does not render: [`Doc::error`].
     Failed,
 }
@@ -99,6 +106,7 @@ impl PdfBackend for Borrowed<'_, '_> {
 enum Passed {
     Opened(u32),
     Page(String),
+    Outline(String),
 }
 
 /// One document, and the bytes of it that have arrived.
@@ -107,6 +115,7 @@ pub struct Doc {
     render: Cache<OutlineBuilder>,
     ready: Option<(u32, String)>,
     opened: Option<u32>,
+    outline: Option<String>,
     error: Option<String>,
     /// The last list handed out. A pass that asks for the same bytes twice has
     /// not lost anything to the network, so it must not loop.
@@ -124,6 +133,7 @@ impl Doc {
             render: Cache::new(OutlineBuilder {}),
             ready: None,
             opened: None,
+            outline: None,
             error: None,
             last_need: Vec::new(),
         }
@@ -163,6 +173,7 @@ impl Doc {
     /// is called again after the fetch, until it stops asking.
     pub fn prepare(&mut self, page: u32) -> Ready {
         self.ready = None;
+        self.outline = None;
         let (out, misses) = self.pass(page);
         let missing = self.cache.missing(&misses);
 
@@ -208,6 +219,11 @@ impl Doc {
                 self.error = None;
                 Ready::Page
             }
+            Ok(Passed::Outline(json)) => {
+                self.outline = Some(json);
+                self.error = None;
+                Ready::Outline
+            }
             Err(e) => {
                 self.error = Some(e);
                 Ready::Failed
@@ -221,6 +237,11 @@ impl Doc {
             Some((p, svg)) if p == page => Some(svg),
             _ => None,
         }
+    }
+
+    /// The outline `prepare(OUTLINE_ONLY)` just built, if any.
+    pub fn take_outline(&mut self) -> Option<String> {
+        self.outline.take()
     }
 
     pub fn error(&self) -> Option<&str> {
@@ -254,6 +275,10 @@ impl Doc {
             .map_err(|e| e.to_string())?;
             if page == OPEN_ONLY {
                 return Ok(Passed::Opened(file.num_pages()));
+            }
+            if page == OUTLINE_ONLY {
+                let json = outline::build(&file.resolver(), file.get_root());
+                return Ok(Passed::Outline(json));
             }
             let page_obj = file.get_page(page).map_err(|e| e.to_string())?;
             let resolver = file.resolver();

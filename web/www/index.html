@@ -58,13 +58,49 @@
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
-    margin: 0; height: 100dvh; display: flex; flex-direction: column; overflow: hidden;
+    margin: 0; height: 100dvh; display: flex; flex-direction: row; overflow: hidden;
     font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
     background: var(--bg); color: var(--ink);
 }
 button, input { font: inherit; color: inherit; }
 ::selection { background: color-mix(in srgb, var(--ring) 28%, transparent); }
+
+/* ------------------------------------------------------------ the sidebar
+   The table of contents, in a column of its own. The page is a column too, so
+   the two are a row: open, the sidebar takes its width from the stage and the
+   pages refit; closed, the stage has all of it. On a phone it is an overlay,
+   because 260px of a 380px screen is not a sidebar, it is the screen. */
+#main { flex: 1 1 auto; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+#side {
+    flex: 0 0 auto; width: 268px; display: flex; flex-direction: column; min-height: 0;
+    background: var(--bar); border-right: 1px solid var(--line);
+}
+#side[hidden] { display: none; }
+.side-head {
+    flex: 0 0 auto; display: flex; align-items: center; gap: .25rem;
+    height: 52px; padding: 0 .375rem 0 .9375rem; border-bottom: 1px solid var(--line);
+    font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--muted);
+}
+.side-head span { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#toc { flex: 1 1 auto; overflow-y: auto; overscroll-behavior: contain; padding: .375rem .375rem 1.25rem; }
+.toc-note { padding: .7rem .625rem; color: var(--faint); font-size: 12.5px; line-height: 1.45; }
+.toc-row {
+    display: flex; align-items: baseline; gap: .5rem; width: 100%;
+    padding: .28rem .5rem; border: 0; border-radius: 7px; background: transparent;
+    color: inherit; cursor: pointer; font-size: 12.5px; line-height: 1.4; text-align: left;
+    transition: background .12s, color .12s;
+}
+.toc-row:hover { background: var(--hover); }
+.toc-row[aria-current="true"] {
+    background: color-mix(in srgb, var(--ring) 15%, transparent); color: var(--accent); font-weight: 550;
+}
+.toc-row:disabled { cursor: default; color: var(--faint); }
+.toc-row:disabled:hover { background: transparent; }
+.toc-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toc-page { flex: 0 0 auto; font-size: 11px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.toc-row[aria-current="true"] .toc-page { color: inherit; }
 
 /* --------------------------------------------------------------- the bar */
 header {
@@ -235,6 +271,11 @@ body.ready #dock { opacity: 1; transform: translateX(-50%); pointer-events: auto
     #title { max-width: 40vw; }
     #url { width: 8rem; }
     .sheet { padding: 16px 16px 96px; }
+    /* An overlay, not a column: the page keeps the whole screen. */
+    #side {
+        position: fixed; top: 0; bottom: 0; left: 0; width: min(300px, 84vw); z-index: 7;
+        box-shadow: var(--shadow); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    }
 }
 @media (prefers-reduced-motion: reduce) {
     * { animation-duration: .001ms !important; transition-duration: .001ms !important; }
@@ -242,6 +283,16 @@ body.ready #dock { opacity: 1; transform: translateX(-50%); pointer-events: auto
 </style>
 </head>
 <body>
+<aside id="side" aria-label="contents">
+    <div class="side-head">
+        <span>Contents</span>
+        <button class="icon-btn" id="sideclose" title="hide contents (t)" aria-label="hide contents">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+        </button>
+    </div>
+    <nav id="toc" aria-label="table of contents"></nav>
+</aside>
+<div id="main">
 <header>
     <div class="mark" aria-hidden="true">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -263,6 +314,11 @@ body.ready #dock { opacity: 1; transform: translateX(-50%); pointer-events: auto
         <input id="url" type="url" placeholder="https://…/file.pdf" spellcheck="false" aria-label="PDF address">
         <button class="btn" id="go" type="submit">Open</button>
     </form>
+    <button class="icon-btn" id="tocbtn" title="contents (t)" aria-label="table of contents" aria-expanded="true" aria-controls="side">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9 6h12M9 12h12M9 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>
+        </svg>
+    </button>
     <button class="icon-btn" id="theme" title="theme: auto" aria-label="change theme">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
             <circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
@@ -287,6 +343,7 @@ body.ready #dock { opacity: 1; transform: translateX(-50%); pointer-events: auto
             <input id="file" type="file" accept="application/pdf,.pdf" hidden>
         </div>
     </div>
+</div>
 </div>
 
 <div id="dock">
@@ -448,6 +505,7 @@ async function open(url, startAt = 1) {
         // Straight to the page asked for: the point of the range table is that
         // landing on page 20 costs page 20, not pages 1–20.
         await show(Math.min(Math.max(1, startAt), state.pages) - 1);
+        refreshToc();
     } catch (e) { fail(e); } finally { busy(false); }
 }
 
@@ -695,6 +753,7 @@ function updateChrome() {
     $("pageno").value = String(i + 1);
     $("prev").disabled = i === 0;
     $("next").disabled = i === n - 1;
+    markToc();
     clearTimeout(chromeTimer);
     chromeTimer = setTimeout(() => {
         try {
@@ -773,6 +832,135 @@ $("zoomout").onclick = () => zoomBy(1 / 1.15);
 $("zoomlabel").onclick = zoomCycle;
 $("errorclose").onclick = clearError;
 
+// --- the table of contents -----------------------------------------------
+//
+// The document's own outline, not a list of page numbers invented here: the
+// same headings the file's `/Outlines` carries, with the nesting it gives
+// them. Reading it costs one pass — the page tree and the destinations, a
+// fraction of a page — and it is fetched *after* the first page is on screen,
+// so opening a document is never slower for having a sidebar.
+//
+// Whether it is open is remembered per browser, not per document: a reader who
+// has the contents out wants them out for the next file too.
+
+const SIDE_KEY = "pdf-viewer-toc";
+const side = $("side"), toc = $("toc");
+let tocRows = [];      // [{ page, el }], in document order
+let tocPage = -1;      // the page the highlight is on, so it moves only on a turn
+let tocPick = null;    // the row the reader clicked, while they are still on its page
+let sideOpen = true;
+try {
+    const saved = localStorage.getItem(SIDE_KEY);
+    sideOpen = saved === null ? !matchMedia("(max-width: 720px)").matches : saved === "1";
+} catch {}
+
+function applySide(save = true) {
+    side.hidden = !sideOpen;
+    $("tocbtn").setAttribute("aria-expanded", String(sideOpen));
+    if (save) try { localStorage.setItem(SIDE_KEY, sideOpen ? "1" : "0"); } catch {}
+}
+
+$("tocbtn").onclick = () => { sideOpen = !sideOpen; applySide(); };
+$("sideclose").onclick = () => { sideOpen = false; applySide(); $("tocbtn").focus(); };
+applySide(false);
+
+function clearToc(note) {
+    toc.textContent = "";
+    tocRows = [];
+    tocPage = -1;
+    tocPick = null;
+    if (note) {
+        const div = document.createElement("div");
+        div.className = "toc-note";
+        div.textContent = note;
+        toc.appendChild(div);
+    }
+}
+
+/** Draw the outline: one row per heading, indented by its depth, the page on
+ *  the right. A row with no page (an external file, a script) is shown but
+ *  not clickable — a chapter that opens somewhere else is still a chapter. */
+function drawToc(entries) {
+    clearToc(null);
+    if (!entries.length) {
+        clearToc("This document has no table of contents.");
+        return;
+    }
+    for (const [depth, page, title] of entries) {
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "toc-row";
+        row.style.paddingLeft = `${6 + Math.min(depth, 12) * 11}px`;
+        row.title = title || "";
+        const label = document.createElement("span");
+        label.className = "toc-label";
+        label.textContent = title || (page != null ? `page ${page + 1}` : "—");
+        row.appendChild(label);
+        if (page != null && page < state.pages) {
+            const num = document.createElement("span");
+            num.className = "toc-page";
+            num.textContent = String(page + 1);
+            row.appendChild(num);
+            const entry = { page, el: row };
+            row.onclick = () => { tocPick = entry; show(page); narrowClose(); };
+            tocRows.push(entry);
+        } else {
+            row.disabled = true;
+        }
+        toc.appendChild(row);
+    }
+    const rows = tocRows.length;
+    console.log(`contents: ${entries.length} row(s), ${rows} with a page`);
+    markToc(true);
+}
+
+function narrowClose() {
+    if (sideOpen && matchMedia("(max-width: 720px)").matches) { sideOpen = false; applySide(); }
+}
+
+/** Mark the row for the section the reader is in: the last heading at or above
+ *  their page, in document order. Not a binary search: an outline is in the
+ *  order the document reads it, which is not always the order of its pages
+ *  (front matter, appendices), and a linear pass over a few hundred rows on a
+ *  page turn costs nothing. */
+function markToc(force = false) {
+    if (!tocRows.length || (!force && tocPage === state.page)) return;
+    tocPage = state.page;
+    let best = null;
+    // The row they just clicked wins while they are on its page: several
+    // headings often live on one page, and marking the last of them would
+    // answer a click on the first with a different row.
+    if (tocPick && tocPick.page === tocPage && tocPick.el.isConnected) {
+        best = tocPick;
+    } else {
+        for (const row of tocRows) if (row.page <= tocPage) best = row;
+    }
+    for (const row of tocRows) row.el.setAttribute("aria-current", row === best ? "true" : "false");
+    if (best && sideOpen) best.el.scrollIntoView({ block: "nearest" });
+}
+
+/** Read and draw the outline of the document that is open. Queued with the
+ *  page renders: the module renders one thing at a time. */
+function refreshToc() {
+    const doc = state.doc;
+    if (!doc) { clearToc("no document"); return Promise.resolve(); }
+    clearToc("reading the contents …");
+    const mine = gen;
+    const run = renderTurn.then(async () => {
+        if (mine !== gen || state.doc !== doc) return;
+        let entries = [];
+        try {
+            entries = await doc.outline();
+        } catch (e) {
+            console.log(`no contents: ${e.message || e}`);
+        }
+        if (mine !== gen || state.doc !== doc) return;
+        drawToc(Array.isArray(entries) ? entries : []);
+    });
+    renderTurn = run.catch(() => {});
+    return run;
+}
+
 $("openform").addEventListener("submit", (e) => {
     e.preventDefault();
     const url = $("url").value.trim();
@@ -842,6 +1030,7 @@ addEventListener("keydown", (e) => {
         case "-": case "_": zoomBy(1 / 1.15); break;
         case "0": state.zoom = "page"; fit(); break;
         case "f": zoomCycle(); break;
+        case "t": sideOpen = !sideOpen; applySide(); break;
         case "Escape": clearError(); $("openform").hidden = true; break;
         default: return;
     }
@@ -897,6 +1086,7 @@ async function openLocal(f) {
         $("openbtn").hidden = false;
         say(`${state.pages} page(s), ${fmt(bytes.length)}`);
         await show(0);
+        refreshToc();
     } catch (e) { fail(e); } finally { busy(false); }
 }
 

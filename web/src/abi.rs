@@ -108,7 +108,7 @@ pub unsafe extern "C" fn pdf_page_needs(
             let flat = flat.into_boxed_slice();
             Box::into_raw(flat) as *mut u32
         }
-        Ready::Page | Ready::Opened(_) => std::ptr::null_mut(),
+        Ready::Page | Ready::Opened(_) | Ready::Outline => std::ptr::null_mut(),
         Ready::Failed => {
             if !out_count.is_null() {
                 *out_count = u32::MAX;
@@ -143,6 +143,28 @@ pub unsafe extern "C" fn pdf_page_svg(doc: *mut Doc, page: u32, out_len: *mut u3
         return std::ptr::null_mut();
     };
     let bytes = svg.into_bytes().into_boxed_slice();
+    if !out_len.is_null() {
+        *out_len = bytes.len() as u32;
+    }
+    Box::into_raw(bytes) as *mut u8
+}
+
+/// The outline `pdf_page_needs(…, OUTLINE_ONLY)` just built: JSON,
+/// `[[depth, page or null, "title"], …]`, page 0-based. Null if there is none
+/// (an outline-less document gives `[]`, which is 2 bytes, not null).
+/// Free with [`pdf_buf_free`] and the length.
+#[no_mangle]
+pub unsafe extern "C" fn pdf_outline(doc: *mut Doc, out_len: *mut u32) -> *mut u8 {
+    if !out_len.is_null() {
+        *out_len = 0;
+    }
+    let Some(doc) = doc.as_mut() else {
+        return std::ptr::null_mut();
+    };
+    let Some(json) = doc.take_outline() else {
+        return std::ptr::null_mut();
+    };
+    let bytes = json.into_bytes().into_boxed_slice();
     if !out_len.is_null() {
         *out_len = bytes.len() as u32;
     }

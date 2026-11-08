@@ -50,7 +50,7 @@ impl Net {
                 Ready::Failed => {
                     return Err(doc.error().unwrap_or("failed without a reason").into())
                 }
-                Ready::Page | Ready::Opened(_) => return Ok(()),
+                Ready::Page | Ready::Opened(_) | Ready::Outline => return Ok(()),
             }
         }
         Err("did not converge in 8 round trips".into())
@@ -242,7 +242,7 @@ fn asking_again_without_fetching_does_not_loop() {
                 }
                 // Supply nothing this time.
             }
-            Ready::Page | Ready::Opened(_) | Ready::Failed => break,
+            Ready::Page | Ready::Opened(_) | Ready::Outline | Ready::Failed => break,
         }
     }
 }
@@ -261,6 +261,162 @@ fn describe(ready: &Ready) -> String {
         Ready::Need(r) => format!("need {} range(s)", r.len()),
         Ready::Page => "page".into(),
         Ready::Opened(n) => format!("opened, {n} page(s)"),
+        Ready::Outline => "outline".into(),
         Ready::Failed => "failed".into(),
     }
+}
+
+// --- the outline ---------------------------------------------------------
+
+/// The JSON back inside the test. The outline is a text format, so the test
+/// reads it as one rather than trusting a substring.
+fn entries(json: &str) -> Vec<(u32, Option<u32>, String)> {
+    let b = json.as_bytes();
+    let digit = |i: &mut usize| {
+        let start = *i;
+        while b[*i].is_ascii_digit() {
+            *i += 1;
+        }
+        json[start..*i].parse::<u32>().unwrap()
+    };
+    assert!(b.starts_with(b"["), "{json}");
+    let mut i = 1;
+    let mut out = Vec::new();
+    while b[i] == b'[' {
+        i += 1;
+        let depth = digit(&mut i);
+        assert_eq!(b[i], b',');
+        i += 1;
+        let page = if b[i..].starts_with(b"null") {
+            i += 4;
+            None
+        } else {
+            Some(digit(&mut i))
+        };
+        assert_eq!(b[i], b',');
+        assert_eq!(b[i + 1], b'"');
+        i += 2;
+        let mut title = String::new();
+        while b[i] != b'"' {
+            if b[i] == b'\\' {
+                i += 1;
+                match b[i] {
+                    b'"' => title.push('"'),
+                    b'\\' => title.push('\\'),
+                    b'n' => title.push('\n'),
+                    b'r' => title.push('\r'),
+                    b't' => title.push('\t'),
+                    b'u' => {
+                        let code = u32::from_str_radix(&json[i + 1..i + 5], 16).unwrap();
+                        title.push(char::from_u32(code).unwrap());
+                        i += 4;
+                    }
+                    other => panic!("escape \\{}", other as char),
+                }
+                i += 1;
+            } else {
+                let ch = json[i..].chars().next().unwrap();
+                title.push(ch);
+                i += ch.len_utf8();
+            }
+        }
+        i += 1;
+        assert_eq!(b[i], b']');
+        i += 1;
+        out.push((depth, page, title));
+        if b[i] == b',' {
+            i += 1;
+        }
+    }
+    assert_eq!(b[i], b']');
+    out
+}
+
+#[test]
+fn a_document_without_an_outline_has_an_empty_one() {
+    let bytes = logo();
+    let mut doc = Doc::new(bytes.len() as u32);
+    doc.supply(0, &bytes);
+    match doc.prepare(OUTLINE_ONLY) {
+        Ready::Outline => {}
+        other => panic!("expected an outline, got {}", describe(&other)),
+    }
+    let json = doc.take_outline().expect("the outline the pass built");
+    assert!(entries(&json).is_empty(), "{json}");
+    // And it is not handed out twice.
+    assert!(doc.take_outline().is_none());
+}
+
+/// A real table of contents, read by range: every row that names a page names
+/// one this document has, and the nesting starts at the top.
+#[test]
+fn the_outline_of_a_large_document_names_pages_it_has() {
+    let path = std::env::var_os("PDF_WEB_SAMPLE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/home/hematite/ia/WG73-WriterGuide.pdf"));
+    let Ok(bytes) = std::fs::read(&path) else {
+        eprintln!("skipped: no sample at {}", path.display());
+        return;
+    };
+    let (rows, pages, net) = {
+        let mut doc = Doc::new(bytes.len() as u32);
+        if let Some(bundle) = font_bundle() {
+            doc.set_fonts(&bundle).unwrap();
+        }
+        let mut net = Net::new(bytes.clone());
+        net.serve(&mut doc, OPEN).unwrap();
+        net.serve(&mut doc, OUTLINE_ONLY).unwrap();
+        let json = doc.take_outline().expect("an outline");
+        (entries(&json), doc.num_pages(), net)
+    };
+    eprintln!(
+        "outline: {} row(s), {} of {} bytes, {} round trips",
+        rows.len(),
+        net.fetched,
+        bytes.len(),
+        net.requests
+    );
+    assert!(!rows.is_empty(), "the guide has a table of contents");
+    assert_eq!(rows[0].0, 0, "the first row is a top-level one");
+    assert!(rows.iter().any(|row| row.1.is_some()), "no row points at a page");
+    assert!(rows.iter().any(|row| row.0 > 0), "the outline has no nesting");
+    for (depth, page, title) in &rows {
+        assert!(*depth as usize <= 12, "{title}: nested {depth} deep");
+        if let Some(page) = page {
+            assert!(*page < pages, "{title}: page {page} of {pages}");
+        }
+    }
+    // The table of contents is a fraction of the document; it must not be
+    // what makes the first page turn expensive.
+    assert!(net.fetched < bytes.len() / 2);
+}
+
+/// The same outline from a ranged read and from the whole file at once.
+#[test]
+fn the_outline_of_a_ranged_read_is_the_outline_of_the_whole_file() {
+    let path = std::env::var_os("PDF_WEB_SAMPLE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/home/hematite/ia/WG73-WriterGuide.pdf"));
+    let Ok(bytes) = std::fs::read(&path) else {
+        eprintln!("skipped: no sample at {}", path.display());
+        return;
+    };
+    let mut whole = Doc::new(bytes.len() as u32);
+    if let Some(bundle) = font_bundle() {
+        whole.set_fonts(&bundle).unwrap();
+    }
+    whole.supply(0, &bytes);
+    assert!(matches!(whole.prepare(OUTLINE_ONLY), Ready::Outline));
+    let expected = whole.take_outline().unwrap();
+
+    let (got, _) = {
+        let mut doc = Doc::new(bytes.len() as u32);
+        if let Some(bundle) = font_bundle() {
+            doc.set_fonts(&bundle).unwrap();
+        }
+        let mut net = Net::new(bytes.clone());
+        net.serve(&mut doc, OUTLINE_ONLY).unwrap();
+        (doc.take_outline().expect("an outline"), net)
+    };
+    assert_eq!(got, expected, "the outline depends on how the bytes arrived");
 }
