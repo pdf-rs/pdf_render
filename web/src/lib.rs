@@ -238,10 +238,14 @@ impl Doc {
             }
             let page_obj = file.get_page(page).map_err(|e| e.to_string())?;
             let resolver = file.resolver();
+            // A page's `id`s are scoped to the page (`p34_`): a viewer may have
+            // several pages inline at once, and `id`s are document-global.
+            let scope = format!("p{page}_");
             let mut backend = SvgBackend::new(render);
+            backend.set_id_scope(&scope);
             render_page(&mut backend, &resolver, &page_obj, Transform2F::default())
                 .map_err(|e| e.to_string())?;
-            Ok(Passed::Page(svg::combine(backend.finish())))
+            Ok(Passed::Page(svg::combine(backend.finish(), &scope)))
         })();
         drop(reader);
         (out, log.take())

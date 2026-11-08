@@ -6,8 +6,9 @@
 //! `flush` between them. A host that wants one image to hand to `<img>` — or
 //! to save — needs them put back together, which is what this does: the image
 //! go in as a PNG data URL, the layers keep their order, and the backend has
-//! already scoped every `id` to its layer (`l0_g17`), so two layers of one page
-//! cannot collide and nothing has to be renamed here.
+//! already scoped every `id` to its layer (`l0_g17`) and, when the host asks
+//! for it, to its page (`p34_l0_g17`), so neither two layers nor two pages of
+//! one document can collide, and nothing has to be renamed here.
 //!
 //! The alternative would be a canvas and `drawImage` per raster layer. That
 //! needs JavaScript to touch pixels and loses "the page is a file you can
@@ -16,8 +17,10 @@
 
 use pdf_render::svg_backend::{ImageLayer, Layer, SvgPage};
 
-/// Assemble the layers of one page into a single SVG document.
-pub fn combine(page: SvgPage) -> String {
+/// Assemble the layers of one page into a single SVG document. `scope` is the
+/// page's prefix (`p34_`), or `""` for a page that will be a document of its
+/// own.
+pub fn combine(page: SvgPage, scope: &str) -> String {
     let [x, y, w, h] = page.view_box;
     // PDF space has y up, SVG's y down. Every vector layer flips its own
     // content inside a group; an image layer is put in the same group so both
@@ -43,7 +46,7 @@ pub fn combine(page: SvgPage) -> String {
     out.push_str("\" shape-rendering=\"geometricPrecision\">");
 
     for (i, layer) in page.layers.iter().enumerate() {
-        let prefix = format!("l{i}_");
+        let prefix = format!("{scope}l{i}_");
         match layer {
             // The backend already numbers its ids per layer (`l0_g17`), so the
             // text goes in as it is: two layers cannot collide.
@@ -164,7 +167,7 @@ mod tests {
                 Layer::Vector("<svg xmlns=\"x\" viewBox=\"0 0 10 20\"><use href=\"#l1_g0\"/></svg>".into()),
             ],
         };
-        let got = combine(page);
+        let got = combine(page, "");
         assert!(got.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""), "{got}");
         assert!(got.contains("<path d=\"M0 0\"/>"), "{got}");
         // The body of a layer goes in whole: the backend already scoped its ids.

@@ -1,4 +1,5 @@
-// Do the ids of a combined page ever repeat?
+// Do the ids of a combined page ever repeat — within the page, or across two
+// pages that a scrolling viewer has in one document at the same time?
 //
 //   node web/test/dupids.mjs file.pdf table.tbl [maxPages]
 
@@ -49,6 +50,8 @@ doc.setTable(table);
 const pages = await doc.open();
 
 let dupPages = 0, imgPages = 0, defs = 0, uses = 0, stray = 0, missingPages = 0, missingRefs = 0;
+let across = 0, acrossPages = 0;
+const all = new Set();          // every id any page has written so far
 for (let i = 0; i < pages && i < max; i++) {
     await doc.prefetch(i);
     const svg = await doc.page(i);
@@ -59,6 +62,15 @@ for (let i = 0; i < pages && i < max; i++) {
         dupPages++;
         if (dupPages <= 5) console.log(`page ${i + 1}: ${dup.length} repeated id(s), e.g. ${dup.slice(0, 4).join(", ")}`);
     }
+    // Two pages inline at once share one id namespace: page 35 must not write
+    // an id page 34 wrote, or its `url(#…)` would land in the other page.
+    const other = ids.filter((id) => all.has(id));
+    if (other.length) {
+        acrossPages++;
+        across += other.length;
+        if (acrossPages <= 5) console.log(`page ${i + 1}: ${other.length} id(s) already used by an earlier page, e.g. ${other.slice(0, 4).join(", ")}`);
+    }
+    for (const id of seen) all.add(id);
     // Every reference must point at something the page defines.
     const refs = [...svg.matchAll(/(?:href="#|url\(#)([^")]+)/g)].map((m) => m[1]);
     const missing = refs.filter((r) => !seen.has(r));
@@ -71,7 +83,9 @@ for (let i = 0; i < pages && i < max; i++) {
     defs += ids.length;
     uses += (svg.match(/<use /g) ?? []).length;
     // Anything the backend did not write: an id whose prefix is a foreign one.
-    stray += ids.filter((id) => !/^(l\d+_)?[gc]\d+$/.test(id) && !/^l\d+_clip$/.test(id)).length;
+    stray += ids.filter((id) => !/^(p\d+_)?(l\d+_)?[gc]\d+$/.test(id) && !/^(p\d+_)?l\d+_clip$/.test(id)).length;
 }
-console.log(`${Math.min(pages, max)} page(s): ${defs} defs, ${uses} <use>, ${imgPages} with a raster, ${dupPages} with repeated ids, ${stray} foreign id(s), ${missingPages} page(s) with ${missingRefs} dangling ref(s)`);
+console.log(`${Math.min(pages, max)} page(s): ${defs} defs, ${uses} <use>, ${imgPages} with a raster, ` +
+    `${dupPages} with repeated ids, ${acrossPages} with ${across} id(s) from another page, ` +
+    `${stray} foreign id(s), ${missingPages} page(s) with ${missingRefs} dangling ref(s)`);
 doc.free();

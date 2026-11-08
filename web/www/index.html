@@ -135,17 +135,23 @@ body.busy #progress { opacity: 1; }
 /* -------------------------------------------------------------- the stage */
 #stage { flex: 1 1 auto; overflow: auto; background: var(--bg-glow); position: relative; }
 .sheet {
-    display: flex; min-width: 100%; min-height: 100%; padding: 28px 28px 104px;
+    display: flex; align-items: flex-start; min-width: 100%; min-height: 100%;
+    padding: 28px 28px 104px;
 }
-#paper {
-    margin: auto; background: #fff; border-radius: 3px; overflow: hidden; line-height: 0;
+/* The pages are one column, laid out by the script: every page has its slot
+   from the start, rendered or not, so the scrollbar tells the truth and a page
+   arriving never moves the one above it. Reading is scrolling. */
+#pages { position: relative; flex: 0 0 auto; margin: 0 auto; }
+#pages:empty { display: none; }
+.page {
+    position: absolute; left: 0; right: 0; margin: 0 auto;
+    background: #fff; border-radius: 3px; overflow: hidden; line-height: 0;
     box-shadow: var(--shadow);
 }
-#paper:empty { display: none; }
 /* The width/height the script sets is the whole size; the page may not be
    shrunk or stretched by the sheet. */
-#paper svg { display: block; width: 100%; height: auto; max-width: none; max-height: none; }
-#paper.enter { animation: pagein .19s ease-out both; }
+.page svg { display: block; width: 100%; height: 100%; max-width: none; max-height: none; }
+.page.enter { animation: pagein .19s ease-out both; }
 @keyframes pagein { from { opacity: 0; transform: translateY(7px) } to { opacity: 1; transform: none } }
 
 /* ----------------------------------------------------------- no document */
@@ -266,7 +272,7 @@ body.ready #dock { opacity: 1; transform: translateX(-50%); pointer-events: auto
 </header>
 
 <div id="stage">
-    <div class="sheet"><div id="paper"></div></div>
+    <div class="sheet"><div id="pages"></div></div>
     <div id="welcome">
         <div class="card" id="card" role="button" tabindex="0">
             <div class="glyph">
@@ -321,11 +327,15 @@ const WASM = await assetUrl('pdf_web.wasm');
 const FONTS = new URLSearchParams(location.search).get('fonts') || await assetUrl('standard_fonts.br');
 
 const $ = (id) => document.getElementById(id);
-const stage = $("stage"), paper = $("paper");
+const stage = $("stage"), pages = $("pages");
 const state = {
     doc: null, page: 0, pages: 0, url: "", length: 0,
     zoom: "page",       // "page" | "width" | a number
-    size: null,         // the page's natural size in CSS px, from the SVG
+    size: null,         // a page's natural size in CSS px, from its SVG
+    sizes: new Map(),   // page index -> natural size, where a page differs
+    layout: null,       // the column: every page's top, width and height
+    mounted: new Map(), // page index -> the element holding it
+    mounting: new Map(),// page index -> the render still running for it
     z: 1,               // what `zoom` worked out to, for the +/- buttons
     busy: false,
 };
@@ -389,6 +399,7 @@ async function open(url, startAt = 1) {
     state.doc = null;
     state.url = url;
     state.pages = 0;
+    resetPages();
     $("title").textContent = nameOf(url);
     document.title = `${nameOf(url)} — PDF`;
     busy(true);
@@ -427,6 +438,9 @@ async function open(url, startAt = 1) {
         $("pageno").max = String(state.pages);
         $("welcome").hidden = true;
         document.body.classList.add("ready");
+        // A zoom needs a page size and only a rendered page has one: lay the
+        // column out from the likely size, corrected when the page arrives.
+        fit();
         $("openform").hidden = true;
         $("openbtn").hidden = false;
         say(`${state.pages} page(s), ${fmt(length)}`);
@@ -451,7 +465,7 @@ function preloadNeighbours() {
     const doc = state.doc;
     if (!doc || !PRELOAD) return;
     const before = doc.preload.bytes;
-    const jobs = [state.page + 1, state.page - 1].map((i) => doc.prefetch(i).catch(() => 0));
+    const jobs = [state.page + 1, state.page - 1, state.page + 2].map((i) => doc.prefetch(i).catch(() => 0));
     Promise.all(jobs).then((got) => {
         const bytes = doc.preload.bytes - before;
         if (bytes > 0) console.log(`preloaded neighbours: ${fmt(bytes)} in ${got.filter(Boolean).length} page(s)`);
@@ -461,55 +475,235 @@ function preloadNeighbours() {
 async function show(i) {
     const doc = state.doc;
     if (!doc || i < 0 || i >= state.pages) return;
+    state.page = Math.round(i);
+    updateChrome();
+    mountAround();
+    scrollToPage(state.page);
     busy(true);
+    try { await mount(state.page); } catch (e) { fail(e); } finally { busy(false); }
+    preloadNeighbours();
+}
+
+// --- the pages -----------------------------------------------------------
+//
+// A document is a column of pages, not one page that is swapped out: page `k`
+// sits at an offset that depends only on the sizes of the pages above it, so
+// the scrollbar is honest and a page that arrives late cannot shove its
+// neighbours around. Only the pages near the reader are in the DOM; the rest
+// are their slots' worth of space, waiting. Reading is scrolling.
+
+const PROVISIONAL = [612, 792];   // letter, until a page says otherwise
+const GAP = 18;                   // px between two pages, whatever the zoom
+const KEEP = 2;                   // pages either side of the reader kept rendered
+
+/** Natural size of page `k`, in CSS px. */
+function naturalSize(k) {
+    return state.sizes.get(k) || state.size || PROVISIONAL;
+}
+
+/** Lay the column out at the current zoom: every slot's top, width and height,
+ *  the height of the whole column, and the pages already in the DOM moved to
+ *  where they now belong. */
+function relayout() {
+    const n = state.pages;
+    if (!n) return null;
+    const tops = new Float64Array(n), hs = new Float64Array(n), ws = new Float64Array(n);
+    let top = 0, maxW = 0;
+    for (let i = 0; i < n; i++) {
+        const [w, h] = naturalSize(i);
+        tops[i] = top; ws[i] = w * state.z; hs[i] = h * state.z;
+        top += hs[i] + GAP;
+        if (ws[i] > maxW) maxW = ws[i];
+    }
+    state.layout = { tops, hs, ws, maxW, total: Math.max(0, top - GAP) };
+    pages.style.height = `${state.layout.total}px`;
+    pages.style.width = `${maxW}px`;
+    for (const [k, el] of state.mounted) place(k, el);
+    return state.layout;
+}
+
+function place(k, el) {
+    const L = state.layout;
+    if (!L || k >= L.tops.length) return;
+    el.style.top = `${L.tops[k]}px`;
+    el.style.width = `${L.ws[k]}px`;
+    el.style.height = `${L.hs[k]}px`;
+}
+
+/** How far into the page the reader is, 0..1: what a zoom has to keep. */
+function progressInPage() {
+    const L = state.layout;
+    if (!L) return 0;
+    const d = stage.scrollTop - pages.offsetTop - L.tops[state.page];
+    return L.hs[state.page] > 0 ? Math.min(Math.max(d / L.hs[state.page], 0), 1) : 0;
+}
+
+function restoreProgress(p) {
+    const L = state.layout;
+    if (!L) return;
+    stage.scrollTop = Math.max(0, pages.offsetTop + L.tops[state.page] + p * L.hs[state.page]);
+}
+
+/** Put a page's top at the top of the viewport. */
+function scrollToPage(k) {
+    const L = state.layout;
+    if (!L || k >= L.tops.length) return;
+    stage.scrollTop = Math.max(0, pages.offsetTop + L.tops[k]);
+}
+
+/** The page under the middle of the viewport — the one the reader is on, so
+ *  the number changes when the next page is more than half in view. */
+function pageAtScroll() {
+    const L = state.layout;
+    if (!L) return 0;
+    const y = stage.scrollTop + stage.clientHeight * 0.5 - pages.offsetTop;
+    let lo = 0, hi = L.tops.length - 1;
+    while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        if (L.tops[mid] <= y) lo = mid; else hi = mid - 1;
+    }
+    return lo;
+}
+
+/** Rendering is one page at a time: `doc.page()` drives the module, and a fast
+ *  scroll must never find two pages half-rendered inside it. */
+let renderTurn = Promise.resolve();
+let gen = 0;                      // which document the queue belongs to
+
+/** Forget everything about the pages of the document that was open. */
+function resetPages() {
+    gen++;
+    pages.textContent = "";
+    state.mounted.clear();
+    state.mounting.clear();
+    state.sizes.clear();
+    state.size = null;
+    state.layout = null;
+    state.page = 0;
+    state.z = 1;
+}
+
+/** Put page `k` in the DOM — at its slot, at once — and render it. */
+function mount(k) {
+    if (!state.doc || !state.layout || k < 0 || k >= state.pages) return Promise.resolve();
+    if (state.mounted.has(k)) return state.mounting.get(k) || Promise.resolve();
+    const el = document.createElement("div");
+    el.className = "page";
+    el.dataset.page = String(k + 1);
+    state.mounted.set(k, el);
+    place(k, el);
+    pages.appendChild(el);
+    const mine = gen;
+    const run = renderTurn.then(() => renderPage(k, el, mine));
+    renderTurn = run.catch(() => {});          // one failure must not stop the queue
+    state.mounting.set(k, run);
+    run.then(() => { if (state.mounting.get(k) === run) state.mounting.delete(k); },
+             () => { if (state.mounting.get(k) === run) state.mounting.delete(k); });
+    return run;
+}
+
+/** The page under the reader first, then the ones a flick of the wheel will
+ *  reach; anything further off goes back to being reserved space. */
+function mountAround() {
+    const k = state.page;
+    mount(k);
+    mount(k + 1); mount(k + 2);
+    mount(k - 1); mount(k - 2);
+    for (const [key, el] of [...state.mounted]) {
+        if (Math.abs(key - k) > KEEP) { el.remove(); state.mounted.delete(key); }
+    }
+}
+
+async function renderPage(k, el, mine) {
+    const doc = state.doc;
+    if (mine !== gen || !doc) return;
+    // Scrolled away while this page waited for the module: keep the slot, skip
+    // the work, and drop the element so coming back mounts it afresh.
+    if (Math.abs(k - state.page) > KEEP || state.mounted.get(k) !== el) {
+        if (state.mounted.get(k) === el) { el.remove(); state.mounted.delete(k); }
+        return;
+    }
+    const before = doc.bytes, beforeRequests = doc.requests;
+    const t0 = performance.now();
+    let svg;
     try {
-        say(`page ${i + 1} of ${state.pages} …`);
-        const before = doc.bytes, beforeRequests = doc.requests;
-        const t0 = performance.now();
-        const svg = await doc.page(i);
-        const t1 = performance.now();
-        state.page = i;
-        // Inline, not as an <img>: inline keeps the page in the document, so
-        // text selection and find-in-page can see it once a text layer exists.
-        paper.innerHTML = svg;
-        const t2 = performance.now();
-        measure();
-        fit();
-        const t3 = performance.now();
-        paper.classList.remove("enter");
-        void paper.offsetWidth;         // restart the animation
-        paper.classList.add("enter");
-        stage.scrollTop = 0;
-        stage.scrollLeft = 0;
-        $("pageno").value = String(i + 1);
-        $("prev").disabled = i === 0;
-        $("next").disabled = i === state.pages - 1;
-        // Where the milliseconds went: the module's own time, the browser's
-        // parse/style/paint after it, and the frame that actually landed.
-        const t4 = performance.now();
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-            const t5 = performance.now();
-            document.body.dataset.timing = JSON.stringify({
-                page: i + 1,
-                fetchModule: Math.round(t1 - t0),
-                dom: Math.round(t2 - t1),
-                layout: Math.round(t3 - t2),
-                css: Math.round(t4 - t3),
-                paint: Math.round(t5 - t4),
-            });
-        }));
-        say(`page ${i + 1}: ${fmt(doc.bytes - before)} in ${doc.requests - beforeRequests} request(s) · ${fmt(doc.bytes)} of ${fmt(state.length)} read · ${Math.round(t4 - t0)} ms`);
+        svg = await doc.page(k);
+    } catch (e) { fail(e); return; }
+    const t1 = performance.now();
+    if (mine !== gen || state.doc !== doc || state.mounted.get(k) !== el) return;
+    el.innerHTML = svg;
+    const t2 = performance.now();
+    // A page that is not the size we assumed moves everything below it: say so
+    // and put the column back together, keeping the reader where they were.
+    const size = sizeOf(el.querySelector("svg"));
+    if (size) {
+        const known = naturalSize(k);
+        if (Math.abs(known[0] - size[0]) > 0.05 || Math.abs(known[1] - size[1]) > 0.05) {
+            state.sizes.set(k, size);
+            if (!state.size) state.size = size;
+            if (typeof state.zoom === "number") { const keep = progressInPage(); relayout(); restoreProgress(keep); }
+            else fit();
+        }
+    }
+    el.classList.remove("enter");
+    void el.offsetWidth;                        // restart the animation
+    el.classList.add("enter");
+    const t3 = performance.now();
+    // Where the milliseconds went: the module's own time, the browser's
+    // parse/style/paint after it, and the frame that actually landed.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        if (mine !== gen) return;
+        document.body.dataset.timing = JSON.stringify({
+            page: k + 1,
+            fetchModule: Math.round(t1 - t0),
+            dom: Math.round(t2 - t1),
+            layout: Math.round(t3 - t2),
+            paint: Math.round(performance.now() - t3),
+        });
+    }));
+    if (k === state.page) {
+        say(`page ${k + 1}: ${fmt(doc.bytes - before)} in ${doc.requests - beforeRequests} request(s) · ` +
+            `${fmt(doc.bytes)} of ${fmt(state.length)} read · ${Math.round(t3 - t0)} ms`);
+    }
+}
+
+// --- scrolling -----------------------------------------------------------
+
+let scrollFrame = 0, chromeTimer = 0;
+
+stage.addEventListener("scroll", () => {
+    if (scrollFrame) return;
+    scrollFrame = requestAnimationFrame(() => { scrollFrame = 0; onScroll(); });
+}, { passive: true });
+
+function onScroll() {
+    if (!state.doc || !state.layout) return;
+    const k = pageAtScroll();
+    if (k !== state.page) {
+        state.page = k;
+        updateChrome();
         preloadNeighbours();
-        // A sandboxed frame (opaque origin) refuses this; the page still works.
-        // Every other parameter is kept — a link copied from the address bar
-        // has to keep working, and `?fonts=` / `?preload=` are part of it.
+        say(`page ${k + 1} of ${state.pages} · ${fmt(state.doc.bytes)} of ${fmt(state.length)} read`);
+    }
+    mountAround();
+}
+
+/** The dock, and the address bar — which follows the reader, but not on every
+ *  frame of a fling. */
+function updateChrome() {
+    const i = state.page, n = state.pages;
+    $("pageno").value = String(i + 1);
+    $("prev").disabled = i === 0;
+    $("next").disabled = i === n - 1;
+    clearTimeout(chromeTimer);
+    chromeTimer = setTimeout(() => {
         try {
             const query = new URLSearchParams(location.search);
             query.set("pdf", state.url);
-            query.set("page", String(i + 1));
+            query.set("page", String(state.page + 1));
             history.replaceState(null, "", `?${query}${location.hash}`);
         } catch {}
-    } catch (e) { fail(e); } finally { busy(false); }
+    }, 180);
 }
 
 // --- size and zoom -------------------------------------------------------
@@ -523,32 +717,34 @@ function px(value) {
     return parseFloat(m[1]) * per;
 }
 
-function measure() {
-    const svg = paper.querySelector("svg");
+/** A page's own size, in CSS px, from its SVG. */
+function sizeOf(svg) {
     const w = px(svg && svg.getAttribute("width")), h = px(svg && svg.getAttribute("height"));
-    state.size = w > 0 && h > 0 ? [w, h] : null;
+    return w > 0 && h > 0 ? [w, h] : null;
 }
 
-/** Work `state.zoom` out into a factor, and give the SVG a real size in px:
- *  scaling by width keeps the text crisp and lets the sheet scroll, which a
- *  CSS transform would not. */
+/** Work `state.zoom` out into a factor. Scaling by width keeps the text crisp
+ *  and lets the column scroll, which a CSS transform would not. */
 function fit() {
-    const svg = paper.querySelector("svg");
-    if (!svg || !state.size) return;
-    const [w, h] = state.size;
+    const [w, h] = state.size || PROVISIONAL;
     const pad = window.matchMedia("(max-width: 720px)").matches ? 16 : 28;
     const availW = Math.max(120, stage.clientWidth - 2 * pad);
     const availH = Math.max(120, stage.clientHeight - 2 * pad - (document.body.classList.contains("ready") ? 40 : 0));
-    let z = typeof state.zoom === "number" ? state.zoom
+    const z = typeof state.zoom === "number" ? state.zoom
         : state.zoom === "width" ? availW / w
         : Math.min(availW / w, availH / h);
-    z = Math.min(Math.max(z, 0.25), 6);
-    state.z = z;
-    svg.style.width = `${(w * z).toFixed(2)}px`;
-    svg.style.height = `${(h * z).toFixed(2)}px`;
-    $("zoomlabel").textContent = `${Math.round(z * 100)}%`;
-    $("zoomout").disabled = z <= 0.251;
-    $("zoomin").disabled = z >= 5.99;
+    setZoom(z);
+}
+
+/** Put a zoom in force: every slot moves, the reader stays where they were. */
+function setZoom(z) {
+    const keep = progressInPage();
+    state.z = Math.min(Math.max(z, 0.25), 6);
+    relayout();
+    restoreProgress(keep);
+    $("zoomlabel").textContent = `${Math.round(state.z * 100)}%`;
+    $("zoomout").disabled = state.z <= 0.251;
+    $("zoomin").disabled = state.z >= 5.99;
 }
 
 function zoomBy(factor) {
@@ -607,12 +803,39 @@ $("pageno").addEventListener("change", () => {
 $("pageno").addEventListener("keydown", (e) => { if (e.key === "Enter") $("pageno").blur(); });
 $("pageno").addEventListener("focus", () => $("pageno").select());
 
+/** The stage is the scroller and the body is not, so the keys a reader uses to
+ *  scroll have to be sent there by hand. A screenful — unless a page's edge is
+ *  nearer than that, in which case the reader asked for the next page and
+ *  should get its top, not a few pixels into it. */
+function scrollBy(dy) {
+    stage.scrollBy({ top: dy, behavior: "smooth" });
+}
+
+function scrollScreen(dir) {
+    const L = state.layout;
+    if (!L) return;
+    const screen = Math.max(80, stage.clientHeight - 64);
+    const edge = L.tops[state.page + dir];
+    if (edge !== undefined) {
+        const to = pages.offsetTop + edge;
+        if (Math.abs(to - stage.scrollTop) <= screen) {
+            stage.scrollTo({ top: to, behavior: "smooth" });
+            return;
+        }
+    }
+    stage.scrollBy({ top: dir * screen, behavior: "smooth" });
+}
+
 addEventListener("keydown", (e) => {
     if (e.target.matches("input, textarea")) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     switch (e.key) {
-        case "ArrowLeft": case "PageUp": show(state.page - 1); break;
-        case "ArrowRight": case "PageDown": case " ": show(state.page + 1); break;
+        case "ArrowLeft": show(state.page - 1); break;
+        case "ArrowRight": show(state.page + 1); break;
+        case "ArrowDown": scrollBy(64); break;
+        case "ArrowUp": scrollBy(-64); break;
+        case " ": case "PageDown": scrollScreen(1); break;
+        case "PageUp": scrollScreen(-1); break;
         case "Home": show(0); break;
         case "End": show(state.pages - 1); break;
         case "+": case "=": zoomBy(1.15); break;
@@ -622,7 +845,7 @@ addEventListener("keydown", (e) => {
         case "Escape": clearError(); $("openform").hidden = true; break;
         default: return;
     }
-    if (e.key === " " || e.key === "PageDown" || e.key === "PageUp") e.preventDefault();
+    e.preventDefault();
 });
 
 // --- a file from this device --------------------------------------------
@@ -649,6 +872,7 @@ async function openLocal(f) {
         const bytes = new Uint8Array(await f.arrayBuffer());
         clearError();
         if (state.doc) state.doc.free();
+        resetPages();
         const doc = new Doc(new HttpSource("", bytes.length));
         state.length = bytes.length;
         await doc.fonts(FONTS);
@@ -668,6 +892,7 @@ async function openLocal(f) {
         $("pageno").max = String(state.pages);
         $("welcome").hidden = true;
         document.body.classList.add("ready");
+        fit();
         $("openform").hidden = true;
         $("openbtn").hidden = false;
         say(`${state.pages} page(s), ${fmt(bytes.length)}`);

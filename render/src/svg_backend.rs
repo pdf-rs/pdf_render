@@ -158,8 +158,12 @@ pub struct SvgBackend<'a> {
     /// `id` namespace of the layer being built: `l0_`, `l1_`, … Layers are
     /// separate documents that a host may splice into one, and `id`s are
     /// document-global, so numbering them per layer keeps two layers apart
-    /// without a rename pass over the finished text.
+    /// without a rename pass over the finished text. `scope` goes in front of
+    /// that for a host that puts several pages in one document — a viewer that
+    /// scrolls: page 34's glyphs are `p34_l0_g17`, and no two pages can
+    /// resolve each other's `<use href="#…">`.
     prefix: String,
+    scope: String,
 }
 
 impl<'a> SvgBackend<'a> {
@@ -169,6 +173,7 @@ impl<'a> SvgBackend<'a> {
             view_box: RectF::default(),
             body: String::new(),
             prefix: String::from("l0_"),
+            scope: String::new(),
             clips: Vec::new(),
             used_clips: Vec::new(),
             layers: Vec::new(),
@@ -192,6 +197,15 @@ impl<'a> SvgBackend<'a> {
     /// background (dark reading mode, checkerboard for transparency).
     pub fn set_paint_background(&mut self, paint: bool) {
         self.paint_background = paint;
+    }
+
+    /// Put every `id` this page writes behind `scope` (`p34_`), for a host
+    /// that has more than one page in a document at a time: a scrolling
+    /// viewer shows them inline, and `id`s and `url(#…)` are document-global,
+    /// so without this page 35 would draw page 34's glyphs.
+    pub fn set_id_scope(&mut self, scope: impl Into<String>) {
+        self.scope = scope.into();
+        self.prefix = format!("{}l0_", self.scope);
     }
 
     /// How many text spans the page had. They are not drawn; this only says
@@ -293,7 +307,7 @@ impl<'a> SvgBackend<'a> {
         svg.push_str(&self.body);
         svg.push_str("</g></svg>");
         self.layers.push(Layer::Vector(svg));
-        self.prefix = format!("l{}_", self.layers.len());
+        self.prefix = format!("{}l{}_", self.scope, self.layers.len());
         self.body.clear();
         self.used_clips.clear();
         self.used_symbols.clear();

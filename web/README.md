@@ -179,6 +179,30 @@ for `page ± 1` as soon as a page is shown. Measured on `nasa.pdf` (521 pages):
 It is real traffic for a page nobody may visit — twice the bytes of a page per
 page read — so `?preload=0` turns it off.
 
+## Scrolling, not paging
+
+The viewer is a column of pages, not one page that gets replaced, so reading a
+document is scrolling it. `index.html` keeps a `<div class="page">` per page in
+`#pages`, at `top = the heights above + gap`, and `#pages` is as tall as the
+whole document from the start: a page that has not been rendered is its slot's
+worth of empty space, so the scrollbar tells the truth and a page arriving late
+cannot move the one above it.
+
+Two pages either side of the reader are in the DOM; the rest go back to being
+space. Renders go through one queue — `doc.page()` drives the module, and two
+pages must not be half-rendered inside it — and a page that is scrolled away
+while it waits its turn is skipped rather than drawn late.
+
+The dock, the page field, `←`/`→`, Home and End scroll to a page; Space and
+PageDown move one screenful, or to a page's top when that is nearer; the wheel
+and a finger do what they always do. The address bar follows the reader,
+debounced, so a copied link still names the page.
+
+Because the pages are inline in one document, an `id` is no longer one page's
+own business, which is what the page scope above is for: before it, page 2
+already repeated 72 of page 1's ids, and every page but the first would have
+drawn its neighbour's glyph outlines.
+
 `node web/test/prefetch.mjs <file.pdf> [<file.pdf>.tbl]` checks it: `fetch` and
 the two out-parameters are stubbed around `www/doc.js`, and the test fails if a
 preloaded page still asks for a byte, if the same page is prefetched twice at
@@ -207,10 +231,12 @@ That pass is gone rather than merely fixed: the backend numbers its `id`s per
 layer itself (`l0_g17`), so the layers of a page are put together by
 concatenation and nothing is read back. A definition is emitted in every layer
 that uses it — 13 of the 521 pages in `nasa.pdf` would repeat one otherwise —
-and the ids keep those copies apart. `node web/test/dupids.mjs <file.pdf>
-<file.pdf>.tbl` is the check: no page may define an `id` twice or reference one
-it does not define (521 pages, 31,072 definitions, 576,832 `<use>`, none
-repeated, none dangling).
+and the ids keep those copies apart. With pages inline in one document (see
+below) an `id` is shared by all of them, so the viewer asks for a page scope as
+well and the backend writes `p34_l0_g17`. `node web/test/dupids.mjs <file.pdf>
+<file.pdf>.tbl` is the check: no page may define an `id` twice, reference one
+it does not define, or write one an earlier page already wrote (521 pages of
+`nasa.pdf`: 38,396 definitions, 576,832 `<use>`, none of the three).
 
 The rest of the rendering is where it should be: the SVG backend formats
 coordinates itself (rounding to thousandths and writing digits, rather than
@@ -220,7 +246,7 @@ writes a paint's `fill`/`fill-opacity` once instead of once per glyph.
 
 The viewer shows each page's own time in the readout (`page 20: 0 B in 0
 request(s) · 156 KiB of 4.7 MiB read · 31 ms`) and puts the breakdown on
-`document.body.dataset.timing`: `fetchModule`, `dom`, `layout`, `css`, `paint`.
+`document.body.dataset.timing`: `fetchModule`, `dom`, `layout`, `paint`.
 
 
 
