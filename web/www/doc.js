@@ -75,10 +75,32 @@ export function parseTable(text) {
     return table;
 }
 
+/** A plain file, read by range over HTTP. */
+export class HttpSource {
+    constructor(url, length) {
+        this.url = url;
+        this.length = length;
+    }
+
+    /** Bytes `[start, start + len)`; one request, whatever the size. */
+    async read(start, len) {
+        const end = start + len - 1;
+        const response = await fetch(this.url, { headers: { Range: `bytes=${start}-${end}` } });
+        if (response.status === 200) {
+            // The server ignored the range and sent everything: take the
+            // window we asked for and cost the caller nothing extra.
+            const all = new Uint8Array(await response.arrayBuffer());
+            return all.subarray(start, Math.min(start + len, all.length));
+        }
+        if (response.status !== 206) throw new Error(`${this.url}: HTTP ${response.status}`);
+        return new Uint8Array(await response.arrayBuffer());
+    }
+}
+
 /** A document fetched by range. */
 export class Doc {
     #doc = 0;
-    #url = "";
+    #source = null;
     /** The sender's table, if any: page index -> ranges. */
     #table = null;
     /** What we hold, sorted and disjoint: `[start, end)` pairs. */
@@ -87,9 +109,9 @@ export class Doc {
     bytes = 0;
     requests = 0;
 
-    constructor(url, length) {
-        this.#url = url;
-        this.#doc = mod.pdf_doc_new(length);
+    constructor(source) {
+        this.#source = source;
+        this.#doc = mod.pdf_doc_new(source.length);
     }
 
     /** Hand the page tables in: one round trip per page, no discovery loop. */
@@ -211,14 +233,7 @@ export class Doc {
     async #fetch(ranges) {
         this.requests++;
         const bodies = await Promise.all(ranges.map(async ([start, len]) => {
-            const end = start + len - 1;
-            const response = await fetch(this.#url, { headers: { Range: `bytes=${start}-${end}` } });
-            if (response.status !== 206) {
-                // 200 means the server ignored the range: it sent the whole
-                // file, which is correct behaviour and costs too much.
-                if (!response.ok) throw new Error(`${this.#url}: HTTP ${response.status}`);
-            }
-            const bytes = new Uint8Array(await response.arrayBuffer());
+            const bytes = await this.#source.read(start, len);
             this.bytes += bytes.length;
             this.#remember(start, bytes.length);
             return [start, bytes];

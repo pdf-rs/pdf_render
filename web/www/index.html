@@ -42,7 +42,8 @@
 <p id="error"></p>
 
 <script type="module">
-import { load, Doc, parseTable } from './doc.js';
+import { load, Doc, HttpSource, parseTable } from './doc.js';
+import { Sealed, keyFromFragment } from './seal.js';
 
 // Where the wasm module and the font bundle live, relative to this page. The
 // bundle is brotli-compressed on the wire (`Content-Encoding: br`, what a server
@@ -94,9 +95,29 @@ async function open(url) {
     state.url = url;
     try {
         say("opening …");
-        const length = await fileLength(url);
+        // A sealed share carries its key in the fragment: the bytes on the
+        // server are ciphertext, and the page is the only place that can read
+        // them. Without a key this is an ordinary range-read file.
+        const key = keyFromFragment(location.hash);
+        let source;
+        try {
+            source = key ? await Sealed.open(url, key) : new HttpSource(url, await fileLength(url));
+        } catch (e) {
+            if (key) throw e;
+            // No key, and the plain file is not there: say what is actually
+            // wrong rather than "Failed to fetch".
+            const sealed = await fetch(`${url}.sealed`, { headers: { Range: "bytes=0-0" } }).catch(() => null);
+            if (sealed && sealed.ok) {
+                throw new Error(
+                    `${url} is sealed: this link is missing its key. Open the whole link, including ` +
+                    `the part after # (it looks like #k=…); without it the file is ciphertext and ` +
+                    `nothing here can read it.`);
+            }
+            throw e;
+        }
+        const length = source.length;
         state.length = length;
-        const doc = new Doc(url, length);
+        const doc = new Doc(source);
         const fontBytes = await doc.fonts(FONTS);
         const table = await loadTable(url);
         if (table) doc.setTable(table);
@@ -128,8 +149,10 @@ async function show(i) {
         $("page").innerHTML = svg;
         say(`page ${i + 1}: ${fmt(doc.bytes - before)} in ${doc.requests - beforeRequests} request(s); ${fmt(doc.bytes)} of ${fmt(state.length)} read`);
         // A sandboxed frame (opaque origin) refuses this; the page still works.
+        // The fragment is kept: it is where a sealed share's key lives, and a
+        // link copied from the address bar has to keep working.
         try {
-            history.replaceState(null, "", `?pdf=${encodeURIComponent(state.url)}&page=${i + 1}`);
+            history.replaceState(null, "", `?pdf=${encodeURIComponent(state.url)}&page=${i + 1}${location.hash}`);
         } catch {}
     } catch (e) { fail(e); }
 }
@@ -163,7 +186,7 @@ async function openLocal(file) {
         const bytes = new Uint8Array(await file.arrayBuffer());
         $("error").textContent = "";
         if (state.doc) state.doc.free();
-        const doc = new Doc("", bytes.length);
+        const doc = new Doc(new HttpSource("", bytes.length));
         state.length = bytes.length;
         await doc.fonts(FONTS);
         // No server: every byte is here already.
