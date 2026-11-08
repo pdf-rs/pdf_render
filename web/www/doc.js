@@ -48,10 +48,41 @@ function supply(doc, start, bytes) {
     mod.pdf_buf_free(ptr, bytes.length);
 }
 
+/** A per-page range table, as `page_table` writes it — the sender's list of
+ *  what each page reads. Returns `page number -> [[start, len], …]`, 1-based,
+ *  with page 0 being the document itself (what it costs to count the pages).
+ *
+ *  Text, not binary, on purpose: it is a few dozen bytes per page, a server
+ *  compresses it to almost nothing, and anyone can read it in a browser. The
+ *  ranges are already merged by the sender, so the client takes them as they
+ *  are. */
+export function parseTable(text) {
+    const lines = text.split("\n");
+    if (lines[0].trim() !== "pdfranges 1") throw new Error("not a pdfranges table");
+    const table = new Map();
+    for (const line of lines.slice(2)) {
+        const field = line.trim().split(/\s+/).filter(Boolean).map(Number);
+        if (field.length < 2 || !Number.isSafeInteger(field[0])) continue;
+        const [page, count] = field;
+        const ranges = [];
+        for (let i = 0; i < count; i++) {
+            const start = field[2 + i * 2], len = field[3 + i * 2];
+            if (!Number.isSafeInteger(start) || !Number.isSafeInteger(len)) break;
+            ranges.push([start, len]);
+        }
+        if (ranges.length) table.set(page, ranges);
+    }
+    return table;
+}
+
 /** A document fetched by range. */
 export class Doc {
     #doc = 0;
     #url = "";
+    /** The sender's table, if any: page index -> ranges. */
+    #table = null;
+    /** What we hold, sorted and disjoint: `[start, end)` pairs. */
+    #have = [];
     /** What the page has read, for the readout. */
     bytes = 0;
     requests = 0;
@@ -59,6 +90,12 @@ export class Doc {
     constructor(url, length) {
         this.#url = url;
         this.#doc = mod.pdf_doc_new(length);
+    }
+
+    /** Hand the page tables in: one round trip per page, no discovery loop. */
+    setTable(table) {
+        this.#table = table;
+        return table.size;
     }
 
     /** Hand in the standard fonts: one bundle, every one of them, up front —
@@ -85,12 +122,26 @@ export class Doc {
 
     /** How many pages, and what that cost. */
     async open() {
+        // The table has a line for the document itself, so even the first
+        // request is complete instead of a discovery round.
+        const known = this.#table && this.#table.get(0);
+        if (known) {
+            const missing = this.#missing(known);
+            if (missing.length) await this.#fetch(missing);
+        }
         await this.#settle(PAGE_ALL);
         return this.numPages;
     }
 
     /** One page, as a self-contained SVG document. */
     async page(index) {
+        // If the sender told us what this page reads, ask for all of it at
+        // once — the page then renders in this pass instead of the next one.
+        const known = this.#table && this.#table.get(index + 1);
+        if (known) {
+            const missing = this.#missing(known);
+            if (missing.length) await this.#fetch(missing);
+        }
         await this.#settle(index);
         const ptr = mod.pdf_page_svg(this.#doc, index, outLen);
         const len = u32(outLen)[0];
@@ -124,6 +175,36 @@ export class Doc {
         return ranges;
     }
 
+    /** The parts of `ranges` we do not hold yet, as map-able `[start, len]`. */
+    #missing(ranges) {
+        const out = [];
+        for (const [start, len] of ranges) {
+            const end = start + len;
+            let pos = start;
+            for (const [s, e] of this.#have) {
+                if (e <= pos) continue;
+                if (s >= end) break;
+                if (s > pos) out.push([pos, Math.min(s, end) - pos]);
+                pos = Math.max(pos, e);
+                if (pos >= end) break;
+            }
+            if (pos < end) out.push([pos, end - pos]);
+        }
+        return out;
+    }
+
+    /** Write down that `[start, start + len)` is here now, merged. */
+    #remember(start, len) {
+        const all = [[start, start + len], ...this.#have].sort((a, b) => a[0] - b[0]);
+        const out = [];
+        for (const r of all) {
+            const last = out[out.length - 1];
+            if (last && r[0] <= last[1]) last[1] = Math.max(last[1], r[1]);
+            else out.push([r[0], r[1]]);
+        }
+        this.#have = out;
+    }
+
     /** Every range of one pass, in parallel. They are separate requests —
      *  a browser HTTP/2 connection carries them together — and the module is
      *  told about each as it arrives. */
@@ -139,6 +220,7 @@ export class Doc {
             }
             const bytes = new Uint8Array(await response.arrayBuffer());
             this.bytes += bytes.length;
+            this.#remember(start, bytes.length);
             return [start, bytes];
         }));
         for (const [start, bytes] of bodies) supply(this.#doc, start, bytes);

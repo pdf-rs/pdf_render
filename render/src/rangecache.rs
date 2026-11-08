@@ -24,6 +24,7 @@
 //!   "fetch only what is needed" buys nothing.
 
 use std::cell::RefCell;
+use std::fmt::Write as _;
 use std::ops::Range;
 use std::rc::Rc;
 
@@ -295,6 +296,91 @@ impl<'a> PdfBackend for LazyReader<'a> {
     }
 }
 
+/// A `pdf::Backend` over bytes we already have that writes down every read.
+///
+/// This is the sender's side of a per-page range table: whoever holds the whole
+/// file — the machine that builds a share, a CDN origin, a proxy — renders a
+/// page once against this and gets exactly the ranges a client that has nothing
+/// else will ask for. Nothing is guessed and nothing is missing, so the client
+/// needs one round trip per page instead of a discovery loop.
+pub struct Recorder<'a> {
+    data: &'a [u8],
+    log: RefCell<Vec<Range<usize>>>,
+}
+
+impl<'a> Recorder<'a> {
+    pub fn new(data: &'a [u8]) -> Self {
+        Recorder { data, log: RefCell::new(Vec::new()) }
+    }
+
+    /// The ranges read so far — merged, sorted, with `max_gap` slack so a
+    /// table does not split into ranges a few hundred bytes apart — and a
+    /// reset, so one recorder can serve every page in turn.
+    pub fn take(&self, max_gap: usize) -> Vec<Range<usize>> {
+        coalesce(std::mem::take(&mut *self.log.borrow_mut()), max_gap)
+    }
+}
+
+impl PdfBackend for Recorder<'_> {
+    fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]> {
+        let r = range.to_range(self.data.len())?;
+        self.log.borrow_mut().push(r.clone());
+        Ok(&self.data[r])
+    }
+
+    fn len(&self) -> usize {
+        self.data.len()
+    }
+}
+
+/// A per-page range table as text, the thing a client fetches once per bundle.
+///
+/// ```text
+/// pdfranges 1
+/// 169
+/// 5 12 0 4096 8192 2048 …
+/// ```
+///
+/// Line 1 is the format tag and its version; line 2 is a hint at how many pages
+/// the document has; then one line per page that has a table: the 1-based page
+/// number, how many ranges follow, and `start length` for each. A page with no
+/// line is simply not covered, and the client falls back to discovering it.
+/// Page 0 is the document itself — what has to be read to know how many pages
+/// there are — so a client can start with one request instead of four.
+/// Numbers are decimal and ranges are disjoint, ascending and already merged.
+pub fn format_table(page_count: u32, pages: &[(u32, Vec<Range<usize>>)]) -> String {
+    let mut out = String::with_capacity(64 * pages.len().max(1));
+    out.push_str("pdfranges 1\n");
+    let _ = writeln!(out, "{page_count}");
+    for (page, ranges) in pages {
+        let _ = write!(out, "{page} {}", ranges.len());
+        for r in ranges {
+            let _ = write!(out, " {} {}", r.start, r.end - r.start);
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// A borrowed backend.
+///
+/// `pdf::Backend` can not be implemented for `&B` here: the blanket impl for
+/// `Deref<Target = [u8]>` would collide with it. One line of forwarding gives
+/// the callers a name for the borrow instead.
+pub struct Borrowed<'a, B: ?Sized>(pub &'a B);
+
+impl<B: PdfBackend + ?Sized> PdfBackend for Borrowed<'_, B> {
+    fn read<T: IndexRange>(&self, range: T) -> Result<&[u8]> {
+        self.0.read(range)
+    }
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+    fn is_incomplete(&self, range: Range<usize>) -> bool {
+        self.0.is_incomplete(range)
+    }
+}
+
 /// What one attempted pass produced.
 pub enum Pass<T> {
     /// Everything it needed was there.
@@ -413,6 +499,23 @@ mod tests {
         assert_eq!(reader.read(100..200).unwrap().len(), 100);
         assert!(!reader.is_incomplete(100..200));
         assert!(log.is_empty());
+    }
+
+    #[test]
+    fn a_table_is_written_and_read_the_same_way() {
+        let table = format_table(3, &[(1, vec![0..10, 20..40]), (3, vec![4096..8192])]);
+        assert_eq!(table, "pdfranges 1\n3\n1 2 0 10 20 20\n3 1 4096 4096\n");
+    }
+
+    #[test]
+    fn a_recorder_writes_down_every_read() {
+        let data = vec![0u8; 100];
+        let rec = Recorder::new(&data);
+        assert_eq!(rec.read(10..20).unwrap().len(), 10);
+        assert_eq!(rec.read(22..30).unwrap().len(), 8);
+        // Coalesced with slack: a table does not split into ranges 200 bytes apart.
+        assert_eq!(rec.take(4 * 1024), vec![10..30]);
+        assert!(rec.take(4 * 1024).is_empty());
     }
 
     #[test]

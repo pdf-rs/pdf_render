@@ -94,6 +94,8 @@ pub struct ImageLayer {
 /// The result of rendering one page.
 pub struct SvgPage {
     /// `[min_x, min_y, width, height]`, the `viewBox` of every vector layer.
+    /// Millimetres, the render space: the same numbers are the `mm` size of the
+    /// document.
     pub view_box: [f32; 4],
     pub layers: Vec<Layer>,
 }
@@ -228,11 +230,16 @@ impl<'a> SvgBackend<'a> {
         }
         let [x, y, w, h] = self.view_box_array();
         let mut svg = String::with_capacity(self.body.len() + 256);
+        // The render space is millimetres (`SCALE` in lib.rs), so the intrinsic
+        // size is in `mm`, not in unitless CSS pixels: a letter page comes out
+        // 215.9×279.4mm = 816×1056 CSS px in a browser, the same size a PDF
+        // viewer shows at 100%, and an `<img>`/`<object>` gets the same. Rendered
+        // unitless it was 216 px wide — a quarter of the page, unreadable.
         svg.push_str("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"");
         fmt_f(w, &mut svg);
-        svg.push_str("\" height=\"");
+        svg.push_str("mm\" height=\"");
         fmt_f(h, &mut svg);
-        svg.push_str("\" viewBox=\"");
+        svg.push_str("mm\" viewBox=\"");
         fmt_f(x, &mut svg);
         svg.push(' ');
         fmt_f(y, &mut svg);
@@ -265,7 +272,8 @@ impl<'a> SvgBackend<'a> {
         // as it is. A flip here would rotate every page by 180°.
         svg.push_str("<g>");
         svg.push_str(&self.body);
-        svg.push_str("</g></svg>");        self.layers.push(Layer::Vector(svg));
+        svg.push_str("</g></svg>");
+        self.layers.push(Layer::Vector(svg));
         self.body.clear();
         self.used_clips.clear();
         self.used_symbols.clear();

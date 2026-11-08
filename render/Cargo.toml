@@ -51,6 +51,19 @@ required-features = ["vello_cpu"]
 name = "vello_scene"
 required-features = ["vello"]
 
+# The examples below write SVG, so they need the backend that does.
+[[example]]
+name = "svg_page"
+required-features = ["svg"]
+
+[[example]]
+name = "net_sim"
+required-features = ["svg"]
+
+[[example]]
+name = "range_render"
+required-features = ["svg"]
+
 # Builds the font bundle the browser fetches (build time only).
 [[bin]]
 name = "fonts_blob"

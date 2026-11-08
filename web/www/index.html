@@ -13,8 +13,12 @@
     header input[type=url] { flex: 1; min-width: 8rem; }
     #readout { font-variant-numeric: tabular-nums; opacity: .7; white-space: nowrap; }
     main { display: grid; place-items: start center; padding: 1rem; }
-    #page { background: white; box-shadow: 0 1px 4px #0003; max-width: 100%; height: auto; }
-    #page svg { display: block; width: 100%; height: auto; }
+    /* The SVG carries its real physical size (`width="215.9mm"`), so no CSS
+       needs to invent one: `width: auto` keeps the page at 100%, and the two
+       max- limits only shrink it when the window is smaller than the paper. */
+    #page { background: white; box-shadow: 0 1px 4px #0003; line-height: 0; }
+    #page svg { display: block; width: auto; height: auto;
+                max-width: min(100%, calc(100vw - 2rem)); max-height: calc(100vh - 5rem); }
     #drop { border: 2px dashed #8886; border-radius: 8px; padding: 3rem; text-align: center; }
     #drop.hot { border-color: #4a9; background: #4a91; }
     #error { color: #b00; white-space: pre-wrap; padding: 0 1rem; }
@@ -38,7 +42,7 @@
 <p id="error"></p>
 
 <script type="module">
-import { load, Doc } from './doc.js';
+import { load, Doc, parseTable } from './doc.js';
 
 // Where the wasm module and the font bundle live, relative to this page. The
 // bundle is brotli-compressed on the wire (`Content-Encoding: br`, what a server
@@ -67,6 +71,22 @@ async function fileLength(url) {
     return Number(total);
 }
 
+/** The sender's per-page table, if it shipped one: `<pdf>.tbl` next to the
+ *  file. It says what each page reads, so one request per page is enough. No
+ *  table is not an error — the client then discovers the ranges page by page. */
+async function loadTable(url) {
+    try {
+        const response = await fetch(`${url}.tbl`);
+        if (!response.ok) return null;
+        const table = parseTable(await response.text());
+        console.log(`table: ${table.size} page(s)`);
+        return table;
+    } catch (e) {
+        console.log(`no range table: ${e.message || e}`);
+        return null;
+    }
+}
+
 async function open(url) {
     $("error").textContent = "";
     if (state.doc) state.doc.free();
@@ -78,12 +98,14 @@ async function open(url) {
         state.length = length;
         const doc = new Doc(url, length);
         const fontBytes = await doc.fonts(FONTS);
+        const table = await loadTable(url);
+        if (table) doc.setTable(table);
         state.pages = await doc.open();
         state.doc = doc;
         state.page = 0;
         $("drop").hidden = true;
         say(`${state.pages} page(s), ${fmt(length)}`);
-        console.log(`fonts: ${fmt(fontBytes)}; open: ${doc.requests} request(s), ${fmt(doc.bytes)}`);
+        console.log(`fonts: ${fmt(fontBytes)}; table: ${table ? `${table.size} page(s)` : "none"}; open: ${doc.requests} request(s), ${fmt(doc.bytes)}`);
         await show(0);
     } catch (e) { fail(e); }
 }

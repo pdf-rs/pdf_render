@@ -24,11 +24,14 @@ pub fn combine(page: SvgPage) -> String {
     let flip = y + y + h;
 
     let mut out = String::with_capacity(4096);
+    // `view_box` is in millimetres (the render space), so the intrinsic size is
+    // in `mm`: 215.9×279.4mm is 816×1056 CSS px, the size of the paper at 100%.
+    // Unitless it would be 216 px wide — a quarter of the page, unreadable.
     out.push_str("<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"");
     num(w, &mut out);
-    out.push_str("\" height=\"");
+    out.push_str("mm\" height=\"");
     num(h, &mut out);
-    out.push_str("\" viewBox=\"");
+    out.push_str("mm\" viewBox=\"");
     num(x, &mut out);
     out.push(' ');
     num(y, &mut out);
