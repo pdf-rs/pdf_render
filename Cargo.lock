@@ -1256,7 +1256,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 [[package]]
 name = "font"
 version = "0.1.0"
-source = "git+https://github.com/pdf-rs/font?rev=f3368198ada8f8888f009261322d7125c43d4c5c#f3368198ada8f8888f009261322d7125c43d4c5c"
+source = "git+https://github.com/pdf-rs/font?rev=032f427839837c6e1fac7333bd4039d3482d17a7#032f427839837c6e1fac7333bd4039d3482d17a7"
 dependencies = [
  "decorum",
  "indexmap 1.9.3",
@@ -1269,8 +1269,7 @@ dependencies = [
  "pathfinder_geometry",
  "pdf_encoding 0.4.0",
  "slotmap",
- "tuple 0.5.1",
- "vello_encoding",
+ "tuple 0.5.2 (git+https://github.com/s3bk/tuple/)",
 ]
 
 [[package]]
@@ -1290,7 +1289,7 @@ dependencies = [
  "pdf_encoding 0.4.0",
  "rand 0.7.3",
  "slotmap",
- "tuple 0.5.1",
+ "tuple 0.5.2 (git+https://github.com/s3bk/tuple/)",
 ]
 
 [[package]]
@@ -1503,7 +1502,7 @@ checksum = "f07c02868ebe3ffab0c273801b815f19a9fc05743b5b9da971449dd40604fe30"
 dependencies = [
  "async-trait",
  "rustc-hash 2.1.0",
- "tuple 0.5.2",
+ "tuple 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "web-time 1.1.0",
 ]
 
@@ -2862,7 +2861,7 @@ version = "0.1.1"
 source = "git+https://github.com/s3bk/pathfinder_view#4c3b70bea706a896dcbbb35f60651680a54d6f23"
 dependencies = [
  "bincode",
- "cfg-if 1.0.0",
+ "cfg-if 0.1.10",
  "gl",
  "glutin 0.30.10",
  "glutin-winit",
@@ -2877,7 +2876,7 @@ dependencies = [
  "pathfinder_webgl",
  "raw-window-handle 0.5.2",
  "serde",
- "tuple 0.5.2",
+ "tuple 0.5.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "wasm-bindgen",
  "web-sys",
  "winit",
@@ -4490,8 +4489,9 @@ dependencies = [
 
 [[package]]
 name = "tuple"
-version = "0.5.1"
-source = "git+https://github.com/s3bk/tuple/#8eacd6eae56691f926b92ff3fcd77012135ee812"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9bb9f6bd73479481158ba8ee3edf17aca93354623d13f02e96a2014fdbc1c37e"
 dependencies = [
  "num-traits",
  "serde",
@@ -4500,8 +4500,7 @@ dependencies = [
 [[package]]
 name = "tuple"
 version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9bb9f6bd73479481158ba8ee3edf17aca93354623d13f02e96a2014fdbc1c37e"
+source = "git+https://github.com/s3bk/tuple/#bcdc3d9fcf5f93ab8310e84f139ccaab6dd6acc7"
 dependencies = [
  "num-traits",
  "serde",
