@@ -12,6 +12,7 @@ use pdf::font::{Font as PdfFont};
 use pdf::error::{Result, PdfError};
 
 use font::{self, Encoder, FontVariant};
+use pathfinder_geometry::vector::Vector2F;
 use vello_encoding::{Encoding, PathEncoder};
 use std::sync::Arc;
 use super::FontEntry;
@@ -548,13 +549,29 @@ impl GlyphData {
         GlyphData { encoding: Encoding::new(), offsets: vec![] }
     }
 }
+/// `font` depends on `vello_encoding` with a wildcard, so a resolution can give
+/// it a copy other than the `=0.11.0` this crate encodes into; its `Pen` impl
+/// then belongs to that other copy and naming `PathEncoder` here stops
+/// satisfying the bound. A local wrapper keeps the two independent.
+pub struct VelloPen<'a>(PathEncoder<'a>);
+
+impl<'a> font::Pen for VelloPen<'a> {
+    fn move_to(&mut self, p: Vector2F) { self.0.move_to(p.x(), p.y()) }
+    fn line_to(&mut self, p: Vector2F) { self.0.line_to(p.x(), p.y()) }
+    fn quad_to(&mut self, p1: Vector2F, p2: Vector2F) { self.0.quad_to(p1.x(), p1.y(), p2.x(), p2.y()) }
+    fn cubic_to(&mut self, p1: Vector2F, p2: Vector2F, p3: Vector2F) {
+        self.0.cubic_to(p1.x(), p1.y(), p2.x(), p2.y(), p3.x(), p3.y())
+    }
+    fn close(&mut self) { self.0.close() }
+}
+
 impl font::Encoder for GlyphData {
-    type Pen<'a> = PathEncoder<'a>;
+    type Pen<'a> = VelloPen<'a>;
     type GlyphRef = u32;
     fn encode_shape<'f, O, E>(&mut self, mut f: impl for<'b> FnMut(&mut Self::Pen<'b>) -> Result<O, E> + 'f) -> Result<(O, Self::GlyphRef), E> {
-        let mut p: PathEncoder = self.encoding.encode_path(true);
+        let mut p = VelloPen(self.encoding.encode_path(true));
         let o = f(&mut p)?;
-        p.finish(true);
+        p.0.finish(true);
         self.offsets.push(Offset {
             path_tag: self.encoding.path_tags.len(),
             path_data: self.encoding.path_data.len(),
