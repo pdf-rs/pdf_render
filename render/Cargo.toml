@@ -100,7 +100,7 @@ branch = "master"
 
 [dependencies]
 log = "0.4"
-font = { git = "https://github.com/pdf-rs/font", rev = "d7b579afd94c983af6e0f218e13d4095209b9be2", features = ["cff"] }
+font = { git = "https://github.com/pdf-rs/font", rev = "f3368198ada8f8888f009261322d7125c43d4c5c", features = ["cff"] }
 pdf_encoding = "0.4"
 itertools = "*"
 image = { version = "0.25", default-features = false, features = ["bmp", "dds", "exr", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp"] }

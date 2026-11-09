@@ -1256,7 +1256,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 [[package]]
 name = "font"
 version = "0.1.0"
-source = "git+https://github.com/pdf-rs/font?branch=vello#d7b579afd94c983af6e0f218e13d4095209b9be2"
+source = "git+https://github.com/pdf-rs/font?rev=f3368198ada8f8888f009261322d7125c43d4c5c#f3368198ada8f8888f009261322d7125c43d4c5c"
 dependencies = [
  "decorum",
  "indexmap 1.9.3",
@@ -1268,7 +1268,6 @@ dependencies = [
  "pathfinder_content",
  "pathfinder_geometry",
  "pdf_encoding 0.4.0",
- "rand 0.7.3",
  "slotmap",
  "tuple 0.5.1",
  "vello_encoding",
@@ -2907,6 +2906,7 @@ version = "0.10.0"
 dependencies = [
  "aes",
  "bitflags 2.13.2",
+ "brotli-decompressor",
  "cbc",
  "datasize",
  "deflate",
@@ -2919,7 +2919,64 @@ dependencies = [
  "log",
  "md5",
  "once_cell",
- "pdf_derive",
+ "pdf_derive 0.3.0",
+ "sha2 0.11.1",
+ "snafu",
+ "stringprep",
+ "tempfile",
+ "weezl",
+ "zune-jpeg 0.5.15",
+]
+
+[[package]]
+name = "pdf"
+version = "0.10.0"
+source = "git+ssh://git@github.com/s3bk/pdf.git?branch=master#c9d39f2b4e4ad71fb06162affe54e6599edea9e2"
+dependencies = [
+ "aes",
+ "bitflags 2.13.2",
+ "brotli-decompressor",
+ "cbc",
+ "datasize",
+ "deflate",
+ "fax",
+ "globalcache",
+ "indexmap 2.14.2",
+ "istring 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "itertools 0.13.0",
+ "libflate",
+ "log",
+ "md5",
+ "once_cell",
+ "pdf_derive 0.3.0 (git+ssh://git@github.com/s3bk/pdf.git?branch=master)",
+ "sha2 0.11.1",
+ "snafu",
+ "stringprep",
+ "tempfile",
+ "weezl",
+ "zune-jpeg 0.5.15",
+]
+
+[[package]]
+name = "pdf"
+version = "0.10.0"
+source = "git+https://github.com/pdf-rs/pdf#c9d39f2b4e4ad71fb06162affe54e6599edea9e2"
+dependencies = [
+ "aes",
+ "bitflags 2.13.2",
+ "brotli-decompressor",
+ "cbc",
+ "datasize",
+ "deflate",
+ "fax",
+ "indexmap 2.14.2",
+ "istring 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
+ "itertools 0.13.0",
+ "libflate",
+ "log",
+ "md5",
+ "once_cell",
+ "pdf_derive 0.3.0 (git+https://github.com/pdf-rs/pdf)",
  "sha2 0.11.1",
  "snafu",
  "stringprep",
@@ -2931,6 +2988,26 @@ dependencies = [
 [[package]]
 name = "pdf_derive"
 version = "0.3.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.91",
+]
+
+[[package]]
+name = "pdf_derive"
+version = "0.3.0"
+source = "git+ssh://git@github.com/s3bk/pdf.git?branch=master#c9d39f2b4e4ad71fb06162affe54e6599edea9e2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.91",
+]
+
+[[package]]
+name = "pdf_derive"
+version = "0.3.0"
+source = "git+https://github.com/pdf-rs/pdf#c9d39f2b4e4ad71fb06162affe54e6599edea9e2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2986,7 +3063,7 @@ dependencies = [
  "pathfinder_content",
  "pathfinder_geometry",
  "pathfinder_renderer",
- "pdf",
+ "pdf 0.10.0 (git+ssh://git@github.com/s3bk/pdf.git?branch=master)",
  "pdf_encoding 0.4.0",
  "peniko",
  "rand 0.6.5",
@@ -3020,7 +3097,7 @@ dependencies = [
  "pathfinder_renderer",
  "pathfinder_resources",
  "pathfinder_view",
- "pdf",
+ "pdf 0.10.0 (git+https://github.com/pdf-rs/pdf)",
  "pdf_encoding 0.1.0",
  "pdf_render",
  "structopt",
@@ -3035,7 +3112,7 @@ dependencies = [
  "flate2",
  "image",
  "log",
- "pdf",
+ "pdf 0.10.0",
  "pdf_render",
 ]
 
