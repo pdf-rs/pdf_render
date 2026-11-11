@@ -32,6 +32,25 @@ pub trait Backend {
     fn draw(&mut self, outline: &Outline, mode: &DrawMode, fill_rule: FillRule, transform: Transform2F, clip: Option<Self::ClipPathId>);
     fn set_view_box(&mut self, r: RectF);
     fn draw_image(&mut self, xref: Ref<XObject>, im: &ImageXObject, resources: &Resources, transform: Transform2F, mode: BlendMode, clip: Option<Self::ClipPathId>, resolve: &impl Resolve);
+
+    /// A stencil (`/ImageMask`): the image's samples say *where* to paint, and
+    /// `fill` says with what. Backends that can paint an alpha mask in a colour
+    /// override this; the rest fall back to drawing it as a grey image, which
+    /// is what every backend did before this existed.
+    fn draw_stencil(
+        &mut self,
+        xref: Ref<XObject>,
+        im: &ImageXObject,
+        resources: &Resources,
+        transform: Transform2F,
+        mode: BlendMode,
+        fill: &FillMode,
+        clip: Option<Self::ClipPathId>,
+        resolve: &impl Resolve,
+    ) {
+        let _ = fill;
+        self.draw_image(xref, im, resources, transform, mode, clip, resolve);
+    }
     fn draw_inline_image(&mut self, im: &Arc<ImageXObject>, resources: &Resources, transform: Transform2F, mode: BlendMode, clip: Option<Self::ClipPathId>, resolve: &impl Resolve);
     fn draw_glyph(&mut self, font: &FontRc<Self::Encoder>, glyph: &Glyph<Self::Encoder>, mode: &DrawMode, transform: Transform2F, clip: Option<Self::ClipPathId>);
     fn get_font(&mut self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry<Self::Encoder>>>, PdfError>;

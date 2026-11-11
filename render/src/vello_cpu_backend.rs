@@ -348,6 +348,27 @@ impl<'a> Backend for VelloCpuBackend<'a> {
         }
     }
 
+    fn draw_stencil(
+        &mut self,
+        xref: pdf::object::Ref<pdf::object::XObject>,
+        im: &pdf::object::ImageXObject,
+        resources: &pdf::object::Resources,
+        transform: Transform2F,
+        mode: crate::BlendMode,
+        fill: &FillMode,
+        clip: Option<Self::ClipPathId>,
+        resolve: &impl pdf::object::Resolve,
+    ) {
+        let ink = match crate::image::stencil_ink(fill) {
+            Some(ink) => ink,
+            None => return self.draw_image(xref, im, resources, transform, mode, clip, resolve),
+        };
+        let ImageResult(r) = self.cache.get_stencil(xref, im, resolve, ink);
+        if let Ok(image) = &*r {
+            self.draw_image_brush(image, transform, clip);
+        }
+    }
+
     fn draw_inline_image(
         &mut self,
         im: &Arc<pdf::object::ImageXObject>,

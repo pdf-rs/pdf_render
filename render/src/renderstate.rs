@@ -438,7 +438,19 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 let mode = self.blend_mode_fill();
                 match *xobject {
                     XObject::Image(ref im) => {
-                        self.backend.draw_image(xobject_ref, im, self.resources, self.graphics_state.transform, mode, self.graphics_state.clip_path_id, self.resolve);
+                        if im.image_mask {
+                            // A stencil paints in the current fill colour: the
+                            // fill is not a colour the image carries, it is
+                            // the one the page set before `Do`.
+                            let fill = FillMode {
+                                color: self.graphics_state.fill_color,
+                                alpha: self.graphics_state.fill_color_alpha,
+                                mode,
+                            };
+                            self.backend.draw_stencil(xobject_ref, im, self.resources, self.graphics_state.transform, mode, &fill, self.graphics_state.clip_path_id, self.resolve);
+                        } else {
+                            self.backend.draw_image(xobject_ref, im, self.resources, self.graphics_state.transform, mode, self.graphics_state.clip_path_id, self.resolve);
+                        }
                     }
                     XObject::Form(ref content) => {
                         self.draw_form(content)?;

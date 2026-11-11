@@ -109,10 +109,72 @@ fn resize_alpha(data: &[u8], src_width: u32, src_height: u32, dest_width: u32, d
     Some(dest.into_raw())
 }
 
+/// One pixel per sample: the ink colour where the stencil paints, transparent
+/// where it does not.
+///
+/// The decoder hands back CCITT stencils one byte per sample (0 or 255); one
+/// that is still packed stays at one bit per sample. After
+/// `ImageXObject::image_data` the rule is the one PDF gives for a plain mask:
+/// sample 0 paints, sample 1 leaves the page alone (`Decode [1 0]` has already
+/// been flipped there).
+fn stencil_alpha(raw_data: &[u8], pixel_count: usize, ink: ColorU) -> Result<Vec<ColorU>, PdfError> {
+    let packed = raw_data.len() * 8 <= pixel_count;
+    if !packed && raw_data.len() < pixel_count {
+        return Err(PdfError::Other { msg: format!("stencil: {} bytes for {} samples", raw_data.len(), pixel_count) });
+    }
+    let clear = ColorU { r: ink.r, g: ink.g, b: ink.b, a: 0 };
+    let mut data = Vec::with_capacity(pixel_count);
+    for i in 0 .. pixel_count {
+        let paint = if packed {
+            (raw_data[i / 8] >> (7 - i % 8)) & 1 == 0
+        } else {
+            raw_data[i] < 0x80
+        };
+        data.push(if paint { ink } else { clear });
+    }
+    Ok(data)
+}
+
+/// The colour a stencil paints with: the solid fill colour of the graphics
+/// state, alpha included. A pattern or gradient fill cannot be flattened into
+/// one colour, so those say `None` and the caller falls back to drawing the
+/// mask as a grey image.
+pub fn stencil_ink(fill: &crate::backend::FillMode) -> Option<ColorU> {
+    match fill.color {
+        crate::Fill::Solid(r, g, b) => Some(pathfinder_color::ColorF::new(r, g, b, fill.alpha).to_u8()),
+        _ => None,
+    }
+}
+
+/// A stencil (`/ImageMask`), painted in `ink`: the samples are not colour, they
+/// are "paint here, this colour".
+pub fn load_stencil(image: &ImageXObject, resolve: &impl Resolve, ink: ColorU) -> Result<ImageData<'static>, PdfError> {
+    let raw_data = image.image_data(resolve)?;
+    stencil_from_samples(&raw_data, image.width, image.height, ink)
+}
+
+fn stencil_from_samples(raw_data: &[u8], width: u32, height: u32, ink: ColorU) -> Result<ImageData<'static>, PdfError> {
+    let pixel_count = width as usize * height as usize;
+    let data = stencil_alpha(raw_data, pixel_count, ink)?;
+    ImageData::new(data, width, height)
+        .ok_or_else(|| PdfError::Other { msg: "stencil size mismatch".into() })
+}
+
 pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Resolve, mode: BlendMode) -> Result<ImageData<'static>, PdfError> {
     let raw_data = image.image_data(resolve)?;
 
     let pixel_count = image.width as usize * image.height as usize;
+
+    // A stencil: the samples are not colour, they are "paint here with the
+    // current fill colour". Read as grey — which is what happens if this is
+    // skipped — a scan of black ink on white paper comes out as a black box,
+    // because the samples are mostly 1 where the paper is. The backends turn a
+    // stencil into `load_stencil` with the graphics state's fill colour; this
+    // is the fallback for the ones that do not (inline images, SVG), which can
+    // at least be black ink on transparent.
+    if image.image_mask {
+        return load_stencil(image, resolve, ColorU { r: 0, g: 0, b: 0, a: 255 });
+    }
 
     if raw_data.len() % pixel_count != 0 {
         warn!("invalid data length {} bytes for {} pixels", raw_data.len(), pixel_count);
