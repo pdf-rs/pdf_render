@@ -1,6 +1,6 @@
 use image::{RgbaImage, ImageBuffer, Rgba};
 use log::{debug, info, warn};
-use pdf::{object::*, t};
+use pdf::{object::*, primitive::Primitive, t};
 use pdf::error::PdfError;
 use pathfinder_color::ColorU;
 use std::borrow::Cow;
@@ -203,8 +203,61 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
         }
     }
 
+    // 8.9.6.4: `/Mask` is either a stencil mask (an image mask at its own
+    // resolution) or a colour-key array. The stencil says where the image is
+    // painted at all; ignoring it paints the whole image, which is how a scan
+    // whose dark plate is masked down to the printed lines becomes a black
+    // sheet.
+    let stencil_alpha_map = match image.mask {
+        Some(Primitive::Reference(r)) => match resolve.get(Ref::<Stream<ImageDict>>::new(r)) {
+            Ok(m) => {
+                let (mw, mh) = (m.info.width.max(1), m.info.height.max(1));
+                let inverted = match m.info.decode.as_ref() {
+                    Some(d) if d.len() >= 2 => d[0] > d[1],
+                    _ => false,
+                };
+                let samples = t!(m.data(resolve));
+                let count = mw as usize * mh as usize;
+                let mut alpha = Vec::with_capacity(count);
+                if samples.len() >= count {
+                    // One byte per sample, the shape the fax decoder produces.
+                    for &s in samples[..count].iter() {
+                        let paint = (s == 0) != inverted;
+                        alpha.push(if paint { 255 } else { 0 });
+                    }
+                } else {
+                    for i in 0 .. count {
+                        let bit = (samples[i / 8] >> (7 - i % 8)) & 1;
+                        let paint = (bit == 0) != inverted;
+                        alpha.push(if paint { 255 } else { 0 });
+                    }
+                }
+                let alpha = if (mw, mh) != (image.width, image.height) {
+                    match resize_alpha(&alpha, mw, mh, image.width, image.height) {
+                        Some(resized) => resized,
+                        None => alpha,
+                    }
+                } else {
+                    alpha
+                };
+                Some(alpha)
+            }
+            Err(e) => {
+                warn!("image /Mask unreadable ({}), painting it unmasked", e);
+                None
+            }
+        },
+        Some(Primitive::Array(_)) => {
+            // Colour-key masking: ranges of sample values that are transparent.
+            // Rare, and a wrong guess would blank an image that should show, so
+            // it is left alone and said out loud.
+            warn!("colour-key /Mask is not supported yet");
+            None
+        }
+        _ => None,
+    };
     let mask = t!(image.smask.map(|r| resolve.get(r)).transpose());
-    let alpha = match mask {
+    let soft: Option<Data> = match mask {
         Some(ref mask) => {
             let data = Data::Arc(t!((**mask).data(resolve)));
             let mask_width = mask.width as usize;
@@ -225,9 +278,22 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
             if mask.width != image.width || mask.height != image.height {
                 alpha = resize_alpha(&*alpha, mask.width, mask.height, image.width, image.height).unwrap().into();
             }
-            alpha
+            Some(alpha)
         }
-        None => Data::Slice(&[][..])
+        None => None
+    };
+    // A pixel is painted only where every mask agrees: with both a soft mask
+    // and a stencil, that is the smaller of the two alphas, and they are both
+    // at the image's resolution by now.
+    let alpha: Data = match (soft, stencil_alpha_map) {
+        (Some(a), None) => a,
+        (None, Some(b)) => Data::Arc(b.into()),
+        (Some(a), Some(b)) => {
+            let n = pixel_count.min(a.len()).min(b.len());
+            let combined: Vec<u8> = (0 .. n).map(|i| a[i].min(b[i])).collect();
+            Data::Arc(combined.into())
+        }
+        (None, None) => Data::Slice(&[][..]),
     };
     #[inline]
     fn ex(b: u8, bits: u8) -> u8 {

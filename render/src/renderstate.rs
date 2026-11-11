@@ -621,11 +621,18 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                 ColorSpace::Icc(ref icc) => {
                     match icc.info.alternate {
                         Some(ref alt) => alt,
+                        // No /Alternate: the profile's own component count says
+                        // how many operands there are, and 8.6.5.5 makes such a
+                        // space behave as the device space with the same count.
+                        // Reading it as an error left whole pages black — the
+                        // one-component profiles are common (an /ICCBased grey
+                        // for a page background).
                         None => {
-                            match args.len() {
+                            match icc.info.components {
+                                1 => &ColorSpace::DeviceGray,
                                 3 => &ColorSpace::DeviceRGB,
                                 4 => &ColorSpace::DeviceCMYK,
-                                _ => return Err(PdfError::Other { msg: format!("ICC profile without alternate color space") })
+                                n => return Err(PdfError::Other { msg: format!("ICC profile with {} components has no alternate color space", n) })
                             }
                         }
                     }
@@ -640,7 +647,15 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
 
             match *cs {
                 ColorSpace::Icc(_) => return Err(PdfError::Other { msg: format!("nested ICC color space") }),
-                ColorSpace::Lab(_) => return Err(PdfError::Other { msg: format!("Lab color space is not supported") }),
+                ColorSpace::Lab(ref lab) => {
+                    if args.len() != 3 {
+                        return Err(PdfError::Other { msg: format!("expected 3 color arguments, got {:?}", args) });
+                    }
+                    let l = args[0].as_number()?;
+                    let a = args[1].as_number()?;
+                    let b = args[2].as_number()?;
+                    Ok(lab2rgb(l, a, b, lab))
+                }
                 ColorSpace::DeviceGray | ColorSpace::CalGray(_) => {
                     if args.len() != 1 {
                         return Err(PdfError::Other { msg: format!("expected 1 color arguments, got {:?}", args) });
@@ -688,7 +703,10 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                         Some(ColorSpace::DeviceCMYK) => {
                             Ok(cmyk2rgb((out[0], out[1], out[2], out[3]), mode))
                         }
-                        _ => unimplemented!("DeviceN colorspace")
+                        _ => {
+                            warn!("DeviceN alternate {:?} not supported, using its first components", alt);
+                            Ok(gray2rgb(out[0]))
+                        }
                     }
                 }
                 ColorSpace::Separation(ref name, ref alt, ref f) => {
@@ -725,7 +743,12 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                             //debug!("gray={gray}");
                             Ok(Fill::Solid(gray, gray, gray))
                         }
-                        c => unimplemented!("Separation(alt={:?})", c)
+                        c => {
+                            warn!("Separation alternate {:?} not supported, using the tint as grey", c);
+                            let mut gray = [0.0];
+                            let _ = f.apply(&[x], &mut gray);
+                            Ok(gray2rgb(gray[0]))
+                        }
                     }
                 }
                 ColorSpace::Indexed(ref cs, hival, ref lut) => {
@@ -744,7 +767,10 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                             let cvt = |b: u8| b as f32;
                             Ok(cmyk2rgb((cvt(c[0]), cvt(c[1]), cvt(c[2]), cvt(c[3])), mode))
                         }
-                        ref base => unimplemented!("Indexed colorspace with base {:?}", base)
+                        ref base => {
+                            warn!("Indexed colorspace with base {:?} not supported, using black", base);
+                            Ok(Fill::Solid(0., 0., 0.))
+                        }
                     }
                 }
                 ColorSpace::Pattern => {
@@ -768,8 +794,14 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
                         }
                     }
                 }
-                ColorSpace::Other(ref p) => unimplemented!("Other Color space {:?}", p),
-                ColorSpace::Named(ref p) => unimplemented!("nested Named {:?}", p),
+                ColorSpace::Other(ref p) => {
+                    warn!("color space {:?} not supported, using black", p);
+                    Ok(Fill::Solid(0., 0., 0.))
+                }
+                ColorSpace::Named(ref p) => {
+                    warn!("nested named color space {:?} not supported, using black", p);
+                    Ok(Fill::Solid(0., 0., 0.))
+                }
             }
         }
     }
@@ -777,6 +809,45 @@ fn convert_color2<'a>(cs: &mut &'a ColorSpace, color: &Color, resources: &Resour
 
 fn gray2rgb(g: f32) -> Fill {
     Fill::Solid(g, g, g)
+}
+
+/// CIE 1976 L*a*b* to sRGB, using the space's own white point and the D50
+/// adaptation sRGB's matrix expects (8.6.5.4 gives the parameters, sRGB the
+/// rest). A fill colour needs to be close, not exact: three levels of error on
+/// a tint are invisible, a page of black because the space was "not supported"
+/// is not.
+fn lab2rgb(l: f32, a: f32, b: f32, params: &LabParams) -> Fill {
+    let wp = |i: usize, default: f32| params.white_point.get(i).copied().unwrap_or(default);
+    let (xw, yw, zw) = (wp(0, 0.9642), wp(1, 1.0), wp(2, 0.8249));
+    // 8.6.5.4: a and b span [amin, amax] and [bmin, bmax], which map onto the
+    // standard -128..127 of the a*b* plane.
+    let (amin, amax, bmin, bmax) = match params.range {
+        Some(ref r) if r.len() >= 4 => (r[0], r[1], r[2], r[3]),
+        _ => (-100.0, 100.0, -100.0, 100.0),
+    };
+    let a = if amax > amin { -128.0 + (a - amin) * 255.0 / (amax - amin) } else { a };
+    let b = if bmax > bmin { -128.0 + (b - bmin) * 255.0 / (bmax - bmin) } else { b };
+    let fy = (l + 16.0) / 116.0;
+    let fx = fy + a / 500.0;
+    let fz = fy - b / 200.0;
+    let finv = |f: f32| {
+        let f3 = f * f * f;
+        if f3 > 0.008856 { f3 } else { (116.0 * f - 16.0) / 903.3 }
+    };
+    let (x, y, z) = (xw * finv(fx), yw * finv(fy), zw * finv(fz));
+    // Bradford, D50 -> D65, then the sRGB primaries.
+    let x65 = 0.9555766 * x - 0.0230393 * y + 0.0631636 * z;
+    let y65 = -0.0282895 * x + 1.0099416 * y + 0.0210077 * z;
+    let z65 = 0.0122982 * x - 0.0204830 * y + 1.3299098 * z;
+    let lin = |v: f32| {
+        let v = v.clamp(0.0, 1.0);
+        if v <= 0.0031308 { 12.92 * v } else { 1.055 * v.powf(1.0 / 2.4) - 0.055 }
+    };
+    Fill::Solid(
+        lin(3.2404542 * x65 - 1.5371385 * y65 - 0.4985314 * z65),
+        lin(-0.9692660 * x65 + 1.8760108 * y65 + 0.0415560 * z65),
+        lin(0.0556434 * x65 - 0.2040259 * y65 + 1.0572252 * z65),
+    )
 }
 
 fn cmyk2rgb((c, m, y, k): (f32, f32, f32, f32), mode: BlendMode) -> Fill {

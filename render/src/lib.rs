@@ -118,20 +118,48 @@ pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Pa
         * rotate
         * Transform2F::row_major(SCALE, 0.0, -bounds.min_x(), 0.0, -SCALE, bounds.max_y());
 
-    let resources = t!(page.resources());
+    // 7.7.3.3: /Resources is inheritable, but a page that has none anywhere is
+    // a page with no resources, not a broken page: poppler draws it with an
+    // empty dictionary and so does this. Losing the page over a missing entry
+    // that only says "there is nothing to look up here" is worse than drawing
+    // what the content stream does with its own inline objects.
+    let empty_resources;
+    let resources = match page.resources() {
+        Ok(r) => r,
+        Err(e) => {
+            warn!("page has no /Resources ({}), drawing it with an empty one", e);
+            empty_resources = MaybeRef::Direct(Shared::new(Resources::default()));
+            &empty_resources
+        }
+    };
 
-    let contents = try_opt!(page.contents.as_ref());
     let mut renderstate = RenderState::new(backend, resolve, &resources, root_transformation);
     // Parse lazily: a `Vec<Op>` for one page of the spec is several megabytes.
-    for (i, op) in contents.ops(resolve).enumerate() {
-        let op = op?;
-        debug!("op {}: {:?}", i, op);
-        // The page number is not here, so name the op: "pages fail" says
-        // nothing, "op 4121 SetGraphicsState(GS0) failed" says everything.
-        renderstate.draw_op(&op, i).map_err(|e| {
-            warn!("op {i} {op:?} failed: {e:?}");
-            e
-        })?;
+    // A page with no /Contents at all (the entry is optional) is a blank page:
+    // poppler draws it as one, and so does this.
+    if let Some(contents) = page.contents.as_ref() {
+        for (i, op) in contents.ops(resolve).enumerate() {
+            let op = match op {
+                Ok(op) => op,
+                Err(e) => {
+                    // A content stream that stops making sense ends the page, it
+                    // does not lose it: what was drawn up to here stays drawn.
+                    warn!("content stream unreadable at op {i}: {e:?}");
+                    break;
+                }
+            };
+            debug!("op {}: {:?}", i, op);
+            // The page number is not here, so name the op: "pages fail" says
+            // nothing, "op 4121 SetGraphicsState(GS0) failed" says everything.
+            //
+            // A failing operator does not lose the page. Real files reference
+            // resources they do not carry — a page without /Resources whose
+            // content still says `/GS0 gs`, a font that is not in the file — and
+            // poppler draws everything after the bad operator, so this does too.
+            if let Err(e) = renderstate.draw_op(&op, i) {
+                warn!("op {i} {op:?} failed: {e:?}");
+            }
+        }
     }
 
     Ok(root_transformation)
