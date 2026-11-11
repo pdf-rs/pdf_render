@@ -64,6 +64,21 @@ fn zdingbat_glyph_name(b: u8) -> Option<String> {
     }
 }
 
+/// A symbolic TrueType — one whose only Unicode cmap is a (3,0) `Symbol`
+/// subtable — keeps its glyphs at `0xF000 + code`. Word and the other Office
+/// producers write exactly that: `udhr.pdf`'s ArialUnicodeMS subset has its
+/// `cmap` at 0xF020..0xF07A and nothing at 0x20..0x7A. Looking such a font up
+/// by the character it is asked for finds nothing, and the whole page comes out
+/// as notdef boxes. Poppler falls back to the private-use code in the same
+/// place, so this does too.
+fn symbolic_gid<E: Encoder + 'static>(font: &FontRc<E>, cp: u32) -> Option<GlyphId> {
+    if cp <= 0xff {
+        font.gid_for_codepoint(0xf000 | cp)
+    } else {
+        None
+    }
+}
+
 /// Map every byte of `enc` to a glyph of `font`, going through the glyph name
 /// where the font program has no unicode map of its own.
 fn fill_builtin_cmap<E: Encoder + 'static>(
@@ -240,7 +255,9 @@ impl<E: Encoder + 'static> FontEntry<E> {
                     if let Some(transcoder) = source.to(dest) {
                         let forward = source.forward_map().unwrap();
                         for b in 0 .. 256 {
-                            if let Some(gid) = transcoder.translate(b).and_then(|cp| font.gid_for_codepoint(cp)) {
+                            if let Some(gid) = transcoder.translate(b)
+                                .and_then(|cp| font.gid_for_codepoint(cp)
+                                    .or_else(|| symbolic_gid(&font, cp))) {
                                 cmap.insert(b as u16, (gid, forward.get(b as u8).map(|c| c.into())));
                                 //debug!("{} -> {:?}", b, gid);
                             }
@@ -251,7 +268,8 @@ impl<E: Encoder + 'static> FontEntry<E> {
                     if let Some(encoder) = enc.to(Encoding::Unicode) {
                         for b in 0 .. 256 {
                             let unicode = encoder.translate(b as u32);
-                            if let Some(gid) = unicode.and_then(|c| font.gid_for_unicode_codepoint(c)) {
+                            if let Some(gid) = unicode.and_then(|c| font.gid_for_unicode_codepoint(c)
+                                .or_else(|| symbolic_gid(&font, c))) {
                                 cmap.insert(b, (gid, unicode.and_then(std::char::from_u32).map(|c| c.into())));
                                 debug!("{} -> {:?}", b, gid);
                             }
@@ -287,6 +305,9 @@ impl<E: Encoder + 'static> FontEntry<E> {
                         uni.and_then(|s| s.chars().next()).and_then(|cp| font.gid_for_unicode_codepoint(cp as u32))
                     ).or_else(||
                         font.gid_for_codepoint(cp)
+                    ).or_else(||
+                        // A symbolic font that keeps its glyphs at 0xF000 + code.
+                        symbolic_gid(&font, cp as u32)
                     );
                     if gid.is_none() && symbolic {
                         gid = symbol_code(uni).and_then(|code| font.gid_for_codepoint(code));
@@ -332,6 +353,21 @@ impl<E: Encoder + 'static> FontEntry<E> {
                             }
                         }
                     }
+                }
+
+                // A symbolic TrueType — the (3,0) `Symbol` cmap Word and the
+                // Office producers write — keeps its glyphs at 0xF000 + code,
+                // so the map above is keyed by 0xF041 and a page whose bytes
+                // are plain ASCII finds nothing: every character came out as
+                // notdef. The glyphs are there, under the private-use code;
+                // make them reachable under the plain one too, where the plain
+                // code is not already taken.
+                let aliases: Vec<(u16, (GlyphId, Option<SmallString>))> = cmap.iter()
+                    .filter(|(&cp, _)| (0xf000 ..= 0xf0ff).contains(&cp) && cp & 0xff != 0)
+                    .map(|(&cp, entry)| (cp & 0xff, entry.clone()))
+                    .collect();
+                for (cp, entry) in aliases {
+                    cmap.entry(cp).or_insert(entry);
                 }
             }
 
