@@ -30,7 +30,7 @@ pub use cache::{Cache};
 use ::font::Encoder;
 pub use fontentry::{FontEntry};
 pub use backend::{DrawMode, Backend, BlendMode, FillMode};
-use log::debug;
+use log::{debug, warn};
 use pathfinder_geometry::vector::vec2f;
 use pdf::{t, try_opt};
 //pub use scene::SceneBackend;
@@ -126,7 +126,12 @@ pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Pa
     for (i, op) in contents.ops(resolve).enumerate() {
         let op = op?;
         debug!("op {}: {:?}", i, op);
-        renderstate.draw_op(&op, i)?;
+        // The page number is not here, so name the op: "pages fail" says
+        // nothing, "op 4121 SetGraphicsState(GS0) failed" says everything.
+        renderstate.draw_op(&op, i).map_err(|e| {
+            warn!("op {i} {op:?} failed: {e:?}");
+            e
+        })?;
     }
 
     Ok(root_transformation)

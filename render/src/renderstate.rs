@@ -271,8 +271,22 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 self.graphics_state.set_stroke_alpha(gs.stroke_alpha.unwrap_or(1.0));
 
                 if let Some((font_ref, size)) = gs.font {
-                    let font = self.resolve.get(font_ref)?;
-                    if let Some(e) = self.backend.get_font(&MaybeRef::Indirect(font), self.resolve)? {
+                    // Same tolerance as `TextFont`: a font that cannot be read
+                    // leaves its text unset, it does not fail the page.
+                    let font = match self.resolve.get(font_ref) {
+                        Ok(font) => self
+                            .backend
+                            .get_font(&MaybeRef::Indirect(font), self.resolve)
+                            .unwrap_or_else(|e| {
+                                warn!("gs font: {e:?}");
+                                None
+                            }),
+                        Err(e) => {
+                            warn!("gs font: {e:?}");
+                            None
+                        }
+                    };
+                    if let Some(e) = font {
                         debug!("new font: {} at size {}", e.name, size);
                         self.text_state.font_entry = Some(e);
                         self.text_state.font_size = size;
@@ -318,11 +332,25 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             Op::Leading { leading } => self.text_state.leading = leading,
             Op::TextFont { ref name, size } => {
                 let font = match self.resources.fonts.get(name) {
-                    Some(font_ref) => {
-                        let font = font_ref.load(self.resolve)?;
-                        self.backend.get_font(&font, self.resolve)?
+                    Some(font_ref) => match font_ref.load(self.resolve) {
+                        Ok(font) => match self.backend.get_font(&font, self.resolve) {
+                            Ok(font) => font,
+                            Err(e) => {
+                                warn!("font {name}: {e:?}");
+                                None
+                            }
+                        },
+                        Err(e) => {
+                            // A font that cannot be read — a `Null` where the
+                            // font program or its descriptor should be, which
+                            // arXiv's writer leaves behind — costs the text set
+                            // in that font, not the rest of the page. Failing
+                            // the op used to fail the whole page with it.
+                            warn!("font {name}: {e:?}");
+                            None
+                        }
                     },
-                    None => None
+                    None => None,
                 };
                 if let Some(e) = font {
                     debug!("new font: {} (is_cid={:?})", e.name, e.is_cid);
@@ -390,8 +418,23 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 //self._debug = _debug
             },
             Op::XObject { ref name } => {
-                let &xobject_ref = self.resources.xobjects.get(name).ok_or(PdfError::NotFound { word: name.as_str().into()})?;
-                let xobject = self.resolve.get(xobject_ref)?;
+                let Some(&xobject_ref) = self.resources.xobjects.get(name) else {
+                    // A content stream naming an object the page's `/Resources`
+                    // does not list: one bad `Do` is not a reason to give up on
+                    // the other nine hundred ops on the page.
+                    warn!("xobject {name}: not in Resources");
+                    return Ok(());
+                };
+                let xobject = match self.resolve.get(xobject_ref) {
+                    Ok(x) => x,
+                    Err(e) => {
+                        // Same for an object that is there but is not one: a
+                        // `Null` in the cross-reference table is common in
+                        // files written by tools that dropped unused objects.
+                        warn!("xobject {name}: {e:?}");
+                        return Ok(());
+                    }
+                };
                 let mode = self.blend_mode_fill();
                 match *xobject {
                     XObject::Image(ref im) => {

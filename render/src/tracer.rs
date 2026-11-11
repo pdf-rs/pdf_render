@@ -82,6 +82,15 @@ where
             std: StandardCache::new(),
         }
     }
+    /// A tracer whose standard fonts come from the host rather than from
+    /// `$STANDARD_FONTS`: what a viewer that carries its fonts in an asset
+    /// bundle needs, since there is no directory to point the variable at.
+    pub fn with_standard(std: StandardCache<E>) -> Self {
+        TraceCache {
+            fonts: SyncCache::new(),
+            std,
+        }
+    }
     pub fn get_font(&self, font_ref: &MaybeRef<PdfFont>, resolve: &impl Resolve) -> Result<Option<Arc<FontEntry<E>>>, PdfError> {
         let mut error = None;
 
