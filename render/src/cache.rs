@@ -18,7 +18,7 @@ use crate::font::GlyphData;
 use crate::BlendMode;
 
 use super::{fontentry::FontEntry};
-use super::image::load_image;
+use super::image::{load_image, load_stencil};
 use super::font::{load_font, StandardCache};
 use globalcache::{sync::SyncCache, ValueSize};
 
@@ -69,6 +69,9 @@ pub struct Cache<E: Encoder> {
     // shared mapping of fontname -> font
     fonts: Arc<SyncCache<usize, Option<Arc<FontEntry<E>>>>>,
     images: Arc<SyncCache<(Ref<XObject>, BlendMode), ImageResult>>,
+    /// Stencils (`/ImageMask`), keyed by the ink they are painted in as well as
+    /// by the object: the same mask paints in whatever the fill colour is.
+    stencils: Arc<SyncCache<(Ref<XObject>, ColorU), ImageResult>>,
     std: StandardCache<E>,
     missing_fonts: Vec<Name>,
     encoder: E,
@@ -104,6 +107,7 @@ impl<E: Encoder + 'static> Cache<E> where E::GlyphRef: Send + Sync {
         Cache {
             fonts: SyncCache::new(),
             images: SyncCache::new(),
+            stencils: SyncCache::new(),
             std: StandardCache::new(),
             missing_fonts: Vec::new(),
             encoder,
@@ -118,6 +122,7 @@ impl<E: Encoder + 'static> Cache<E> where E::GlyphRef: Send + Sync {
         Cache {
             fonts: SyncCache::new(),
             images: SyncCache::new(),
+            stencils: SyncCache::new(),
             std,
             missing_fonts: Vec::new(),
             encoder,
@@ -156,21 +161,36 @@ impl<E: Encoder + 'static> Cache<E> where E::GlyphRef: Send + Sync {
 
     pub fn get_image(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resources: &Resources, resolve: &impl Resolve, mode: BlendMode) -> ImageResult {
         self.images.get((xobject_ref, mode), |_| {
-            let im = match load_image(im, resources, resolve, mode) {
-                Ok(im) => im,
-                Err(e) => return ImageResult(Arc::new(Err(e)))
-            };
-            let data = ImageData {
-                alpha_type: ImageAlphaType::Alpha,
-                data: Blob::new(Arc::new(im.rgba_data().to_owned())),
-                format: ImageFormat::Rgba8,
-                height: im.height(),
-                width: im.width()
-            };
-            let brush = ImageBrush::new(data);
-            ImageResult(Arc::new(Ok(brush)))
+            match load_image(im, resources, resolve, mode) {
+                Ok(im) => ImageResult(Arc::new(Ok(brush_of(im)))),
+                Err(e) => ImageResult(Arc::new(Err(e))),
+            }
         })
     }
+
+    /// A stencil, painted in `ink`. Cached apart from `images` because the same
+    /// mask object paints in a different colour each time the graphics state's
+    /// fill colour differs.
+    pub fn get_stencil(&mut self, xobject_ref: Ref<XObject>, im: &ImageXObject, resolve: &impl Resolve, ink: ColorU) -> ImageResult {
+        self.stencils.get((xobject_ref, ink), |_| {
+            match load_stencil(im, resolve, ink) {
+                Ok(im) => ImageResult(Arc::new(Ok(brush_of(im)))),
+                Err(e) => ImageResult(Arc::new(Err(e))),
+            }
+        })
+    }
+}
+
+/// The pixels as the brush the backends draw.
+fn brush_of(im: super::image::ImageData<'_>) -> ImageBrush {
+    let data = ImageData {
+        alpha_type: ImageAlphaType::Alpha,
+        data: Blob::new(Arc::new(im.rgba_data().to_owned())),
+        format: ImageFormat::Rgba8,
+        height: im.height(),
+        width: im.width()
+    };
+    ImageBrush::new(data)
 }
 impl<E: Encoder> Drop for Cache<E> {
     fn drop(&mut self) {

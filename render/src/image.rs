@@ -1,6 +1,6 @@
 use image::{RgbaImage, ImageBuffer, Rgba};
 use log::{debug, info, warn};
-use pdf::{object::*, t};
+use pdf::{object::*, primitive::Primitive, t};
 use pdf::error::PdfError;
 use pathfinder_color::ColorU;
 use std::borrow::Cow;
@@ -109,10 +109,72 @@ fn resize_alpha(data: &[u8], src_width: u32, src_height: u32, dest_width: u32, d
     Some(dest.into_raw())
 }
 
+/// One pixel per sample: the ink colour where the stencil paints, transparent
+/// where it does not.
+///
+/// The decoder hands back CCITT stencils one byte per sample (0 or 255); one
+/// that is still packed stays at one bit per sample. After
+/// `ImageXObject::image_data` the rule is the one PDF gives for a plain mask:
+/// sample 0 paints, sample 1 leaves the page alone (`Decode [1 0]` has already
+/// been flipped there).
+fn stencil_alpha(raw_data: &[u8], pixel_count: usize, ink: ColorU) -> Result<Vec<ColorU>, PdfError> {
+    let packed = raw_data.len() * 8 <= pixel_count;
+    if !packed && raw_data.len() < pixel_count {
+        return Err(PdfError::Other { msg: format!("stencil: {} bytes for {} samples", raw_data.len(), pixel_count) });
+    }
+    let clear = ColorU { r: ink.r, g: ink.g, b: ink.b, a: 0 };
+    let mut data = Vec::with_capacity(pixel_count);
+    for i in 0 .. pixel_count {
+        let paint = if packed {
+            (raw_data[i / 8] >> (7 - i % 8)) & 1 == 0
+        } else {
+            raw_data[i] < 0x80
+        };
+        data.push(if paint { ink } else { clear });
+    }
+    Ok(data)
+}
+
+/// The colour a stencil paints with: the solid fill colour of the graphics
+/// state, alpha included. A pattern or gradient fill cannot be flattened into
+/// one colour, so those say `None` and the caller falls back to drawing the
+/// mask as a grey image.
+pub fn stencil_ink(fill: &crate::backend::FillMode) -> Option<ColorU> {
+    match fill.color {
+        crate::Fill::Solid(r, g, b) => Some(pathfinder_color::ColorF::new(r, g, b, fill.alpha).to_u8()),
+        _ => None,
+    }
+}
+
+/// A stencil (`/ImageMask`), painted in `ink`: the samples are not colour, they
+/// are "paint here, this colour".
+pub fn load_stencil(image: &ImageXObject, resolve: &impl Resolve, ink: ColorU) -> Result<ImageData<'static>, PdfError> {
+    let raw_data = image.image_data(resolve)?;
+    stencil_from_samples(&raw_data, image.width, image.height, ink)
+}
+
+fn stencil_from_samples(raw_data: &[u8], width: u32, height: u32, ink: ColorU) -> Result<ImageData<'static>, PdfError> {
+    let pixel_count = width as usize * height as usize;
+    let data = stencil_alpha(raw_data, pixel_count, ink)?;
+    ImageData::new(data, width, height)
+        .ok_or_else(|| PdfError::Other { msg: "stencil size mismatch".into() })
+}
+
 pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Resolve, mode: BlendMode) -> Result<ImageData<'static>, PdfError> {
     let raw_data = image.image_data(resolve)?;
 
     let pixel_count = image.width as usize * image.height as usize;
+
+    // A stencil: the samples are not colour, they are "paint here with the
+    // current fill colour". Read as grey — which is what happens if this is
+    // skipped — a scan of black ink on white paper comes out as a black box,
+    // because the samples are mostly 1 where the paper is. The backends turn a
+    // stencil into `load_stencil` with the graphics state's fill colour; this
+    // is the fallback for the ones that do not (inline images, SVG), which can
+    // at least be black ink on transparent.
+    if image.image_mask {
+        return load_stencil(image, resolve, ColorU { r: 0, g: 0, b: 0, a: 255 });
+    }
 
     if raw_data.len() % pixel_count != 0 {
         warn!("invalid data length {} bytes for {} pixels", raw_data.len(), pixel_count);
@@ -141,8 +203,61 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
         }
     }
 
+    // 8.9.6.4: `/Mask` is either a stencil mask (an image mask at its own
+    // resolution) or a colour-key array. The stencil says where the image is
+    // painted at all; ignoring it paints the whole image, which is how a scan
+    // whose dark plate is masked down to the printed lines becomes a black
+    // sheet.
+    let stencil_alpha_map = match image.mask {
+        Some(Primitive::Reference(r)) => match resolve.get(Ref::<Stream<ImageDict>>::new(r)) {
+            Ok(m) => {
+                let (mw, mh) = (m.info.width.max(1), m.info.height.max(1));
+                let inverted = match m.info.decode.as_ref() {
+                    Some(d) if d.len() >= 2 => d[0] > d[1],
+                    _ => false,
+                };
+                let samples = t!(m.data(resolve));
+                let count = mw as usize * mh as usize;
+                let mut alpha = Vec::with_capacity(count);
+                if samples.len() >= count {
+                    // One byte per sample, the shape the fax decoder produces.
+                    for &s in samples[..count].iter() {
+                        let paint = (s == 0) != inverted;
+                        alpha.push(if paint { 255 } else { 0 });
+                    }
+                } else {
+                    for i in 0 .. count {
+                        let bit = (samples[i / 8] >> (7 - i % 8)) & 1;
+                        let paint = (bit == 0) != inverted;
+                        alpha.push(if paint { 255 } else { 0 });
+                    }
+                }
+                let alpha = if (mw, mh) != (image.width, image.height) {
+                    match resize_alpha(&alpha, mw, mh, image.width, image.height) {
+                        Some(resized) => resized,
+                        None => alpha,
+                    }
+                } else {
+                    alpha
+                };
+                Some(alpha)
+            }
+            Err(e) => {
+                warn!("image /Mask unreadable ({}), painting it unmasked", e);
+                None
+            }
+        },
+        Some(Primitive::Array(_)) => {
+            // Colour-key masking: ranges of sample values that are transparent.
+            // Rare, and a wrong guess would blank an image that should show, so
+            // it is left alone and said out loud.
+            warn!("colour-key /Mask is not supported yet");
+            None
+        }
+        _ => None,
+    };
     let mask = t!(image.smask.map(|r| resolve.get(r)).transpose());
-    let alpha = match mask {
+    let soft: Option<Data> = match mask {
         Some(ref mask) => {
             let data = Data::Arc(t!((**mask).data(resolve)));
             let mask_width = mask.width as usize;
@@ -163,9 +278,22 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
             if mask.width != image.width || mask.height != image.height {
                 alpha = resize_alpha(&*alpha, mask.width, mask.height, image.width, image.height).unwrap().into();
             }
-            alpha
+            Some(alpha)
         }
-        None => Data::Slice(&[][..])
+        None => None
+    };
+    // A pixel is painted only where every mask agrees: with both a soft mask
+    // and a stencil, that is the smaller of the two alphas, and they are both
+    // at the image's resolution by now.
+    let alpha: Data = match (soft, stencil_alpha_map) {
+        (Some(a), None) => a,
+        (None, Some(b)) => Data::Arc(b.into()),
+        (Some(a), Some(b)) => {
+            let n = pixel_count.min(a.len()).min(b.len());
+            let combined: Vec<u8> = (0 .. n).map(|i| a[i].min(b[i])).collect();
+            Data::Arc(combined.into())
+        }
+        (None, None) => Data::Slice(&[][..]),
     };
     #[inline]
     fn ex(b: u8, bits: u8) -> u8 {
