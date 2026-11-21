@@ -41,6 +41,11 @@ use pdf::error::PdfError;
 use pdf::font::Font as PdfFont;
 use pdf::object::{ImageXObject, MaybeRef, Ref, Resolve, Resources, XObject};
 
+/// How far, in glyph units (1/2048 em for most fonts), the first corner of a
+/// rectangular glyph contour is moved so the rasteriser stops treating the
+/// contour as a pixel-snappable rectangle. See [`path_data`].
+const GLYPH_NUDGE: f32 = 0.5;
+
 /// Glyph outlines, as pathfinder outlines.
 ///
 /// The same encoder the scene and vello backends use, kept here so the SVG
@@ -349,7 +354,7 @@ impl<'a> SvgBackend<'a> {
 
     fn emit_filled(&mut self, outline: &Outline, fill: &FillMode, fill_rule: FillRule, transform: Transform2F, clip: Option<usize>) {
         let mut d = String::new();
-        path_data(outline, transform, &mut d);
+        path_data(outline, transform, 0.0, &mut d);
         if d.is_empty() {
             return;
         }
@@ -389,7 +394,7 @@ impl<'a> SvgBackend<'a> {
             Some(d) => d,
             None => {
                 self.glyph_buf.clear();
-                path_data(outline, Transform2F::default(), &mut self.glyph_buf);
+                path_data(outline, Transform2F::default(), GLYPH_NUDGE, &mut self.glyph_buf);
                 let d: Arc<str> = Arc::from(self.glyph_buf.as_str());
                 self.cache.put_glyph_path(font, key, d.clone());
                 d
@@ -457,7 +462,7 @@ impl<'a> crate::Backend for SvgBackend<'a> {
 
     fn create_clip_path(&mut self, path: Outline, fill_rule: FillRule, parent: Option<usize>) -> usize {
         let mut d = String::new();
-        path_data(&path, Transform2F::default(), &mut d);
+        path_data(&path, Transform2F::default(), 0.0, &mut d);
         let id = self.clips.len();
         self.clips.push(ClipDef { d, even_odd: matches!(fill_rule, FillRule::EvenOdd), parent });
         id
@@ -609,7 +614,108 @@ fn matrix_data(t: Transform2F, out: &mut String) {
 // every normal fill `overlay`, painting black text invisible on white.
 
 /// SVG path data for `outline`, with `t` applied.
-fn path_data(outline: &Outline, t: Transform2F, out: &mut String) {
+///
+/// `nudge` (in the outline's own units, so only glyph space wants it) moves
+/// the first corner of every contour that is exactly an axis-aligned
+/// rectangle. Gecko's SVG rasteriser takes such a contour for a rectangle and
+/// snaps it to the pixel grid: on page 5 of the Glowpunk paper the `l` of
+/// "Stihl" came out 3 px wide with two hard edges at a zoom where every other
+/// stem — same 236 font units, but drawn with curves — measured 3.5 px and
+/// antialiased to match (pdf.js in the same browser, filling the same
+/// rectangle into a canvas, antialiased it too; `shape-rendering=
+/// "geometricPrecision"` on the root changed nothing). Half a font unit of
+/// slant on one corner takes the contour off the rect path of the rasteriser,
+/// and at any zoom it is far below a device pixel.
+fn path_data(outline: &Outline, t: Transform2F, nudge: f32, out: &mut String) {
+    if nudge == 0.0 {
+        return path_data_plain(outline, t, out);
+    }
+    let (a, b, c, d, e, f) = (t.m11(), t.m21(), t.m12(), t.m22(), t.m13(), t.m23());
+    let mut at = |v: Vector2F, out: &mut String| {
+        let x = a * v.x() + c * v.y() + e;
+        let y = b * v.x() + d * v.y() + f;
+        fmt_f(x, out);
+        out.push(' ');
+        fmt_f(y, out);
+    };
+    // One contour at a time, so the rectangle test can look at every point
+    // before the first one is written.
+    let mut elems: Vec<(SegmentKind, Vector2F, Vector2F, Vector2F)> = Vec::new();
+    for contour in outline.contours() {
+        elems.clear();
+        let mut straight = true;
+        for elem in contour.iter(ContourIterFlags::empty()) {
+            match elem.kind {
+                SegmentKind::None => {}
+                SegmentKind::Line => elems.push((SegmentKind::Line, Vector2F::default(), Vector2F::default(), elem.baseline.to())),
+                kind => {
+                    straight = false;
+                    elems.push((kind, elem.ctrl.from(), elem.ctrl.to(), elem.baseline.to()));
+                }
+            }
+        }
+        // A rectangle: the corners of a closed contour, all straight, each
+        // coordinate one of two values. A rect may also arrive unclosed — the
+        // bar of a compound glyph, `M54 0L187 0L187 554L54 554` — since a fill
+        // closes it.
+        let mut rect = false;
+        // The closing edge may be listed explicitly or left to `Z`.
+        if nudge != 0.0 && straight && (elems.len() == 3 || elems.len() == 4) {
+            if let Some(first) = contour.first_position() {
+                let pts = [first, elems[0].3, elems[1].3, elems[2].3];
+                let x0 = pts[0].x();
+                let y0 = pts[0].y();
+                let x1 = pts.iter().map(|p| p.x()).find(|&x| (x - x0).abs() > 1e-3);
+                let y1 = pts.iter().map(|p| p.y()).find(|&y| (y - y0).abs() > 1e-3);
+                if let (Some(x1), Some(y1)) = (x1, y1) {
+                    rect = pts.iter().all(|p| {
+                        let on_x = (p.x() - x0).abs() <= 1e-3 || (p.x() - x1).abs() <= 1e-3;
+                        let on_y = (p.y() - y0).abs() <= 1e-3 || (p.y() - y1).abs() <= 1e-3;
+                        on_x && on_y
+                    });
+                }
+            }
+        }
+        if let Some(mut first) = contour.first_position() {
+            if rect {
+                first += Vector2F::new(nudge, nudge);
+            }
+            out.push('M');
+            at(first, out);
+        }
+        for (kind, ctrl_from, ctrl_to, to) in elems.drain(..) {
+            match kind {
+                SegmentKind::None => {}
+                SegmentKind::Line => {
+                    out.push('L');
+                    at(to, out);
+                }
+                SegmentKind::Quadratic => {
+                    out.push('Q');
+                    at(ctrl_from, out);
+                    out.push(' ');
+                    at(to, out);
+                }
+                SegmentKind::Cubic => {
+                    out.push('C');
+                    at(ctrl_from, out);
+                    out.push(' ');
+                    at(ctrl_to, out);
+                    out.push(' ');
+                    at(to, out);
+                }
+            }
+        }
+        if contour.is_closed() {
+            out.push('Z');
+        }
+    }
+}
+
+/// The same, with nothing to test for: one pass over the outline, no buffer.
+/// This is the path every vector fill and stroke takes, and on a page of small
+/// shapes it is the hot loop.
+fn path_data_plain(outline: &Outline, t: Transform2F, out: &mut String) {
     let (a, b, c, d, e, f) = (t.m11(), t.m21(), t.m12(), t.m22(), t.m13(), t.m23());
     let mut pt = |v: Vector2F, out: &mut String| {
         let x = a * v.x() + c * v.y() + e;
