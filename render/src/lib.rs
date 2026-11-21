@@ -15,6 +15,9 @@ macro_rules! unimplemented {
 
 mod types;
 mod shading;
+/// Shading → peniko, shared by the two backends that paint with it.
+#[cfg(any(feature = "vello", feature = "vello_cpu"))]
+mod peniko_paint;
 
 mod cache;
 mod fontentry;

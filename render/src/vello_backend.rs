@@ -13,6 +13,7 @@ use vello::{
     Scene, kurbo::{Affine, BezPath, Cap, Stroke}, peniko::{BlendMode, Blob, BrushRef, Color, Fill, ImageBrush, ImageData, Mix, color::AlphaColor}
 };
 
+use crate::peniko_paint::{paint_transform, to_peniko_gradient};
 use crate::{Backend, Cache, DrawMode, FillMode, cache::ImageResult, font::FontRc, load_image};
 
 pub struct VelloBackend<'a> {
@@ -199,19 +200,34 @@ impl<'a> Backend for VelloBackend<'a> {
                 FillRule::EvenOdd => Fill::EvenOdd,
                 FillRule::Winding => Fill::NonZero,
             };
-            let brush = convert_fill(fill);
+            // A gradient is a peniko brush in shading space, placed by the
+            // shading's own matrix; vello composes that under the CTM, so the
+            // shape is drawn with `transform` as for any other paint.
             let shape = outline_to_bez(outline);
-            self.scene.fill(style, transform, brush, None, &shape);
+            match &fill.color {
+                crate::Fill::Gradient(g) => {
+                    let gradient = to_peniko_gradient(g, fill.alpha);
+                    self.scene.fill(style, transform, BrushRef::Gradient(&gradient),
+                                    paint_transform(fill), &shape);
+                }
+                _ => self.scene.fill(style, transform, convert_fill(fill), None, &shape),
+            }
         }
-        if let Some((stroke, stroke_mode)) = mode.stroke() {
+        if let Some((paint, stroke_style)) = mode.stroke() {
             let style = match fill_rule {
                 FillRule::EvenOdd => Fill::EvenOdd,
                 FillRule::Winding => Fill::NonZero,
             };
-            let brush = convert_fill(stroke);
-            let stroke = convert_stroke(stroke_mode);
+            let stroke = convert_stroke(stroke_style);
             let shape = outline_to_bez(outline);
-            self.scene.stroke(&stroke, transform, brush, None, &shape);
+            match &paint.color {
+                crate::Fill::Gradient(g) => {
+                    let gradient = to_peniko_gradient(g, paint.alpha);
+                    self.scene.stroke(&stroke, transform, BrushRef::Gradient(&gradient),
+                                      paint_transform(paint), &shape);
+                }
+                _ => self.scene.stroke(&stroke, transform, convert_fill(paint), None, &shape),
+            }
         }
     }
     fn add_text(&mut self, span: crate::TextSpan<OutlineBuilder>, clip: Option<Self::ClipPathId>) {}

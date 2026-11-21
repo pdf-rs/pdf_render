@@ -39,6 +39,7 @@ use vello_cpu::{
     Image, ImageSource, PaintType, Pixmap, RenderContext, Resources,
 };
 
+use crate::peniko_paint::{paint_transform, to_peniko_gradient};
 use crate::{cache::ImageResult, Backend, Cache, DrawMode, FillMode, FontRc};
 
 /// The CPU backend rasterises drawings immediately, so it has no image handles of
@@ -242,54 +243,6 @@ fn convert_fill(fill: &FillMode) -> PaintType {
     }
 }
 
-/// `vello_cpu` paints gradients in peniko form; the shading has already been
-/// reduced to stops and a shape, so this is a copy, not a decision.
-fn to_peniko_gradient(g: &crate::shading::Gradient, alpha: f32) -> peniko::Gradient {
-    use crate::shading::GradientKind;
-    use peniko::color::{AlphaColor, DynamicColor, Srgb};
-    use peniko::{ColorStop, ColorStops};
-
-    let mut pg = match g.kind {
-        GradientKind::Linear { start, end } => peniko::Gradient::new_linear(
-            (start.x() as f64, start.y() as f64),
-            (end.x() as f64, end.y() as f64),
-        ),
-        GradientKind::Radial { start, start_radius, end, end_radius } => {
-            peniko::Gradient::new_two_point_radial(
-                (start.x() as f64, start.y() as f64),
-                start_radius,
-                (end.x() as f64, end.y() as f64),
-                end_radius,
-            )
-        }
-    };
-    // A shading pads; an end `/Extend` switched off is a transparent stop.
-    pg.extend = peniko::Extend::Pad;
-    let mut stops = ColorStops::new();
-    for s in &g.stops {
-        let c = ColorF::new(s.color.0, s.color.1, s.color.2, alpha).to_u8();
-        stops.push(ColorStop {
-            offset: s.offset,
-            color: DynamicColor::from_alpha_color(AlphaColor::<Srgb>::from_rgba8(
-                c.r, c.g, c.b, c.a,
-            )),
-        });
-    }
-    pg.stops = stops;
-    pg
-}
-
-/// The paint transform that puts a gradient where the shading says.
-///
-/// `vello_cpu` composes the paint transform as `path_transform * paint`, and
-/// the shape is already drawn with the CTM, so this is the gradient's own
-/// matrix — shading space to user space — with no CTM in it.
-fn paint_transform(fill: &FillMode) -> Option<Affine> {
-    match &fill.color {
-        crate::Fill::Gradient(g) => Some(transform_to_affine(g.matrix)),
-        _ => None,
-    }
-}
 
 fn convert_stroke(stroke: &crate::backend::Stroke) -> vello_cpu::kurbo::Stroke {
     use vello_cpu::kurbo::{Cap, Join};
