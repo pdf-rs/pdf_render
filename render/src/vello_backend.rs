@@ -105,17 +105,17 @@ pub fn outline_to_bez(outline: &Outline) -> BezPath {
 }
 
 fn convert_fill(fill: &FillMode) -> BrushRef<'static> {
-    match fill.color {
+    match &fill.color {
         // A gradient brush would need the shape's transform as the brush
         // transform, which `draw` does not pass here yet; the average colour
         // keeps the page's shape readable until it does.
         crate::Fill::Gradient(g) => {
             let (r, g, b) = g.average_color();
             let ColorU { r, g, b, a } = ColorF::new(r, g, b, fill.alpha).to_u8();
-            BrushRef::Solid(ColorU { r, g, b, a }.into())
+            BrushRef::Solid(AlphaColor::from_rgba8(r, g, b, a))
         }
         crate::Fill::Solid(r, g, b) => {
-            let ColorU { r, g, b, a } = ColorF::new(r, g, b, fill.alpha).to_u8();
+            let ColorU { r, g, b, a } = ColorF::new(*r, *g, *b, fill.alpha).to_u8();
             BrushRef::Solid(AlphaColor::from_rgba8(r, g, b, a))
         }
         _ => BrushRef::Solid(AlphaColor::from_rgba8(255, 0, 0, 127))
