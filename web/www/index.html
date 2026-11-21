@@ -359,7 +359,7 @@ body.ready #dock { opacity: 1; transform: translateX(-50%); pointer-events: auto
     <button id="zoomout" title="zoom out (−)" aria-label="zoom out">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>
     </button>
-    <button id="zoomlabel" title="fit page / fit width / actual size">100%</button>
+    <button id="zoomlabel" title="fit width up to actual size / fit page / fit width / actual size">100%</button>
     <button id="zoomin" title="zoom in (+)" aria-label="zoom in">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
     </button>
@@ -387,7 +387,7 @@ const $ = (id) => document.getElementById(id);
 const stage = $("stage"), pages = $("pages");
 const state = {
     doc: null, page: 0, pages: 0, url: "", length: 0,
-    zoom: "page",       // "page" | "width" | a number
+    zoom: "auto",       // "auto" | "page" | "width" | a number
     size: null,         // a page's natural size in CSS px, from its SVG
     sizes: new Map(),   // page index -> natural size, where a page differs
     layout: null,       // the column: every page's top, width and height
@@ -786,15 +786,25 @@ function sizeOf(svg) {
 }
 
 /** Work `state.zoom` out into a factor. Scaling by width keeps the text crisp
- *  and lets the column scroll, which a CSS transform would not. */
+ *  and lets the column scroll, which a CSS transform would not.
+ *
+ *  "auto" is the opening zoom: the page at the width of the container, but
+ *  never enlarged past 100% — the page's own physical size, since its SVG
+ *  carries millimetres and 96 CSS px is an inch (the CSS reference pixel is
+ *  defined as 1/96 in; no browser reports a panel's real pixels-per-inch, so
+ *  this is the honest reading of "actual size"). Which of the two wins is left
+ *  to the screen: a phone fits a fraction of a page, a desktop has room to
+ *  spare and stretching the page to it would only make the type soft. */
 function fit() {
     const [w, h] = state.size || PROVISIONAL;
     const pad = window.matchMedia("(max-width: 720px)").matches ? 16 : 28;
     const availW = Math.max(120, stage.clientWidth - 2 * pad);
     const availH = Math.max(120, stage.clientHeight - 2 * pad - (document.body.classList.contains("ready") ? 40 : 0));
+    const byWidth = availW / w;
     const z = typeof state.zoom === "number" ? state.zoom
-        : state.zoom === "width" ? availW / w
-        : Math.min(availW / w, availH / h);
+        : state.zoom === "width" ? byWidth
+        : state.zoom === "auto" ? Math.min(byWidth, 1)
+        : Math.min(byWidth, availH / h);
     setZoom(z);
 }
 
@@ -814,9 +824,10 @@ function zoomBy(factor) {
     fit();
 }
 function zoomCycle() {
-    if (state.zoom === "page") state.zoom = "width";
+    if (state.zoom === "auto") state.zoom = "page";
+    else if (state.zoom === "page") state.zoom = "width";
     else if (state.zoom === "width") state.zoom = 1;
-    else state.zoom = "page";
+    else state.zoom = "auto";
     fit();
 }
 
@@ -1073,7 +1084,7 @@ addEventListener("keydown", (e) => {
         case "End": show(state.pages - 1); break;
         case "+": case "=": zoomBy(1.15); break;
         case "-": case "_": zoomBy(1 / 1.15); break;
-        case "0": state.zoom = "page"; fit(); break;
+        case "0": state.zoom = "auto"; fit(); break;
         case "f": zoomCycle(); break;
         case "t": sideOpen = !sideOpen; applySide(); break;
         case "Escape": clearError(); $("openform").hidden = true; break;
