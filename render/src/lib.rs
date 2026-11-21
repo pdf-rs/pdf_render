@@ -14,6 +14,7 @@ macro_rules! unimplemented {
 }
 
 mod types;
+mod shading;
 
 mod cache;
 mod fontentry;
@@ -35,6 +36,7 @@ use pathfinder_geometry::vector::vec2f;
 use pdf::{t, try_opt};
 //pub use scene::SceneBackend;
 pub use crate::image::{load_image, ImageData};
+pub use crate::shading::{Extend as GradientExtend, Gradient, GradientKind, Stop};
 use custom_debug_derive::Debug;
 pub use ::font::Glyph;
 #[cfg(feature = "vello")]
@@ -134,6 +136,7 @@ pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Pa
     };
 
     let mut renderstate = RenderState::new(backend, resolve, &resources, root_transformation);
+    renderstate.set_device_rect(view_box);
     // Parse lazily: a `Vec<Op>` for one page of the spec is several megabytes.
     // A page with no /Contents at all (the entry is optional) is a blank page:
     // poppler draws it as one, and so does this.
@@ -167,7 +170,22 @@ pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Pa
 pub fn render_pattern(backend: &mut impl Backend, pattern: &Pattern, resolve: &impl Resolve) -> Result<(), PdfError> {
     match pattern {
         Pattern::Stream(dict, ops) => {
-            let resources = resolve.get(dict.resources)?;
+            // A pattern's `/Resources` is optional and a shading pattern
+            // (`/PatternType 2`) has none at all: the cell then uses the
+            // resources of whoever paints it, and a stream with no resources
+            // of its own but operators in it has nothing to look up anyway.
+            let own;
+            let resolved;
+            let resources: &Resources = match dict.resources {
+                Some(r) => {
+                    resolved = resolve.get(r)?;
+                    &resolved
+                }
+                None => {
+                    own = Resources::default();
+                    &own
+                }
+            };
             let mut renderstate = RenderState::new(backend, resolve, &*resources, Transform2F::default());
             for (i, op) in ops.iter().enumerate() {
                 debug!("op {}: {:?}", i, op);
@@ -180,10 +198,15 @@ pub fn render_pattern(backend: &mut impl Backend, pattern: &Pattern, resolve: &i
 }
 
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+/// A paint. `Solid` is the overwhelmingly common case and is compared by
+/// value; a gradient is a whole paint object, so it is shared rather than
+/// copied — a page may fill a hundred shapes with one `sh` shading.
+#[derive(Clone, PartialEq, Debug)]
 pub enum Fill {
     Solid(f32, f32, f32),
     Pattern(Ref<Pattern>),
+    /// A gradient from a `sh` shading (or a type 2 pattern), in shading space.
+    Gradient(Arc<Gradient>),
 }
 impl Fill {
     pub fn black() -> Self {

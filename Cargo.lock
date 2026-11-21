@@ -1651,7 +1651,7 @@ source = "git+https://github.com/s3bk/glyphmatcher#1958392699b875695a22b332f1e49
 dependencies = [
  "font 0.1.1",
  "istring 0.3.4 (git+https://github.com/s3bk/istring)",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "pathfinder_content",
  "pathfinder_geometry",
  "pdf_encoding 0.3.0",
@@ -2930,7 +2930,7 @@ dependencies = [
 [[package]]
 name = "pdf"
 version = "0.10.0"
-source = "git+ssh://git@github.com/s3bk/pdf.git?branch=master#c9d39f2b4e4ad71fb06162affe54e6599edea9e2"
+source = "git+ssh://git@github.com/s3bk/pdf.git?branch=master#eb32bb47ba3e71bfcdcd471167cc267c12fcb130"
 dependencies = [
  "aes",
  "bitflags 2.13.2",
@@ -2996,7 +2996,7 @@ dependencies = [
 [[package]]
 name = "pdf_derive"
 version = "0.3.0"
-source = "git+ssh://git@github.com/s3bk/pdf.git?branch=master#c9d39f2b4e4ad71fb06162affe54e6599edea9e2"
+source = "git+ssh://git@github.com/s3bk/pdf.git?branch=master#eb32bb47ba3e71bfcdcd471167cc267c12fcb130"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3055,7 +3055,7 @@ dependencies = [
  "image",
  "instant",
  "istring 0.3.4 (git+https://github.com/s3bk/istring)",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "once_cell",
  "pathfinder_color",
@@ -3086,7 +3086,7 @@ dependencies = [
  "font 0.1.1",
  "getrandom 0.2.10",
  "image",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "js-sys",
  "log",
  "pathfinder_color",

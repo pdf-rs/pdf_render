@@ -33,9 +33,10 @@ use pathfinder_geometry::{rect::RectF, transform2d::Transform2F, vector::Vector2
 use vello_cpu::{
     color::Srgb,
     kurbo::{Affine, BezPath, Rect},
+    peniko,
     peniko::color::AlphaColor,
     peniko::{Blob, ImageData, ImageFormat},
-    Image, ImageSource, Pixmap, RenderContext, Resources,
+    Image, ImageSource, PaintType, Pixmap, RenderContext, Resources,
 };
 
 use crate::{cache::ImageResult, Backend, Cache, DrawMode, FillMode, FontRc};
@@ -228,13 +229,65 @@ fn convert_fill_rule(fill_rule: FillRule) -> vello_cpu::peniko::Fill {
     }
 }
 
-fn convert_fill(fill: &FillMode) -> AlphaColor<Srgb> {
-    match fill.color {
+fn convert_fill(fill: &FillMode) -> PaintType {
+    match &fill.color {
         crate::Fill::Solid(r, g, b) => {
-            let ColorU { r, g, b, a } = ColorF::new(r, g, b, fill.alpha).to_u8();
-            AlphaColor::from_rgba8(r, g, b, a)
+            let ColorU { r, g, b, a } = ColorF::new(*r, *g, *b, fill.alpha).to_u8();
+            PaintType::Solid(AlphaColor::from_rgba8(r, g, b, a))
         }
-        _ => AlphaColor::from_rgba8(255, 0, 0, 127),
+        crate::Fill::Pattern(_) => PaintType::Solid(AlphaColor::from_rgba8(255, 0, 0, 127)),
+        crate::Fill::Gradient(gradient) => {
+            PaintType::Gradient(to_peniko_gradient(gradient, fill.alpha))
+        }
+    }
+}
+
+/// `vello_cpu` paints gradients in peniko form; the shading has already been
+/// reduced to stops and a shape, so this is a copy, not a decision.
+fn to_peniko_gradient(g: &crate::shading::Gradient, alpha: f32) -> peniko::Gradient {
+    use crate::shading::GradientKind;
+    use peniko::color::{AlphaColor, DynamicColor, Srgb};
+    use peniko::{ColorStop, ColorStops};
+
+    let mut pg = match g.kind {
+        GradientKind::Linear { start, end } => peniko::Gradient::new_linear(
+            (start.x() as f64, start.y() as f64),
+            (end.x() as f64, end.y() as f64),
+        ),
+        GradientKind::Radial { start, start_radius, end, end_radius } => {
+            peniko::Gradient::new_two_point_radial(
+                (start.x() as f64, start.y() as f64),
+                start_radius,
+                (end.x() as f64, end.y() as f64),
+                end_radius,
+            )
+        }
+    };
+    // A shading pads; an end `/Extend` switched off is a transparent stop.
+    pg.extend = peniko::Extend::Pad;
+    let mut stops = ColorStops::new();
+    for s in &g.stops {
+        let c = ColorF::new(s.color.0, s.color.1, s.color.2, alpha).to_u8();
+        stops.push(ColorStop {
+            offset: s.offset,
+            color: DynamicColor::from_alpha_color(AlphaColor::<Srgb>::from_rgba8(
+                c.r, c.g, c.b, c.a,
+            )),
+        });
+    }
+    pg.stops = stops;
+    pg
+}
+
+/// The paint transform that puts a gradient where the shading says.
+///
+/// `vello_cpu` composes the paint transform as `path_transform * paint`, and
+/// the shape is already drawn with the CTM, so this is the gradient's own
+/// matrix — shading space to user space — with no CTM in it.
+fn paint_transform(fill: &FillMode) -> Option<Affine> {
+    match &fill.color {
+        crate::Fill::Gradient(g) => Some(transform_to_affine(g.matrix)),
+        _ => None,
     }
 }
 
@@ -319,11 +372,19 @@ impl<'a> Backend for VelloCpuBackend<'a> {
         if let Some(fill) = mode.fill() {
             self.ctx.set_fill_rule(convert_fill_rule(fill_rule));
             self.ctx.set_paint(convert_fill(fill));
+            match paint_transform(fill) {
+                Some(t) => self.ctx.set_paint_transform(t),
+                None => self.ctx.reset_paint_transform(),
+            }
             self.ctx.fill_path(&shape);
         }
         if let Some((stroke, stroke_mode)) = mode.stroke() {
             self.ctx.set_fill_rule(convert_fill_rule(fill_rule));
             self.ctx.set_paint(convert_fill(stroke));
+            match paint_transform(stroke) {
+                Some(t) => self.ctx.set_paint_transform(t),
+                None => self.ctx.reset_paint_transform(),
+            }
             self.ctx.set_stroke(convert_stroke(stroke_mode));
             self.ctx.stroke_path(&shape);
         }

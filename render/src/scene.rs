@@ -54,7 +54,12 @@ impl<'a> SceneBackend<'a> {
     }
     fn paint(&mut self, fill: Fill, alpha: f32) -> PaintId {
         let paint = match fill {
-            Fill::Solid(r, g, b) => Paint::from_color(ColorF::new(r, g, b, alpha).to_u8()),
+            Fill::Solid(r, g, b) => Paint::from_color(ColorF::new(*r, *g, *b, alpha).to_u8()),
+            // No gradient paints in pathfinder: paint the ramp's average.
+            Fill::Gradient(g) => {
+                let (r, g, b) = g.average_color();
+                Paint::from_color(ColorF::new(r, g, b, alpha).to_u8())
+            }
             Fill::Pattern(_) => {
                 Paint::black()
             }

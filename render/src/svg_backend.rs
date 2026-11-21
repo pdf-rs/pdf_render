@@ -119,6 +119,16 @@ impl SvgPage {
     }
 }
 
+/// A gradient that goes into `<defs>`: the element's attributes and stops,
+/// with the `id` added when the layer is written (ids carry the layer's
+/// namespace).
+struct GradientDef {
+    /// `linearGradient` or `radialGradient`.
+    element: &'static str,
+    attrs: String,
+    stops: String,
+}
+
 struct ClipDef {
     /// Path data in device space; no further transform is applied.
     d: String,
@@ -150,6 +160,13 @@ pub struct SvgBackend<'a> {
     symbol_ids: std::collections::HashMap<Arc<str>, u32>,
     /// Symbols the layer being built refers to.
     used_symbols: Vec<u32>,
+    /// Gradient paints in `<defs>`, by id: the element without its `id`.
+    gradients: Vec<GradientDef>,
+    /// `Arc::as_ptr` of a [`crate::shading::Gradient`] -> id, so one shading
+    /// fills many shapes with one definition.
+    gradient_ids: std::collections::HashMap<(usize, [u32; 6]), u32>,
+    /// Gradients the layer being built refers to.
+    used_gradients: Vec<u32>,
     /// Scratch for the path data of a glyph, so a page of text does not
     /// allocate a string per glyph just to look it up.
     glyph_buf: String,
@@ -193,6 +210,9 @@ impl<'a> SvgBackend<'a> {
             symbols: Vec::new(),
             symbol_ids: std::collections::HashMap::new(),
             used_symbols: Vec::new(),
+            gradients: Vec::new(),
+            gradient_ids: std::collections::HashMap::new(),
+            used_gradients: Vec::new(),
             glyph_buf: String::new(),
             matrix_buf: String::new(),
             fill_attr: String::new(),
@@ -295,7 +315,10 @@ impl<'a> SvgBackend<'a> {
         fmt_f(h, &mut svg);
         svg.push_str("\" shape-rendering=\"geometricPrecision\">");
         let prefix = &self.prefix;
-        if !self.used_clips.is_empty() || !self.used_symbols.is_empty() {
+        if !self.used_clips.is_empty()
+            || !self.used_symbols.is_empty()
+            || !self.used_gradients.is_empty()
+        {
             svg.push_str("<defs>");
             for &id in &self.used_clips {
                 let clip = &self.clips[id];
@@ -312,6 +335,18 @@ impl<'a> SvgBackend<'a> {
             for &id in &self.used_symbols {
                 let _ = write!(svg, "<g id=\"{prefix}g{id}\"><path d=\"{}\"/></g>", self.symbols[id as usize]);
             }
+            // Gradients after the glyphs, so a `<use>` never refers to an
+            // element further down the document than itself.
+            for &id in &self.used_gradients {
+                let g = &self.gradients[id as usize];
+                let _ = write!(
+                    svg,
+                    "<{el} id=\"{prefix}r{id}\" {attrs}>{stops}</{el}>",
+                    el = g.element,
+                    attrs = g.attrs,
+                    stops = g.stops,
+                );
+            }
             svg.push_str("</defs>");
         }
         // The backend's coordinates are already y-down: the font matrix flips
@@ -325,6 +360,7 @@ impl<'a> SvgBackend<'a> {
         self.body.clear();
         self.used_clips.clear();
         self.used_symbols.clear();
+        self.used_gradients.clear();
     }
 
     /// Wrap the next element in the clip chain of `clip`, outermost first, and
@@ -359,7 +395,7 @@ impl<'a> SvgBackend<'a> {
             return;
         }
         self.paths_emitted += 1;
-        self.update_fill(fill);
+        self.update_fill(fill, transform);
         let opened = self.open_clips(clip);
         let rule = if fill_rule == FillRule::EvenOdd { "evenodd" } else { "nonzero" };
         let _ = write!(self.body, "<path d=\"{d}\"{} fill-rule=\"{rule}\"/>", self.fill_attr);
@@ -368,19 +404,115 @@ impl<'a> SvgBackend<'a> {
 
     /// Cache ` fill="…" fill-opacity="…"` for the paint in force. Text is one
     /// colour for page after page, so this is nearly always a cache hit.
-    fn update_fill(&mut self, fill: &FillMode) {
-        let key = match fill.color {
-            crate::Fill::Solid(r, g, b) => [r.to_bits(), g.to_bits(), b.to_bits(), fill.alpha.to_bits()],
+    fn update_fill(&mut self, fill: &FillMode, transform: Transform2F) {
+        let key = match &fill.color {
+            crate::Fill::Solid(r, g, b) => Some([r.to_bits(), g.to_bits(), b.to_bits(), fill.alpha.to_bits()]),
             // Pattern fills are rasterised by some other path; flagged, not painted.
-            crate::Fill::Pattern(_) => [u32::MAX, 0, 0, fill.alpha.to_bits()],
+            crate::Fill::Pattern(_) => Some([u32::MAX, 0, 0, fill.alpha.to_bits()]),
+            // A gradient is an object with an id, not a value: look it up.
+            crate::Fill::Gradient(_) => None,
         };
-        if self.fill_key == Some(key) {
-            return;
+        match key {
+            Some(key) => {
+                if self.fill_key == Some(key) {
+                    return;
+                }
+                self.fill_key = Some(key);
+            }
+            // A solid fill after a gradient must not reuse the gradient's
+            // attributes just because the key is back to `None`.
+            None => self.fill_key = None,
         }
-        self.fill_key = Some(key);
-        let (color, opacity) = fill_attrs(fill);
+        let (paint, opacity) = match &fill.color {
+            crate::Fill::Gradient(gradient) => {
+                let id = self.gradient_def(gradient, transform);
+                if !self.used_gradients.contains(&id) {
+                    self.used_gradients.push(id);
+                }
+                (format!("url(#{}r{id})", self.prefix), fill.alpha)
+            }
+            _ => fill_attrs(fill),
+        };
         self.fill_attr.clear();
-        let _ = write!(self.fill_attr, " fill=\"{color}\" fill-opacity=\"{opacity}\"");
+        let _ = write!(self.fill_attr, " fill=\"{paint}\" fill-opacity=\"{opacity}\"");
+    }
+
+    /// The gradient's `<defs>` entry, and its id. Written once per layer that
+    /// uses it: `id`s are document-global and carry the layer's namespace.
+    fn gradient_def(&mut self, gradient: &Arc<crate::shading::Gradient>, transform: Transform2F) -> u32 {
+        use crate::shading::GradientKind;
+
+        // Shading space -> the coordinates the path data is in (the CTM is
+        // baked into the path). Keyed by both, since one gradient drawn under
+        // two transforms needs two `<defs>` entries.
+        let matrix = transform * gradient.matrix;
+        let key = (
+            Arc::as_ptr(gradient) as usize,
+            [
+                matrix.m11().to_bits(),
+                matrix.m21().to_bits(),
+                matrix.m12().to_bits(),
+                matrix.m22().to_bits(),
+                matrix.m13().to_bits(),
+                matrix.m23().to_bits(),
+            ],
+        );
+        if let Some(&id) = self.gradient_ids.get(&key) {
+            return id;
+        }
+        let mut attrs = String::from("gradientUnits=\"userSpaceOnUse\"");
+        let element = match gradient.kind {
+            GradientKind::Linear { start, end } => {
+                attrs.push_str(" x1=\"");
+                fmt_f(start.x(), &mut attrs);
+                attrs.push_str("\" y1=\"");
+                fmt_f(start.y(), &mut attrs);
+                attrs.push_str("\" x2=\"");
+                fmt_f(end.x(), &mut attrs);
+                attrs.push_str("\" y2=\"");
+                fmt_f(end.y(), &mut attrs);
+                attrs.push('"');
+                "linearGradient"
+            }
+            GradientKind::Radial { start, start_radius, end, end_radius } => {
+                // SVG 2's `fr` is the start radius. Without it a type 3
+                // shading with r0 > 0 would paint the inner disk with the
+                // first stop, which is only right when r0 is 0.
+                attrs.push_str(" cx=\"");
+                fmt_f(end.x(), &mut attrs);
+                attrs.push_str("\" cy=\"");
+                fmt_f(end.y(), &mut attrs);
+                attrs.push_str("\" r=\"");
+                fmt_f(end_radius, &mut attrs);
+                attrs.push_str("\" fx=\"");
+                fmt_f(start.x(), &mut attrs);
+                attrs.push_str("\" fy=\"");
+                fmt_f(start.y(), &mut attrs);
+                attrs.push_str("\" fr=\"");
+                fmt_f(start_radius, &mut attrs);
+                attrs.push('"');
+                "radialGradient"
+            }
+        };
+        // A shading always pads: an end that `/Extend` switched off carries a
+        // transparent stop instead, which no `spreadMethod` can express.
+        attrs.push_str(" spreadMethod=\"pad\"");
+        attrs.push_str(" gradientTransform=\"matrix(");
+        matrix_data(matrix, &mut attrs);
+        attrs.push_str(")\"");
+
+        let mut stops = String::new();
+        for stop in &gradient.stops {
+            let ColorU { r, g, b, .. } = ColorF::new(stop.color.0, stop.color.1, stop.color.2, 1.0).to_u8();
+            stops.push_str("<stop offset=\"");
+            fmt_f(stop.offset, &mut stops);
+            let _ = write!(stops, "\" stop-color=\"#{r:02x}{g:02x}{b:02x}\"/>");
+        }
+
+        let id = self.gradients.len() as u32;
+        self.gradients.push(GradientDef { element, attrs, stops });
+        self.gradient_ids.insert(key, id);
+        id
     }
 
     /// One occurrence of a glyph outline: register it in `<defs>` the first
@@ -415,7 +547,7 @@ impl<'a> SvgBackend<'a> {
         if !self.used_symbols.contains(&id) {
             self.used_symbols.push(id);
         }
-        self.update_fill(fill);
+        self.update_fill(fill, transform);
         self.matrix_buf.clear();
         matrix_data(transform, &mut self.matrix_buf);
         let opened = self.open_clips(clip);
@@ -587,14 +719,17 @@ fn image_matrix(transform: Transform2F) -> [f32; 6] {
 }
 
 fn fill_attrs(fill: &FillMode) -> (String, f32) {
-    match fill.color {
+    match &fill.color {
         crate::Fill::Solid(r, g, b) => {
-            let ColorU { r, g, b, .. } = ColorF::new(r, g, b, 1.0).to_u8();
+            let ColorU { r, g, b, .. } = ColorF::new(*r, *g, *b, 1.0).to_u8();
             (format!("#{r:02x}{g:02x}{b:02x}"), fill.alpha)
         }
         // Patterns are rasterised by some other path; mark them rather than
         // silently painting them black.
         crate::Fill::Pattern(_) => ("#ff0000".to_string(), fill.alpha * 0.5),
+        // Never reached: `update_fill` writes `url(#…)` for a gradient. Red,
+        // like a pattern, if it ever is.
+        crate::Fill::Gradient(_) => ("#ff0000".to_string(), fill.alpha * 0.5),
     }
 }
 

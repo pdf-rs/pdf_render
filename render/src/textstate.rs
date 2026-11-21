@@ -88,8 +88,8 @@ impl<E: Encoder + 'static> TextState<E> {
             (cid, e.cmap.get(&cid).map(|&(gid, ref uni)| (gid, uni.clone())), i * step + idx0)
         );
 
-        let fill = FillMode { color: gs.fill_color, alpha: gs.fill_color_alpha, mode: fill_mode };
-        let stroke = FillMode { color: gs.stroke_color, alpha: gs.stroke_color_alpha, mode: stroke_mode };
+        let fill = FillMode { color: gs.fill_color.clone(), alpha: gs.fill_color_alpha, mode: fill_mode };
+        let stroke = FillMode { color: gs.stroke_color.clone(), alpha: gs.stroke_color_alpha, mode: stroke_mode };
         let stroke_mode = gs.stroke();
 
         let draw_mode = match self.mode {
