@@ -2930,7 +2930,7 @@ dependencies = [
 [[package]]
 name = "pdf"
 version = "0.10.0"
-source = "git+ssh://git@github.com/s3bk/pdf.git?branch=master#eb32bb47ba3e71bfcdcd471167cc267c12fcb130"
+source = "git+https://github.com/s3bk/pdf.git?branch=master#eb32bb47ba3e71bfcdcd471167cc267c12fcb130"
 dependencies = [
  "aes",
  "bitflags 2.13.2",
@@ -2947,7 +2947,7 @@ dependencies = [
  "log",
  "md5",
  "once_cell",
- "pdf_derive 0.3.0 (git+ssh://git@github.com/s3bk/pdf.git?branch=master)",
+ "pdf_derive 0.3.0 (git+https://github.com/s3bk/pdf.git?branch=master)",
  "sha2 0.11.1",
  "snafu",
  "stringprep",
@@ -2996,7 +2996,7 @@ dependencies = [
 [[package]]
 name = "pdf_derive"
 version = "0.3.0"
-source = "git+ssh://git@github.com/s3bk/pdf.git?branch=master#eb32bb47ba3e71bfcdcd471167cc267c12fcb130"
+source = "git+https://github.com/s3bk/pdf.git?branch=master#eb32bb47ba3e71bfcdcd471167cc267c12fcb130"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3062,7 +3062,7 @@ dependencies = [
  "pathfinder_content",
  "pathfinder_geometry",
  "pathfinder_renderer",
- "pdf 0.10.0 (git+ssh://git@github.com/s3bk/pdf.git?branch=master)",
+ "pdf 0.10.0 (git+https://github.com/s3bk/pdf.git?branch=master)",
  "pdf_encoding 0.4.0",
  "peniko",
  "rand 0.6.5",
