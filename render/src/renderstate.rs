@@ -1190,13 +1190,11 @@ fn lab2rgb(l: f32, a: f32, b: f32, params: &LabParams) -> Fill {
     )
 }
 
-fn cmyk2rgb((c, m, y, k): (f32, f32, f32, f32), mode: BlendMode) -> Fill {
-    let clamp = |f| if f > 1.0 { 1.0 } else { f };
-    Fill::Solid(
-        1.0 - clamp(c + k),
-        1.0 - clamp(m + k),
-        1.0 - clamp(y + k),
-    )
+fn cmyk2rgb((c, m, y, k): (f32, f32, f32, f32), _mode: BlendMode) -> Fill {
+    // DeviceCMYK has no display conversion of its own: go through the default
+    // press profile the way ghostscript and poppler do (see crate::cmyk).
+    let [r, g, b] = crate::cmyk::to_rgb(c, m, y, k);
+    Fill::Solid(r, g, b)
 }
 
 

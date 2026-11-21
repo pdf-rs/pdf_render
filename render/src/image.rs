@@ -450,28 +450,15 @@ fn rgb2rgb(r: f32, g: f32, b: f32, mode: BlendMode) -> [u8; 3] {
     }
 
 }
-/*
-red = 1.0 – min ( 1.0, cyan + black )
-green = 1.0 – min ( 1.0, magenta + black )
-blue = 1.0 – min ( 1.0, yellow + black )
-*/
-
+/// CMYK image samples to RGB, through the default press profile (see
+/// `crate::cmyk`) rather than `1 - min(1, c + k)`.
 #[inline]
-fn cmyk2rgb([c, m, y, k]: [u8; 4], mode: BlendMode) -> [u8; 3] {
+fn cmyk2rgb(cmyk: [u8; 4], mode: BlendMode) -> [u8; 3] {
+    let [r, g, b] = crate::cmyk::to_rgb_u8(cmyk);
     match mode {
-        BlendMode::Darken => {
-            let r = 255 - c.saturating_add(k);
-            let g = 255 - m.saturating_add(k);
-            let b = 255 - y.saturating_add(k);
-            [r, g, b]
-        }
-        BlendMode::Overlay => {
-            let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
-            let r = 255 - c.saturating_add(k);
-            let g = 255 - m.saturating_add(k);
-            let b = 255 - y.saturating_add(k);
-            [r, g, b]
-        }
+        BlendMode::Overlay => [r, g, b],
+        // overprint: the backend multiplies, so hand it the inverted ink
+        BlendMode::Darken => [255 - r, 255 - g, 255 - b],
     }
 }
 
