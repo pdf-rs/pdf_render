@@ -1651,7 +1651,7 @@ source = "git+https://github.com/s3bk/glyphmatcher#1958392699b875695a22b332f1e49
 dependencies = [
  "font 0.1.1",
  "istring 0.3.4 (git+https://github.com/s3bk/istring)",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "pathfinder_content",
  "pathfinder_geometry",
  "pdf_encoding 0.3.0",
@@ -2029,9 +2029,9 @@ dependencies = [
 
 [[package]]
 name = "jpeg-decoder"
-version = "0.3.0"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc0000e42512c92e31c2252315bda326620a4e034105e900c98ec492fa077b3e"
+checksum = "00810f1d8b74be64b13dbf3db89ac67740615d6c891f0e7b6179326533011a07"
 
 [[package]]
 name = "js-sys"
@@ -2861,7 +2861,7 @@ version = "0.1.1"
 source = "git+https://github.com/s3bk/pathfinder_view#4c3b70bea706a896dcbbb35f60651680a54d6f23"
 dependencies = [
  "bincode",
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "gl",
  "glutin 0.30.10",
  "glutin-winit",
@@ -2914,6 +2914,7 @@ dependencies = [
  "indexmap 2.14.2",
  "istring 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "itertools 0.13.0",
+ "jpeg-decoder",
  "libflate",
  "log",
  "md5",
@@ -3055,7 +3056,7 @@ dependencies = [
  "image",
  "instant",
  "istring 0.3.4 (git+https://github.com/s3bk/istring)",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "once_cell",
  "pathfinder_color",
@@ -3086,7 +3087,7 @@ dependencies = [
  "font 0.1.1",
  "getrandom 0.2.10",
  "image",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "js-sys",
  "log",
  "pathfinder_color",

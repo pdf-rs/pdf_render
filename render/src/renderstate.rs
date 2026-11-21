@@ -214,19 +214,24 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 let mut path: Outline = self.current_outline.clone().transformed(&self.graphics_state.transform);
                 let clip_path_rect = to_rect(&path);
 
+                // A new clip never replaces the one in force: it narrows it.
+                // Every branch therefore keeps `parent`, so the backend can
+                // push the whole chain (see `push_clip`). Dropping the parent
+                // — which this did whenever the new clip was a rectangle —
+                // leaves only the last link, and pages whose innermost clip is
+                // the full MediaBox get painted to the edge: that is the dark
+                // sheet over Grundfosliterature-6154082.pdf page 15.
                 let (path, r, parent) = match (self.graphics_state.clip_path_rect, clip_path_rect, self.graphics_state.clip_path_id) {
                     (Some(r1), Some(r2), Some(p)) => {
                         let r = r1.intersection(r2).unwrap_or_default();
-                        (Outline::from_rect(r), Some(r), None)
+                        (Outline::from_rect(r), Some(r), Some(p))
                     }
                     (Some(r), None, Some(p)) => {
                         path.clip_against_polygon(&[r.origin(), r.upper_right(), r.lower_right(), r.lower_left()]);
-                        (path, None, None)
+                        (path, None, Some(p))
                     }
-                    (None, Some(r), Some(p)) => {
-                        //let mut path = self.graphics_state.clip_path.as_ref().unwrap().outline.clone();
-                        path.clip_against_polygon(&[r.origin(), r.upper_right(), r.lower_right(), r.lower_left()]);
-                        (path, None, None)
+                    (None, Some(_r), Some(p)) => {
+                        (path, None, Some(p))
                     }
                     (None, Some(r), None) => {
                         (path, Some(r), None)
