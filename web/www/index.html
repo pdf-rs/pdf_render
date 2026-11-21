@@ -359,7 +359,7 @@ body.ready #dock { opacity: 1; transform: translateX(-50%); pointer-events: auto
     <button id="zoomout" title="zoom out (−)" aria-label="zoom out">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>
     </button>
-    <button id="zoomlabel" title="fit width up to actual size / fit page / fit width / actual size">100%</button>
+    <button id="zoomlabel" title="fit page / fit width / actual size">100%</button>
     <button id="zoomin" title="zoom in (+)" aria-label="zoom in">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
     </button>
@@ -387,7 +387,7 @@ const $ = (id) => document.getElementById(id);
 const stage = $("stage"), pages = $("pages");
 const state = {
     doc: null, page: 0, pages: 0, url: "", length: 0,
-    zoom: "auto",       // "auto" | "page" | "width" | a number
+    zoom: "page",       // "page" | "width" | a number
     size: null,         // a page's natural size in CSS px, from its SVG
     sizes: new Map(),   // page index -> natural size, where a page differs
     layout: null,       // the column: every page's top, width and height
@@ -399,7 +399,12 @@ const state = {
 
 function say(text) { $("readout").textContent = text; }
 function fail(e) {
-    const text = String(e && (e.stack || e.message) || e);
+    // The reason first: Firefox's `stack` has the frames only, no message, so
+    // `stack || message` used to show a bare list of line numbers and nothing
+    // about what went wrong.
+    const message = e && e.message ? String(e.message) : String(e);
+    const stack = e && e.stack ? String(e.stack) : "";
+    const text = stack && stack !== message ? `${message}\n\n${stack}` : message;
     $("errortext").textContent = text;
     $("error").classList.add("show");
     console.error(e);
@@ -1084,7 +1089,7 @@ addEventListener("keydown", (e) => {
         case "End": show(state.pages - 1); break;
         case "+": case "=": zoomBy(1.15); break;
         case "-": case "_": zoomBy(1 / 1.15); break;
-        case "0": state.zoom = "auto"; fit(); break;
+        case "0": state.zoom = "page"; fit(); break;
         case "f": zoomCycle(); break;
         case "t": sideOpen = !sideOpen; applySide(); break;
         case "Escape": clearError(); $("openform").hidden = true; break;
