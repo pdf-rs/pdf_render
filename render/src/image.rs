@@ -457,8 +457,11 @@ fn cmyk2rgb(cmyk: [u8; 4], mode: BlendMode) -> [u8; 3] {
     let [r, g, b] = crate::cmyk::to_rgb_u8(cmyk);
     match mode {
         BlendMode::Overlay => [r, g, b],
-        // overprint: the backend multiplies, so hand it the inverted ink
-        BlendMode::Darken => [255 - r, 255 - g, 255 - b],
+        // Overprint. `BlendMode::Darken` also negates the rgb path, but a CMYK
+        // image is ink, not light: the multiply the backend applies on top of
+        // the page is the whole of the overprint here, and negating as well
+        // turns every CMYK image on a page black.
+        BlendMode::Darken => [r, g, b],
     }
 }
 
