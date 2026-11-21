@@ -410,7 +410,24 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
             if !matches!(cs, Some(ColorSpace::DeviceCMYK)) {
                 info!("image has data/pixel ratio of 4, but colorspace is {:?}", cs);
             }
-            cmyk2color_arr(&raw_data[..pixel_count * 4], alpha, mode)
+            // `/Decode` is how a producer says the samples are stored the other
+            // way round, and `[1 0 1 0 1 0 1 0]` is common on an Adobe CMYK
+            // scan. Ignoring it paints white paper black:
+            // Muecher_Datenblatt_Uebergangsring.pdf page 1, the LRQA mark.
+            let samples: Cow<[u8]> = match image.decode.as_deref() {
+                Some(d) if d.len() >= 8 => {
+                    let mut v = Vec::with_capacity(pixel_count * 4);
+                    for (i, &s) in raw_data[..pixel_count * 4].iter().enumerate() {
+                        let ch = i % 4;
+                        let (lo, hi) = (d[2 * ch], d[2 * ch + 1]);
+                        let t = lo + (s as f32 / 255.) * (hi - lo);
+                        v.push((t.clamp(0., 1.) * 255.).round() as u8);
+                    }
+                    Cow::Owned(v)
+                }
+                _ => Cow::Borrowed(&raw_data[..pixel_count * 4]),
+            };
+            cmyk2color_arr(&samples, alpha, mode)
         }
         _ => unimplemented!("data/pixel ratio {}", data_ratio),
     };
