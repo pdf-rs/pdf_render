@@ -18,9 +18,10 @@ use crate::{Backend, Cache, DrawMode, FillMode, cache::ImageResult, font::FontRc
 
 pub struct VelloBackend<'a> {
     scene: Scene,
-    clip_paths: Vec<(BezPath, FillRule)>,
+    clip_paths: Vec<(BezPath, FillRule, Option<usize>)>,
     cache: &'a mut Cache<OutlineBuilder>,
-    current_clip_path: Option<usize>,
+    /// How many clip layers are currently open on the scene.
+    open_clips: usize,
 }
 
 impl<'a> VelloBackend<'a> {
@@ -29,31 +30,55 @@ impl<'a> VelloBackend<'a> {
             scene: Scene::new(),
             clip_paths: vec![],
             cache,
-            current_clip_path: None,
+            open_clips: 0,
         }
     }
+    /// A clip path and its ancestors, outermost first.
+    fn clip_chain(&self, clip: Option<usize>) -> Vec<usize> {
+        let mut chain = Vec::new();
+        let mut cur = clip;
+        while let Some(id) = cur {
+            let Some((_, _, parent)) = self.clip_paths.get(id) else {
+                break;
+            };
+            chain.push(id);
+            cur = *parent;
+        }
+        chain.reverse();
+        chain
+    }
+
+    fn pop_clips(&mut self) {
+        for _ in 0..self.open_clips {
+            self.scene.pop_layer();
+        }
+        self.open_clips = 0;
+    }
+
+    /// Cut everything drawn from here on to `clip_path` and its ancestors.
+    ///
+    /// Every link of the chain has to be pushed: a producer that ends a clip
+    /// stack with the sheet rect would otherwise let the innermost link — the
+    /// sheet — win, and paint a shading across the whole page.
     fn set_clip_path(&mut self, clip_path: Option<usize>) {
-        if clip_path == self.current_clip_path {
-            if let Some(_) = self.current_clip_path {
-                self.scene.pop_layer();
-            }
-            if let Some(n) = clip_path {
-                let (path, fill_rule) = &self.clip_paths[n];
-                self.scene.push_clip_layer(Fill::EvenOdd, Affine::IDENTITY, path);
-            }
-            self.current_clip_path = clip_path;
+        self.pop_clips();
+        for id in self.clip_chain(clip_path) {
+            let (path, fill_rule, _) = &self.clip_paths[id];
+            let style = match fill_rule {
+                FillRule::EvenOdd => Fill::EvenOdd,
+                FillRule::Winding => Fill::NonZero,
+            };
+            self.scene.push_clip_layer(style, Affine::IDENTITY, path);
+            self.open_clips += 1;
         }
     }
-    pub fn finish(self) -> Scene {
+    pub fn finish(mut self) -> Scene {
+        self.pop_clips();
         self.scene
     }
 
     fn do_draw_image(&mut self, brush: &ImageBrush, transform: Transform2F, clip: Option<<VelloBackend<'_> as Backend>::ClipPathId>) {
-        if let Some(clip_id) = clip {
-            let (clip_path, _) = self.clip_paths.get(clip_id).unwrap();
-
-            self.scene.push_layer(Fill::EvenOdd, BlendMode::default(), 1.0,  Affine::IDENTITY, clip_path);
-        }
+        self.set_clip_path(clip);
 
         let im_tr = transform
             * Transform2F::from_scale(Vector2F::new(1.0 / (brush.image.width as f32), -1.0 / (brush.image.height as f32)))
@@ -61,10 +86,6 @@ impl<'a> VelloBackend<'a> {
 
         self.scene
             .draw_image(brush, transform_to_affine(im_tr));
-
-        if clip.is_some() {
-            self.scene.pop_layer();
-        }
     }
 }
 
@@ -181,7 +202,8 @@ impl<'a> Backend for VelloBackend<'a> {
         parent: Option<Self::ClipPathId>,
     ) -> Self::ClipPathId {
         let id = self.clip_paths.len();
-        self.clip_paths.push((outline_to_bez(&path), fill_rule));
+        self.clip_paths
+            .push((outline_to_bez(&path), fill_rule, parent));
         id
     }
     fn draw(
