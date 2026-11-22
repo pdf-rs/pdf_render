@@ -161,11 +161,15 @@ header {
 #progress { position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; overflow: hidden;
             opacity: 0; transition: opacity .2s; }
 body.busy #progress { opacity: 1; }
+/* The sweep runs only while something is being read. An `infinite` animation
+   left running behind `opacity: 0` keeps the compositor producing frames for
+   as long as the page is open — a viewer sitting in a chat, untouched, that
+   never stops drawing. */
 #progress::before {
     content: ""; position: absolute; inset: 0; width: 40%;
     background: linear-gradient(90deg, transparent, var(--accent), transparent);
-    animation: slide 1.1s ease-in-out infinite;
 }
+body.busy #progress::before { animation: slide 1.1s ease-in-out infinite; }
 @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(350%); } }
 
 /* -------------------------------------------------------------- the stage */
@@ -368,9 +372,9 @@ body.ready #dock { opacity: 1; transform: translateX(-50%); pointer-events: auto
 <div id="error" role="alert"><span id="errortext"></span><button id="errorclose" aria-label="dismiss">×</button></div>
 
 <script type="module">
-import { load, Doc, HttpSource, parseTable } from './doc.js';
-import { Sealed, keyFromFragment } from './seal.js';
+import { keyFromFragment } from './seal.js';
 import { resolve as assetUrl } from './assets.js';
+import { Remote } from './remote.js';
 
 // Where the wasm module and the font bundle live, relative to this page, or —
 // in a share — wherever `assets.json` says: those two files are the same in
@@ -418,35 +422,11 @@ function busy(on) {
     document.body.classList.toggle("busy", state.busy);
 }
 
-await load(WASM).catch(fail);
+// The module is loaded by the worker, not here; the page's own first paint no
+// longer waits for a 2.3 MB wasm compile it will not use on this thread.
 
-/** Bytes of a PDF at `url`, without reading it: HEAD, else a one-byte range. */
-async function fileLength(url) {
-    const head = await fetch(url, { method: "HEAD" });
-    const len = head.headers.get("content-length");
-    if (head.ok && len) return Number(len);
-    const probe = await fetch(url, { headers: { Range: "bytes=0-0" } });
-    const range = probe.headers.get("content-range");   // "bytes 0-0/123456"
-    const total = range && range.split("/").pop();
-    if (!total || total === "*") throw new Error(`${url}: the server does not say how large it is`);
-    return Number(total);
-}
-
-/** The sender's per-page table, if it shipped one: `<pdf>.tbl` next to the
- *  file. It says what each page reads, so one request per page is enough. No
- *  table is not an error — the client then discovers the ranges page by page. */
-async function loadTable(url) {
-    try {
-        const response = await fetch(`${url}.tbl`);
-        if (!response.ok) return null;
-        const table = parseTable(await response.text());
-        console.log(`table: ${table.pages.size} page(s), ${table.toc.length} heading(s)`);
-        return table;
-    } catch (e) {
-        console.log(`no range table: ${e.message || e}`);
-        return null;
-    }
-}
+// `fileLength` and the `<pdf>.tbl` reader live in `worker.js` too: they are
+// part of opening a document, which is now that thread's job.
 
 function nameOf(url) {
     try {
@@ -467,40 +447,27 @@ async function open(url, startAt = 1) {
     busy(true);
     try {
         say("opening …");
-        // A sealed share carries its key in the fragment: the bytes on the
-        // server are ciphertext, and the page is the only place that can read
-        // them. Without a key this is an ordinary range-read file.
-        const key = keyFromFragment(location.hash);
-        let source;
-        try {
-            source = key ? await Sealed.open(url, key) : new HttpSource(url, await fileLength(url));
-        } catch (e) {
-            if (key) throw e;
-            // No key, and the plain file is not there: say what is actually
-            // wrong rather than "Failed to fetch".
-            const sealed = await fetch(`${url}.sealed`, { headers: { Range: "bytes=0-0" } }).catch(() => null);
-            if (sealed && sealed.ok) {
-                throw new Error(
-                    `${url} is sealed: this link is missing its key. Open the whole link, including ` +
-                    `the part after # (it looks like #k=…); without it the file is ciphertext and ` +
-                    `nothing here can read it.`);
-            }
-            throw e;
-        }
-        const length = source.length;
-        state.length = length;
-        const doc = new Doc(source);
-        const fontBytes = await doc.fonts(FONTS);
-        const table = await loadTable(url);
-        if (table) doc.setTable(table);
-        state.pages = await doc.open();
+        // The document — the module, the bytes, the drawing — lives in a
+        // worker now (`worker.js`), and this is the handle on it: the work that
+        // used to block this thread happens there instead. A sealed share
+        // carries its key in the fragment: the bytes on the server are
+        // ciphertext, and only the page can read them.
+        const doc = new Remote();
+        const opened = await doc.open({
+            url: new URL(url, location.href).href,
+            key: keyFromFragment(location.hash),
+            wasm: WASM,
+            fonts: FONTS,
+        });
+        state.length = opened.length;
+        state.pages = opened.pages;
         state.doc = doc;
         state.page = 0;
         $("pagecount").textContent = String(state.pages);
         $("pageno").max = String(state.pages);
-        // The contents, when the table carried them: drawn here, from bytes
-        // already fetched, so the sidebar is full before page one is painted.
-        if (table && table.toc.length) drawToc(table.toc);
+        // The contents, when the table carried them: already resolved by the
+        // sender, so the sidebar is full before page one is painted.
+        if (opened.tableToc.length) drawToc(opened.tableToc);
         $("welcome").hidden = true;
         document.body.classList.add("ready");
         // A zoom needs a page size and only a rendered page has one: lay the
@@ -508,8 +475,8 @@ async function open(url, startAt = 1) {
         fit();
         $("openform").hidden = true;
         $("openbtn").hidden = false;
-        say(`${state.pages} page(s), ${fmt(length)}`);
-        console.log(`fonts: ${fmt(fontBytes)}; table: ${table ? `${table.pages.size} page(s), ${table.toc.length} heading(s)` : "none"}; open: ${doc.requests} request(s), ${fmt(doc.bytes)}`);
+        say(`${state.pages} page(s), ${fmt(opened.length)}`);
+        console.log(`fonts: ${fmt(opened.fonts)}; table: ${opened.hasTable ? `${opened.tablePages} page(s), ${opened.tableToc.length} heading(s)` : "none"}; open: ${doc.requests} request(s), ${fmt(doc.bytes)}`);
         // Straight to the page asked for: the point of the range table is that
         // landing on page 20 costs page 20, not pages 1–20.
         await show(Math.min(Math.max(1, startAt), state.pages) - 1);
@@ -715,12 +682,14 @@ async function renderPage(k, el, mine) {
     void el.offsetWidth;                        // restart the animation
     el.classList.add("enter");
     const t3 = performance.now();
-    // Where the milliseconds went: the module's own time, the browser's
-    // parse/style/paint after it, and the frame that actually landed.
+    // Where the milliseconds went: the worker's own time, the wait for it (a
+    // message round trip, not work on this thread), the browser's parse/style
+    // after `innerHTML`, and the frame that actually landed.
     requestAnimationFrame(() => requestAnimationFrame(() => {
         if (mine !== gen) return;
         document.body.dataset.timing = JSON.stringify({
             page: k + 1,
+            worker: doc.workerMs,
             fetchModule: Math.round(t1 - t0),
             dom: Math.round(t2 - t1),
             layout: Math.round(t3 - t2),
@@ -729,7 +698,7 @@ async function renderPage(k, el, mine) {
     }));
     if (k === state.page) {
         say(`page ${k + 1}: ${fmt(doc.bytes - before)} in ${doc.requests - beforeRequests} request(s) · ` +
-            `${fmt(doc.bytes)} of ${fmt(state.length)} read · ${Math.round(t3 - t0)} ms`);
+            `${fmt(doc.bytes)} of ${fmt(state.length)} read · ${doc.workerMs} ms drawn off-thread`);
     }
 }
 
@@ -1119,20 +1088,19 @@ stage.addEventListener("drop", async (e) => {
 async function openLocal(f) {
     busy(true);
     try {
-        const bytes = new Uint8Array(await f.arrayBuffer());
+        // The bytes cross to the worker as a transfer, not a copy: the file the
+        // reader dropped is a whole document, and nothing on this thread needs
+        // it afterwards.
+        const bytes = await f.arrayBuffer();
         clearError();
         if (state.doc) state.doc.free();
+        state.doc = null;
         resetPages();
-        const doc = new Doc(new HttpSource("", bytes.length));
-        state.length = bytes.length;
-        await doc.fonts(FONTS);
-        // No server: every byte is here already.
-        const mod = await load(WASM);
-        const ptr = mod.pdf_buf_alloc(bytes.length);
-        new Uint8Array(mod.memory.buffer, ptr, bytes.length).set(bytes);
-        mod.pdf_supply(doc, 0, ptr, bytes.length);
-        mod.pdf_buf_free(ptr, bytes.length);
-        state.pages = await doc.open();
+        // No server: the worker is handed the whole file and asks for nothing.
+        const doc = new Remote();
+        const opened = await doc.openLocal({ bytes, wasm: WASM, fonts: FONTS });
+        state.length = opened.length;
+        state.pages = opened.pages;
         state.doc = doc;
         state.url = f.name;
         state.page = 0;
@@ -1145,7 +1113,7 @@ async function openLocal(f) {
         fit();
         $("openform").hidden = true;
         $("openbtn").hidden = false;
-        say(`${state.pages} page(s), ${fmt(bytes.length)}`);
+        say(`${state.pages} page(s), ${fmt(opened.length)}`);
         await show(0);
         refreshToc();
     } catch (e) { fail(e); } finally { busy(false); }
