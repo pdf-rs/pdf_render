@@ -20,6 +20,7 @@ use pathfinder_content::{
 };
 use super::{
     graphicsstate::GraphicsState,
+    mesh,
     textstate::{TextState, Span},
     DrawMode,
     TextSpan,
@@ -546,6 +547,11 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
 
     /// `sh`: fill the region the current clip selects with the shading that
     /// `/Shading` names (§8.7.4.2).
+    /// `sh`: paint the shading called `name` (§8.7.4.5).
+    ///
+    /// Types 2 and 3 are a function of one parameter and become a gradient;
+    /// types 4 to 7 are streams of coloured vertices and are painted as
+    /// triangles.
     fn draw_shading(&mut self, name: &Name) -> Result<()> {
         let Some(raw) = self.resources.shading.get(name) else {
             // Like a missing XObject: one bad operator does not lose the page.
@@ -554,7 +560,17 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         };
         let dict = match raw.clone().resolve(self.resolve)? {
             Primitive::Dictionary(dict) => dict,
-            Primitive::Stream(stream) => stream.info,
+            Primitive::Stream(stream) => {
+                let dict: Dictionary = stream.info.clone();
+                if let Some(shading_type) = mesh_type(&dict) {
+                    // The stream's data is still filtered; the typed wrapper
+                    // decodes it against `/Filter` and `/DecodeParms`.
+                    let stream = pdf::object::Stream::<Dictionary>::from_stream(stream, self.resolve)?;
+                    let data = stream.data(self.resolve)?;
+                    return self.paint_mesh(shading_type, &dict, &data);
+                }
+                dict
+            }
             p => {
                 warn!("shading {:?}: expected a dictionary, found {}", name, p.get_debug_name());
                 return Ok(());
@@ -742,6 +758,133 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         );
     }
 
+    /// Paint a mesh shading (types 4 to 7): triangles of coloured vertices.
+    ///
+    /// The backends take a solid colour or a gradient, not a Gouraud
+    /// triangle, so each triangle is split until the colour across it varies
+    /// by less than a visible step and painted flat. Every triangle is
+    /// transformed to device space here rather than by the backend: the
+    /// shading's own `/Matrix` and the CTM both apply, and a triangle grown to
+    /// hide the seam against its neighbour must grow by a pixel *there*.
+    fn paint_mesh(&mut self, shading_type: u8, dict: &Dictionary, data: &[u8]) -> Result<()> {
+        let number = |key: &str| dict.get(key).and_then(|p| p.as_number().ok());
+        let (Some(bits_per_coordinate), Some(bits_per_component)) = (
+            number("BitsPerCoordinate").map(|n| n as u32),
+            number("BitsPerComponent").map(|n| n as u32),
+        ) else {
+            warn!("mesh shading type {shading_type} without /BitsPerCoordinate or /BitsPerComponent");
+            return Ok(());
+        };
+        let bits_per_flag = number("BitsPerFlag").map(|n| n as u32).unwrap_or(0);
+        let Some(decode) = dict.get("Decode").map(number_array).transpose()? else {
+            warn!("mesh shading type {shading_type} without /Decode");
+            return Ok(());
+        };
+        let params = mesh::Params {
+            shading_type,
+            bits_per_coordinate,
+            bits_per_component,
+            bits_per_flag,
+            decode,
+            vertices_per_row: number("VerticesPerRow").map(|n| n as usize).unwrap_or(0),
+        };
+        if params.components() == 0 {
+            warn!("mesh shading type {shading_type} without colour components in /Decode");
+            return Ok(());
+        }
+        if bits_per_flag == 0 && shading_type != 5 {
+            warn!("mesh shading type {shading_type} without /BitsPerFlag; reading no flags");
+        }
+
+        let (shapes, bad_flags) = mesh::parse_reported(data, &params);
+        // A stream written without its flag bits reads as garbage: the flag of
+        // a type 4 vertex is 0, 1 or 2, so anything else means the bytes at
+        // that offset are not flags. Read it again as if there were none,
+        // which is what its producer meant.
+        let shapes = if bad_flags > 0 && bits_per_flag > 0 && shading_type == 4 {
+            warn!("mesh shading: {bad_flags} vertices with an out-of-range flag; reading the stream without flags");
+            mesh::parse(data, &mesh::Params { bits_per_flag: 0, ..params.clone() })
+        } else {
+            shapes
+        };
+        if shapes.is_empty() {
+            warn!("mesh shading type {shading_type}: stream decoded to nothing");
+            return Ok(());
+        }
+
+        let Some(csp) = dict.get("ColorSpace") else {
+            warn!("mesh shading type {shading_type} without /ColorSpace");
+            return Ok(());
+        };
+        let cs = ColorSpace::from_primitive(csp.clone(), self.resolve)?;
+        let cs = device_color_space(&cs);
+        // `/Matrix` maps shading space to the user space of the `sh`; unlike
+        // a type 2 or 3 gradient, every mesh dictionary may have one.
+        let matrix = match dict.get("Matrix").map(number_array).transpose()? {
+            Some(m) if m.len() == 6 => {
+                Transform2F::row_major(m[0], m[2], m[4], m[1], m[3], m[5])
+            }
+            Some(_) => {
+                warn!("mesh shading: /Matrix is not six numbers");
+                Transform2F::default()
+            }
+            None => Transform2F::default(),
+        };
+
+        let transform = self.graphics_state.transform;
+        let alpha = self.graphics_state.fill_color_alpha;
+        let mode = self.blend_mode_fill();
+        let clip = self.graphics_state.clip_path_id;
+        // Two triangles share an edge, and each is drawn antialiased: a seam
+        // of paper would show between them. Growing each by a fraction of a
+        // pixel closes it, and an overlap of opaque paint is invisible.
+        let expand = alpha >= 0.999 && matches!(mode, BlendMode::Overlay);
+        let mut budget = MESH_TRIANGLES;
+        let ncomp = params.components().min(mesh::MAX_COMPONENTS);
+        for shape in &shapes {
+            let mut colours = [[0.0f32; 4]; 4];
+            for (i, v) in shape.vertices().iter().enumerate() {
+                let (r, g, b) = self.components_to_rgb(cs, &v.comps[..ncomp])?;
+                colours[i] = [r, g, b, 0.0];
+            }
+            for (points, cols) in mesh::subdivide(shape, &colours, MESH_SPREAD, budget) {
+                let mut dev = [
+                    transform * (matrix * points[0]),
+                    transform * (matrix * points[1]),
+                    transform * (matrix * points[2]),
+                ];
+                if triangle_area(&dev).abs() < 0.01 {
+                    continue;
+                }
+                if expand {
+                    grow(&mut dev, 0.5);
+                }
+                let colour = [
+                    (cols[0][0] + cols[1][0] + cols[2][0]) / 3.0,
+                    (cols[0][1] + cols[1][1] + cols[2][1]) / 3.0,
+                    (cols[0][2] + cols[1][2] + cols[2][2]) / 3.0,
+                ];
+                let mut outline = Outline::new();
+                push_polygon(&mut outline, &dev, &Transform2F::default());
+                let fill = FillMode {
+                    color: Fill::Solid(colour[0], colour[1], colour[2]),
+                    alpha,
+                    mode,
+                };
+                // Device space already: the transform is the identity.
+                self.backend.draw(
+                    &outline,
+                    &DrawMode::Fill { fill },
+                    FillRule::Winding,
+                    Transform2F::default(),
+                    clip,
+                );
+                budget = budget.saturating_sub(1);
+            }
+        }
+        Ok(())
+    }
+
     /// The area a shading paints, in device space.
     ///
     /// With `/Extend [true true]` that is the page. With an end switched off
@@ -899,6 +1042,40 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
 }
 
 /// One closed polygon contour, in device space.
+/// The largest colour difference, in any channel, across one flat triangle.
+/// 0.01 is two and a half steps of eight bits: below what a smooth gradient
+/// shows as banding, and far below the step of a 64×64 mesh in practice.
+const MESH_SPREAD: f32 = 0.01;
+
+/// How many triangles one mesh shading may be split into before it is painted
+/// as it is. A page with a pathological mesh must not take the renderer with
+/// it.
+const MESH_TRIANGLES: usize = 120_000;
+
+/// Shading types 4 to 7 are mesh streams; 1, 2 and 3 are dictionaries.
+fn mesh_type(dict: &Dictionary) -> Option<u8> {
+    let t = dict.get("ShadingType")?.as_number().ok()? as u8;
+    matches!(t, 4..=7).then_some(t)
+}
+
+/// Twice the signed area of a triangle: the sign says which way it winds.
+fn triangle_area(p: &[Vector2F; 3]) -> f32 {
+    (p[1].x() - p[0].x()) * (p[2].y() - p[0].y()) - (p[1].y() - p[0].y()) * (p[2].x() - p[0].x())
+}
+
+/// Move each vertex `d` pixels away from the centroid, so that neighbouring
+/// triangles overlap instead of leaving an antialiasing seam between them.
+fn grow(p: &mut [Vector2F; 3], d: f32) {
+    let centroid = (p[0] + p[1] + p[2]) * (1.0 / 3.0);
+    for v in p.iter_mut() {
+        let r = *v - centroid;
+        let len = (r.x() * r.x() + r.y() * r.y()).sqrt();
+        if len > 1e-6 {
+            *v = *v + r * (d / len);
+        }
+    }
+}
+
 fn push_polygon(outline: &mut Outline, points: &[Vector2F], m: &Transform2F) {
     if points.len() < 3 {
         return;

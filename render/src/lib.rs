@@ -15,6 +15,8 @@ macro_rules! unimplemented {
 
 mod types;
 mod shading;
+/// Mesh shadings (§8.7.4.5.5): streams of coloured vertices, types 4 to 7.
+mod mesh;
 mod cmyk;
 /// Shading → peniko, shared by the two backends that paint with it.
 #[cfg(any(feature = "vello", feature = "vello_cpu"))]
