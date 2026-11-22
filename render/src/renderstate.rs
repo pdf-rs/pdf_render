@@ -856,7 +856,14 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         // of paper would show between them. Growing each by a fraction of a
         // pixel closes it, and an overlap of opaque paint is invisible.
         let expand = alpha >= 0.999 && matches!(mode, BlendMode::Overlay);
+        if std::env::var("MESH_DEBUG").is_ok() {
+            eprintln!("mesh: alpha {alpha} mode {mode:?} expand {expand}");
+        }
         let mut budget = MESH_TRIANGLES;
+        let debug = std::env::var("MESH_DEBUG").is_ok();
+        let mut painted = 0usize;
+        let mut areas: Vec<f32> = Vec::new();
+        let mut spread_worst = 0.0f32;
         let ncomp = params.components().min(mesh::MAX_COMPONENTS);
         for shape in &shapes {
             let mut colours = [[0.0f32; 4]; 4];
@@ -876,8 +883,17 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 if triangle_area(&dev).abs() < 0.02 {
                     continue;
                 }
+                if debug {
+                    painted += 1;
+                    areas.push(triangle_area(&dev).abs() / 2.0);
+                    let ds = |a: [f32; 3], b: [f32; 3]| {
+                        (a[0] - b[0]).abs().max((a[1] - b[1]).abs()).max((a[2] - b[2]).abs())
+                    };
+                    spread_worst = spread_worst
+                        .max(ds(cols[0], cols[1]).max(ds(cols[1], cols[2])).max(ds(cols[0], cols[2])));
+                }
                 if expand {
-                    grow(&mut dev, 0.5);
+                    inflate(&mut dev, 0.5);
                 }
                 let colour = [
                     (cols[0][0] + cols[1][0] + cols[2][0]) / 3.0,
@@ -901,6 +917,15 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 );
                 budget = budget.saturating_sub(1);
             }
+        }
+        if debug {
+            areas.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let n = areas.len();
+            let q = |f: f32| areas.get(((n as f32) * f).min((n - 1) as f32) as usize).copied().unwrap_or(0.0);
+            eprintln!(
+                "mesh: {painted} pieces, area px2 min {:.3} p10 {:.2} p50 {:.2} p90 {:.2} max {:.1}, worst spread {spread_worst:.4}",
+                areas.first().copied().unwrap_or(0.0), q(0.1), q(0.5), q(0.9), areas.last().copied().unwrap_or(0.0)
+            );
         }
         Ok(())
     }
@@ -1102,6 +1127,54 @@ fn grow(p: &mut [Vector2F; 3], d: f32) {
             *v = *v + r * (d / len);
         }
     }
+}
+
+/// Push each edge of the triangle outwards by `d` pixels, and let the corners
+/// meet where the moved edges do.
+///
+/// This is what closes the seam between two pieces that share an edge: both
+/// grow by `d` and overlap by `2d`, so a pixel on the old edge is covered
+/// outright instead of half by each. Growing the vertices radially from the
+/// centroid does not do the same job — a corner of a thin piece barely moves
+/// sideways, and the paper shows through the gap it leaves at a junction,
+/// which is exactly the speckle a mesh comes out with.
+fn inflate(p: &mut [Vector2F; 3], d: f32) {
+    let area = triangle_area(p);
+    if area == 0.0 {
+        return;
+    }
+    let sign = if area > 0.0 { 1.0 } else { -1.0 };
+    let mut lines = [(Vector2F::default(), Vector2F::default()); 3];
+    for i in 0..3 {
+        let a = p[i];
+        let b = p[(i + 1) % 3];
+        let c = p[(i + 2) % 3];
+        let e = b - a;
+        let len = (e.x() * e.x() + e.y() * e.y()).sqrt();
+        if len < 1e-9 {
+            return;
+        }
+        // Outward normal: the one pointing away from the opposite corner.
+        let mut n = Vector2F::new(-e.y() / len, e.x() / len) * sign;
+        if n.x() * (c.x() - a.x()) + n.y() * (c.y() - a.y()) > 0.0 {
+            n = n * -1.0;
+        }
+        lines[i] = (a + n * d, e);
+    }
+    let mut out = [Vector2F::default(); 3];
+    for i in 0..3 {
+        // The corner at p[i] is where edge i-1 and edge i meet once moved.
+        let (a1, e1) = lines[(i + 2) % 3];
+        let (a2, e2) = lines[i];
+        let den = e1.x() * e2.y() - e1.y() * e2.x();
+        if den.abs() < 1e-9 {
+            out[i] = p[i];
+            continue;
+        }
+        let t = ((a2.x() - a1.x()) * e2.y() - (a2.y() - a1.y()) * e2.x()) / den;
+        out[i] = a1 + e1 * t;
+    }
+    *p = out;
 }
 
 fn push_polygon(outline: &mut Outline, points: &[Vector2F], m: &Transform2F) {
@@ -1426,4 +1499,59 @@ fn to_rect(o: &Outline) -> Option<RectF> {
     }
 
     Some(c.bounds())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn p(x: f32, y: f32) -> Vector2F {
+        Vector2F::new(x, y)
+    }
+
+    /// Barycentric test, so "is this point inside" needs no winding rule.
+    fn inside(t: &[Vector2F; 3], q: Vector2F) -> bool {
+        let s = |a: Vector2F, b: Vector2F| {
+            (q.x() - a.x()) * (b.y() - a.y()) - (q.y() - a.y()) * (b.x() - a.x())
+        };
+        let (d1, d2, d3) = (s(t[0], t[1]), s(t[1], t[2]), s(t[2], t[0]));
+        (d1 >= 0.0 && d2 >= 0.0 && d3 >= 0.0) || (d1 <= 0.0 && d2 <= 0.0 && d3 <= 0.0)
+    }
+
+    #[test]
+    fn a_triangle_inflated_covers_its_own_edges() {
+        let mut t = [p(0.0, 0.0), p(10.0, 0.0), p(0.0, 10.0)];
+        let before = triangle_area(&t).abs() / 2.0;
+        inflate(&mut t, 1.0);
+        let after = triangle_area(&t).abs() / 2.0;
+        assert!(after > before, "area grew, {after} > {before}");
+        // A point on the inside of each original edge is now well inside, so a
+        // piece that shares that edge loses no pixel to the seam.
+        for (a, b, c) in [(0, 1, 2), (1, 2, 0), (2, 0, 1)] {
+            let mid = p((t[a].x() + t[b].x()) / 2.0, (t[a].y() + t[b].y()) / 2.0);
+            let inward = p((t[c].x() - mid.x()) * 0.1, (t[c].y() - mid.y()) * 0.1);
+            let probe = p(mid.x() + inward.x(), mid.y() + inward.y());
+            assert!(inside(&t, probe), "point {a}-{b} offset is covered");
+        }
+    }
+
+    #[test]
+    fn a_thin_piece_is_widened_not_just_moved() {
+        // Kept off the axes on purpose: a triangle whose long edge runs along
+        // x gets its corners pushed along that edge, which widens nothing.
+        let mut t = [p(0.0, 0.0), p(8.0, 0.8), p(16.0, 0.0)];
+        inflate(&mut t, 0.5);
+        // The old top edge ran from (0,0) to (16,0); a pixel half a unit above
+        // its middle was outside before and must be inside now.
+        assert!(inside(&t, p(8.0, 0.3)), "the sliver's long edge moved out");
+        assert!(inside(&t, p(8.0, -0.3)), "and the other way");
+    }
+
+    #[test]
+    fn inflate_keeps_the_winding() {
+        let mut cw = [p(0.0, 0.0), p(0.0, 10.0), p(10.0, 0.0)];
+        let sign = triangle_area(&cw).signum();
+        inflate(&mut cw, 0.7);
+        assert_eq!(triangle_area(&cw).signum(), sign);
+    }
 }

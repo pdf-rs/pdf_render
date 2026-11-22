@@ -1256,7 +1256,7 @@ checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 [[package]]
 name = "font"
 version = "0.1.0"
-source = "git+https://github.com/s3bk/font?branch=vello#032f427839837c6e1fac7333bd4039d3482d17a7"
+source = "git+https://github.com/pdf-rs/font?rev=032f427839837c6e1fac7333bd4039d3482d17a7#032f427839837c6e1fac7333bd4039d3482d17a7"
 dependencies = [
  "decorum",
  "indexmap 1.9.3",
@@ -2905,7 +2905,6 @@ version = "0.10.0"
 dependencies = [
  "aes",
  "bitflags 2.13.2",
- "brotli-decompressor",
  "cbc",
  "datasize",
  "deflate",
@@ -2914,7 +2913,6 @@ dependencies = [
  "indexmap 2.14.2",
  "istring 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "itertools 0.13.0",
- "jpeg-decoder",
  "libflate",
  "log",
  "md5",
@@ -4933,6 +4931,12 @@ dependencies = [
 [[package]]
 name = "web-time"
 version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
+dependencies = [
+ "js-sys",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "weezl"
