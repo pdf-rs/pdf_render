@@ -832,6 +832,23 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         };
 
         let transform = self.graphics_state.transform;
+        // The mesh's `/Matrix` and the CTM, together: a vertex in the stream
+        // becomes a pixel here and nowhere else.
+        let m = transform * matrix;
+        // Subdivision stops at a triangle too small to be worth splitting, and
+        // the floor is in device pixels — an area scales with the determinant,
+        // a length with its square root. Without it a dense mesh is split down
+        // to slivers and sub-pixel vertices, which is what a rasteriser chokes
+        // on; the price is only that such a triangle keeps one flat colour.
+        let det = (m.m11() * m.m22() - m.m12() * m.m21()).abs();
+        let limit = if det > 0.0 && det.is_finite() {
+            mesh::Limit {
+                area: MESH_MIN_AREA_PX / det,
+                altitude: MESH_MIN_ALTITUDE_PX / det.sqrt(),
+            }
+        } else {
+            mesh::Limit::NONE
+        };
         let alpha = self.graphics_state.fill_color_alpha;
         let mode = self.blend_mode_fill();
         let clip = self.graphics_state.clip_path_id;
@@ -847,13 +864,16 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 let (r, g, b) = self.components_to_rgb(cs, &v.comps[..ncomp])?;
                 colours[i] = [r, g, b, 0.0];
             }
-            for (points, cols) in mesh::subdivide(shape, &colours, MESH_SPREAD, budget) {
+            for (points, cols) in mesh::subdivide(shape, &colours, MESH_SPREAD, limit, budget) {
                 let mut dev = [
-                    transform * (matrix * points[0]),
-                    transform * (matrix * points[1]),
-                    transform * (matrix * points[2]),
+                    m * points[0],
+                    m * points[1],
+                    m * points[2],
                 ];
-                if triangle_area(&dev).abs() < 0.01 {
+                // Vertices on one line, or on one point: nothing to paint, and
+                // a degenerate triangle is exactly what a rasteriser does not
+                // want handed to it.
+                if triangle_area(&dev).abs() < 0.02 {
                     continue;
                 }
                 if expand {
@@ -1046,6 +1066,14 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
 /// 0.01 is two and a half steps of eight bits: below what a smooth gradient
 /// shows as banding, and far below the step of a 64×64 mesh in practice.
 const MESH_SPREAD: f32 = 0.01;
+
+/// The smallest a triangle of a mesh may be split to, in device pixels: one
+/// pixel of area, half a pixel of altitude. Below that the colour across the
+/// triangle is invisible anyway, while a mesh dense enough to go there is a
+/// field of slivers whose vertices sit a fraction of a pixel apart — that is
+/// what breaks the render, not what paints it.
+const MESH_MIN_AREA_PX: f32 = 1.0;
+const MESH_MIN_ALTITUDE_PX: f32 = 0.5;
 
 /// How many triangles one mesh shading may be split into before it is painted
 /// as it is. A page with a pathological mesh must not take the renderer with

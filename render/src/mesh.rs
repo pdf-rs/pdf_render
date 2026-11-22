@@ -263,6 +263,31 @@ fn patches(data: &[u8], p: &Params, points: usize, corners: [usize; 4]) -> Vec<S
 /// only keeps the type a round size.
 type Colours = [f32; 4];
 
+/// Where subdivision stops, in shading space: the area and the altitude (the
+/// thinnest dimension) a *painted* triangle may have at the smallest.
+///
+/// A mesh asks to be split until its colour is flat, and that alone can drive
+/// a dense mesh down to triangles far below a pixel — vertices a fraction of
+/// a pixel apart, slivers with no area. A rasteriser does not like those, and
+/// the eye cannot see the colour they carry, so the caller converts a device
+/// floor into these two numbers (by the determinant, and by its square root
+/// for a length) and a triangle whose quarters would fall below the floor is
+/// painted flat as it stands. The loss is precision in the colour, never in
+/// the paint's coverage.
+#[derive(Debug, Clone, Copy)]
+pub struct Limit {
+    pub area: f32,
+    pub altitude: f32,
+}
+
+impl Limit {
+    /// No floor at all.
+    pub const NONE: Limit = Limit {
+        area: 0.0,
+        altitude: 0.0,
+    };
+}
+
 /// Split `shape` into triangles whose corners differ by no more than
 /// `max_spread` in any channel, so that painting each one flat does not show
 /// as banding. `colour` gives the rgb of each corner in the same order.
@@ -273,6 +298,7 @@ pub fn subdivide(
     shape: &Shape,
     colour: &[Colours],
     max_spread: f32,
+    limit: Limit,
     budget: usize,
 ) -> Vec<([Vector2F; 3], [[f32; 3]; 3])> {
     let mut out = Vec::new();
@@ -287,6 +313,7 @@ pub fn subdivide(
                 &mut cols,
                 max_spread.min(1.0),
                 5,
+                limit,
                 budget,
                 &mut out,
             );
@@ -309,6 +336,7 @@ pub fn subdivide(
                     &mut cols,
                     max_spread.min(1.0),
                     5,
+                    limit,
                     budget,
                     &mut out,
                 );
@@ -328,11 +356,12 @@ fn tri(
     cols: &mut [[f32; 3]; 3],
     max_spread: f32,
     depth: u32,
+    limit: Limit,
     budget: usize,
     out: &mut Vec<([Vector2F; 3], [[f32; 3]; 3])>,
 ) {
     let spread = spread(*cols);
-    if spread <= max_spread || depth == 0 || out.len() >= budget {
+    if spread <= max_spread || depth == 0 || out.len() >= budget || below(pts, limit) {
         out.push((*pts, *cols));
         return;
     }
@@ -356,8 +385,40 @@ fn tri(
     ] {
         let mut p = p;
         let mut c = c;
-        tri(&mut p, &mut c, max_spread, depth - 1, budget, out);
+        tri(&mut p, &mut c, max_spread, depth - 1, limit, budget, out);
     }
+}
+
+/// Whether splitting this triangle would make pieces below the size floor. A
+/// four-way split quarters the area and halves the altitude, so a triangle
+/// within four times the floor's area, or twice its altitude, is left whole:
+/// the smallest triangle painted is then never under the floor.
+fn below(p: &[Vector2F; 3], limit: Limit) -> bool {
+    if limit.area <= 0.0 && limit.altitude <= 0.0 {
+        return false;
+    }
+    let a = area(p);
+    if limit.area > 0.0 && a <= 4.0 * limit.area {
+        return true;
+    }
+    if limit.altitude <= 0.0 {
+        return false;
+    }
+    let longest = [(0, 1), (1, 2), (2, 0)]
+        .iter()
+        .map(|&(i, j)| {
+            let d = p[j] - p[i];
+            (d.x() * d.x() + d.y() * d.y()).sqrt()
+        })
+        .fold(0.0f32, f32::max);
+    longest > 0.0 && 2.0 * a / longest <= 2.0 * limit.altitude
+}
+
+/// The area of a triangle, unsigned.
+fn area(p: &[Vector2F; 3]) -> f32 {
+    let d = |i: usize, j: usize| p[j] - p[i];
+    let (ab, ac) = (d(0, 1), d(0, 2));
+    (ab.x() * ac.y() - ab.y() * ac.x()).abs() * 0.5
 }
 
 fn spread(c: [[f32; 3]; 3]) -> f32 {
@@ -528,5 +589,107 @@ mod tests {
         }
         let shapes = parse(&data, &params(5));
         assert_eq!(shapes.len(), 1);
+    }
+
+    /// A triangle already inside the size floor is painted as one piece,
+    /// however far apart its colours are: splitting it would only make
+    /// vertices that sit a fraction of a pixel from each other.
+    #[test]
+    fn subdivision_stops_at_the_size_floor() {
+        let shape = Shape::Triangle([
+            Vertex {
+                point: Vector2F::new(0.0, 0.0),
+                ..Default::default()
+            },
+            Vertex {
+                point: Vector2F::new(1.0, 0.0),
+                ..Default::default()
+            },
+            Vertex {
+                point: Vector2F::new(0.0, 1.0),
+                ..Default::default()
+            },
+        ]);
+        let colours = [
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 1.0, 1.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+        ];
+        let floor = Limit {
+            area: 1.0,
+            altitude: 0.5,
+        };
+        assert_eq!(subdivide(&shape, &colours, 0.01, floor, 100_000).len(), 1);
+        // Without the floor the same triangle is split, and split again.
+        assert!(subdivide(&shape, &colours, 0.01, Limit::NONE, 100_000).len() > 1);
+    }
+
+    /// A sliver has area enough to look respectable but no altitude: it is one
+    /// piece, because every split of it is a thinner sliver in its place.
+    #[test]
+    fn a_sliver_is_not_split() {
+        let shape = Shape::Triangle([
+            Vertex {
+                point: Vector2F::new(0.0, 0.0),
+                ..Default::default()
+            },
+            Vertex {
+                point: Vector2F::new(1000.0, 0.0),
+                ..Default::default()
+            },
+            Vertex {
+                point: Vector2F::new(500.0, 0.1),
+                ..Default::default()
+            },
+        ]);
+        let colours = [
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 1.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+        ];
+        let floor = Limit {
+            area: 1.0,
+            altitude: 0.5,
+        };
+        assert_eq!(subdivide(&shape, &colours, 0.01, floor, 100_000).len(), 1);
+    }
+
+    /// A four-way split quarters the area, so a triangle whose quarters would
+    /// fall below the floor is left whole: every piece painted from a triangle
+    /// big enough to be split is above the floor's area.
+    #[test]
+    fn no_painted_piece_falls_below_the_floor() {
+        let shape = Shape::Triangle([
+            Vertex {
+                point: Vector2F::new(0.0, 0.0),
+                ..Default::default()
+            },
+            Vertex {
+                point: Vector2F::new(40.0, 0.0),
+                ..Default::default()
+            },
+            Vertex {
+                point: Vector2F::new(0.0, 20.0),
+                ..Default::default()
+            },
+        ]);
+        let colours = [
+            [0.0, 0.0, 0.0, 0.0],
+            [1.0, 1.0, 0.0, 0.0],
+            [0.0, 1.0, 1.0, 0.0],
+        ];
+        let floor = Limit {
+            area: 1.0,
+            altitude: 0.5,
+        };
+        let pieces = subdivide(&shape, &colours, 0.01, floor, 100_000);
+        assert!(pieces.len() > 1);
+        for (points, cols) in &pieces {
+            let a = area(points);
+            assert!(
+                a > floor.area || spread(*cols) <= 0.01,
+                "a piece of area {a} was painted below the floor"
+            );
+        }
     }
 }
