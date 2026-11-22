@@ -545,13 +545,11 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         self.device_rect = r;
     }
 
-    /// `sh`: fill the region the current clip selects with the shading that
-    /// `/Shading` names (§8.7.4.2).
     /// `sh`: paint the shading called `name` (§8.7.4.5).
     ///
     /// Types 2 and 3 are a function of one parameter and become a gradient;
-    /// types 4 to 7 are streams of coloured vertices and are painted as
-    /// triangles.
+    /// type 1 is a function of two and is painted as a grid of quads; types 4
+    /// to 7 are streams of coloured vertices and are painted as triangles.
     fn draw_shading(&mut self, name: &Name) -> Result<()> {
         let Some(raw) = self.resources.shading.get(name) else {
             // Like a missing XObject: one bad operator does not lose the page.
@@ -576,6 +574,9 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
                 return Ok(());
             }
         };
+        if self.paint_function_shading(&dict)? {
+            return Ok(());
+        }
         let Some(gradient) = self.shading_gradient(&dict)? else {
             return Ok(());
         };
@@ -756,6 +757,179 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
             self.graphics_state.transform,
             self.graphics_state.clip_path_id,
         );
+    }
+
+    /// Shading type 1 (§8.7.4.5.2): a colour at every point of a rectangle,
+    /// `/Function` of the two coordinates.
+    ///
+    /// Neither a gradient nor a mesh paints this: a gradient is a function of
+    /// one parameter, and a mesh is a triangulation that the file supplies,
+    /// while here there are no vertices at all. So the rectangle is drawn as a
+    /// grid of flat quads, each split until the colour across it is flatter
+    /// than a visible step — the same reduction a mesh gets, but on quads this
+    /// renderer chose rather than on triangles the file did. The corners carry
+    /// the function's real values, so what is lost between them is a step
+    /// below one level of eight bits, and no vertex of the grid is a
+    /// coordinate from a producer that neither reader nor writer checked.
+    ///
+    /// Returns whether the shading was one of these, so the caller does not go
+    /// looking for a gradient.
+    fn paint_function_shading(&mut self, dict: &Dictionary) -> Result<bool> {
+        if dict.get("ShadingType").and_then(|p| p.as_number().ok()) != Some(1.0) {
+            return Ok(false);
+        }
+        let (Some(domain), Some(cs)) = (dict.get("Domain"), dict.get("ColorSpace")) else {
+            warn!("function-based shading: /Domain or /ColorSpace missing");
+            return Ok(true);
+        };
+        let Some(function) = dict.get("Function") else {
+            warn!("function-based shading: /Function missing");
+            return Ok(true);
+        };
+        let domain = number_array(domain)?;
+        if domain.len() != 4 || domain.iter().any(|v| !v.is_finite()) {
+            warn!("function-based shading: /Domain is not four finite numbers");
+            return Ok(true);
+        }
+        let (x0, x1) = (domain[0].min(domain[1]), domain[0].max(domain[1]));
+        let (y0, y1) = (domain[2].min(domain[3]), domain[2].max(domain[3]));
+        let cs = ColorSpace::from_primitive(cs.clone(), self.resolve)?;
+        let cs = device_color_space(&cs);
+        let Some(ncomp) = colour_components(cs) else {
+            warn!("function-based shading: colour space {:?} has no component count", cs);
+            return Ok(true);
+        };
+        let function = Function::from_primitive(function.clone(), self.resolve)?;
+        // `/Matrix` maps shading space to the user space of the `sh`, unlike a
+        // type 2 or 3 dictionary, where the coordinates are already in it.
+        let matrix = match dict.get("Matrix").map(number_array).transpose()? {
+            Some(m) if m.len() == 6 => {
+                Transform2F::row_major(m[0], m[2], m[4], m[1], m[3], m[5])
+            }
+            Some(_) => {
+                warn!("function-based shading: /Matrix is not six numbers");
+                Transform2F::default()
+            }
+            None => Transform2F::default(),
+        };
+        // `/Extend [x y]` (§8.7.4.5.2): outside the domain, the nearest edge's
+        // colour or nothing at all. The function itself clamps to its own
+        // `/Domain` — the same domain, by the spec — so padding costs nothing
+        // here; not padding is the case that needs the region to say so.
+        let extend = match dict.get("Extend") {
+            Some(Primitive::Array(a)) if a.len() == 2 => [
+                if a[0].as_bool().unwrap_or(false) { Extend::Pad } else { Extend::None },
+                if a[1].as_bool().unwrap_or(false) { Extend::Pad } else { Extend::None },
+            ],
+            _ => [Extend::None; 2],
+        };
+
+        let m = self.graphics_state.transform * matrix;
+        let inverse = m.inverse();
+        if !inverse.m11().is_finite() {
+            warn!("function-based shading: /Matrix and the CTM leave a singular matrix");
+            return Ok(true);
+        }
+        // The region in shading space: the domain, grown to the page on each
+        // side `/Extend` pads. The page is taken back into shading space
+        // corner by corner, so a rotated or skewed matrix gives the right
+        // rectangle rather than the page's bounding box.
+        let page = self.device_rect;
+        let (mut rx0, mut rx1, mut ry0, mut ry1) = (x0, x1, y0, y1);
+        if extend != [Extend::None; 2] && page.width() > 0.0 && page.height() > 0.0 {
+            let corners = [
+                page.origin(),
+                page.upper_right(),
+                page.lower_right(),
+                page.lower_left(),
+            ];
+            let (mut px0, mut px1) = (f32::MAX, f32::MIN);
+            let (mut py0, mut py1) = (f32::MAX, f32::MIN);
+            for c in corners {
+                let p = inverse * c;
+                px0 = px0.min(p.x());
+                px1 = px1.max(p.x());
+                py0 = py0.min(p.y());
+                py1 = py1.max(p.y());
+            }
+            if extend[0] == Extend::Pad {
+                rx0 = px0;
+                rx1 = px1;
+            }
+            if extend[1] == Extend::Pad {
+                ry0 = py0;
+                ry1 = py1;
+            }
+        }
+        if !(rx1 > rx0 && ry1 > ry0) {
+            return Ok(true);
+        }
+
+        // Every sample is a full function application — a table lookup with
+        // interpolation, or a PostScript run — so the quad is only split when
+        // the colour across it would show, and the walk has a ceiling.
+        let mut sample_out = vec![0.0f32; ncomp];
+        let mut quads: Vec<([Vector2F; 4], [f32; 3])> = Vec::new();
+        let mut budget = FUNCTION_QUADS;
+        {
+            let mut sample = |x: f32, y: f32| -> Result<(f32, f32, f32)> {
+                function.apply(&[x, y], &mut sample_out)?;
+                self.components_to_rgb(cs, &sample_out)
+            };
+            let corners = [
+                sample(x0, y0)?,
+                sample(x1, y0)?,
+                sample(x1, y1)?,
+                sample(x0, y1)?,
+            ];
+            let mut corners = corners;
+            let mut worst = 0.0f32;
+            for i in 0..4 {
+                for j in i + 1..4 {
+                    worst = worst.max(channel_spread(corners[i], corners[j]));
+                }
+            }
+            split_quads(
+                &mut sample,
+                &m,
+                [rx0, rx1, ry0, ry1],
+                &mut corners,
+                worst,
+                0,
+                &mut budget,
+                &page,
+                &mut quads,
+            )?;
+        }
+
+        let alpha = self.graphics_state.fill_color_alpha;
+        let mode = self.blend_mode_fill();
+        let clip = self.graphics_state.clip_path_id;
+        // Two quads share an edge and each is drawn antialiased: without the
+        // overlap the paper shows through as a grid of hairlines, which on a
+        // dark ground is a lattice of light lines.
+        let expand = alpha >= 0.999 && matches!(mode, BlendMode::Overlay);
+        for (mut dev, colour) in quads {
+            if expand {
+                inflate(&mut dev, 0.5);
+            }
+            let mut outline = Outline::new();
+            push_polygon(&mut outline, &dev, &Transform2F::default());
+            let fill = FillMode {
+                color: Fill::Solid(colour[0], colour[1], colour[2]),
+                alpha,
+                mode,
+            };
+            // Device space already: the transform is the identity.
+            self.backend.draw(
+                &outline,
+                &DrawMode::Fill { fill },
+                FillRule::Winding,
+                Transform2F::default(),
+                clip,
+            );
+        }
+        Ok(true)
     }
 
     /// Paint a mesh shading (types 4 to 7): triangles of coloured vertices.
@@ -1105,6 +1279,132 @@ const MESH_MIN_ALTITUDE_PX: f32 = 0.5;
 /// it.
 const MESH_TRIANGLES: usize = 120_000;
 
+/// The largest colour difference, in any channel, between two corners of a
+/// quad of a function-based shading. The same two and a half steps of eight
+/// bits as [`MESH_SPREAD`]: below banding, above nothing.
+const FUNCTION_SPREAD: f32 = 0.01;
+
+/// The smallest a quad of a function-based shading may be split to, in device
+/// pixels of area. Below this the colour across it is invisible anyway.
+const FUNCTION_MIN_AREA_PX: f32 = 1.0;
+
+/// How deep a quad may be split: eight halvings of each side, sixty-four
+/// thousandths of the colour range per step. With [`FUNCTION_SPREAD`] that
+/// covers a full black-to-white ramp over the page, seven levels of four
+/// quarters — sixteen thousand quads, which the budget below allows. A
+/// function that varies faster than that is one written to defeat this.
+const FUNCTION_DEPTH: u32 = 8;
+
+/// How many quads one function-based shading may be split into.
+const FUNCTION_QUADS: usize = 60_000;
+
+/// How many components a colour space's colour has, which is how many values
+/// a shading's `/Function` must output — one per component.
+fn colour_components(cs: &ColorSpace) -> Option<usize> {
+    Some(match cs {
+        ColorSpace::DeviceGray
+        | ColorSpace::CalGray(_)
+        | ColorSpace::Separation(..)
+        | ColorSpace::Indexed(..) => 1,
+        ColorSpace::DeviceRGB | ColorSpace::CalRGB(_) | ColorSpace::Lab(_) => 3,
+        ColorSpace::DeviceCMYK | ColorSpace::CalCMYK(_) => 4,
+        ColorSpace::DeviceN { names, .. } => names.len(),
+        ColorSpace::Icc(stream) => stream.info.components as usize,
+        _ => return None,
+    })
+}
+
+/// The largest difference in one channel between two colours.
+fn channel_spread(a: (f32, f32, f32), b: (f32, f32, f32)) -> f32 {
+    (a.0 - b.0).abs().max((a.1 - b.1).abs()).max((a.2 - b.2).abs())
+}
+
+/// The quads a function-based shading is painted as.
+///
+/// `r` is the quad in shading space and `c` its four corners' colours, in the
+/// order lower-left, lower-right, upper-right, upper-left. A quad is painted
+/// when the colour across it is flat enough that one average does for all four
+/// corners; otherwise it is cut in four and each quarter asked the same. The
+/// subdivision is in shading space, where the domain is a rectangle and the
+/// clip is exact, and only the size floor and the paint are in device space.
+#[allow(clippy::too_many_arguments)]
+fn split_quads(
+    sample: &mut dyn FnMut(f32, f32) -> Result<(f32, f32, f32)>,
+    m: &Transform2F,
+    r: [f32; 4],
+    c: &[(f32, f32, f32); 4],
+    worst: f32,
+    depth: u32,
+    budget: &mut usize,
+    page: &RectF,
+    out: &mut Vec<([Vector2F; 4], [f32; 3])>,
+) -> Result<()> {
+    let [x0, x1, y0, y1] = r;
+    let dev = [
+        *m * Vector2F::new(x0, y0),
+        *m * Vector2F::new(x1, y0),
+        *m * Vector2F::new(x1, y1),
+        *m * Vector2F::new(x0, y1),
+    ];
+    let len = |a: Vector2F, b: Vector2F| {
+        let (dx, dy) = (b.x() - a.x(), b.y() - a.y());
+        (dx * dx + dy * dy).sqrt()
+    };
+    // A quad maps to a parallelogram: its two sides are the edges in each
+    // direction, and its area is the product of the longer one of each pair —
+    // an upper bound, which is what a floor wants.
+    let side_x = len(dev[0], dev[1]).max(len(dev[3], dev[2]));
+    let side_y = len(dev[0], dev[3]).max(len(dev[1], dev[2]));
+    if worst <= FUNCTION_SPREAD
+        || side_x * side_y < FUNCTION_MIN_AREA_PX
+        || depth >= FUNCTION_DEPTH
+        || *budget == 0
+    {
+        // Off the page, nothing is asked: a shading's matrix can put its
+        // domain anywhere, and a quad outside the paper is paint nobody sees.
+        let visible = page.width() <= 0.0
+            || page.height() <= 0.0
+            || dev.iter().any(|p| {
+                p.x() >= page.origin().x()
+                    && p.x() <= page.origin().x() + page.width()
+                    && p.y() >= page.origin().y()
+                    && p.y() <= page.origin().y() + page.height()
+            });
+        if visible {
+            let colour = [
+                (c[0].0 + c[1].0 + c[2].0 + c[3].0) * 0.25,
+                (c[0].1 + c[1].1 + c[2].1 + c[3].1) * 0.25,
+                (c[0].2 + c[1].2 + c[2].2 + c[3].2) * 0.25,
+            ];
+            out.push((dev, colour));
+        }
+        return Ok(());
+    }
+    *budget -= 1;
+    let (xm, ym) = (0.5 * (x0 + x1), 0.5 * (y0 + y1));
+    let b = sample(xm, y0)?;
+    let r_ = sample(x1, ym)?;
+    let t = sample(xm, y1)?;
+    let l = sample(x0, ym)?;
+    let mid = sample(xm, ym)?;
+    let quarters: [([f32; 4], [(f32, f32, f32); 4]); 4] = [
+        ([x0, xm, y0, ym], [c[0], b, mid, l]),
+        ([xm, x1, y0, ym], [b, c[1], r_, mid]),
+        ([xm, x1, ym, y1], [mid, r_, c[2], t]),
+        ([x0, xm, ym, y1], [l, mid, t, c[3]]),
+    ];
+    for (qr, qc) in quarters {
+        let mut child = 0.0f32;
+        for i in 0..4 {
+            for j in i + 1..4 {
+                child = child.max(channel_spread(qc[i], qc[j]));
+            }
+        }
+        split_quads(sample, m, qr, &qc, child, depth + 1, budget, page, out)?;
+    }
+    Ok(())
+}
+
 /// Shading types 4 to 7 are mesh streams; 1, 2 and 3 are dictionaries.
 fn mesh_type(dict: &Dictionary) -> Option<u8> {
     let t = dict.get("ShadingType")?.as_number().ok()? as u8;
@@ -1129,8 +1429,8 @@ fn grow(p: &mut [Vector2F; 3], d: f32) {
     }
 }
 
-/// Push each edge of the triangle outwards by `d` pixels, and let the corners
-/// meet where the moved edges do.
+/// Push each edge of a closed polygon outwards by `d` pixels, and let the
+/// corners meet where the moved edges do.
 ///
 /// This is what closes the seam between two pieces that share an edge: both
 /// grow by `d` and overlap by `2d`, so a pixel on the old edge is covered
@@ -1138,33 +1438,46 @@ fn grow(p: &mut [Vector2F; 3], d: f32) {
 /// centroid does not do the same job — a corner of a thin piece barely moves
 /// sideways, and the paper shows through the gap it leaves at a junction,
 /// which is exactly the speckle a mesh comes out with.
-fn inflate(p: &mut [Vector2F; 3], d: f32) {
-    let area = triangle_area(p);
+///
+/// A triangle or a quad: whatever the mesh or the shading was split into.
+fn inflate(p: &mut [Vector2F], d: f32) {
+    let n = p.len();
+    if n < 3 {
+        return;
+    }
+    // Which way the polygon winds, so "outwards" is the side away from the
+    // interior. Twice the signed area, as in `triangle_area`.
+    let mut area = 0.0;
+    for i in 0..n {
+        let a = p[i];
+        let b = p[(i + 1) % n];
+        area += a.x() * b.y() - b.x() * a.y();
+    }
     if area == 0.0 {
         return;
     }
     let sign = if area > 0.0 { 1.0 } else { -1.0 };
-    let mut lines = [(Vector2F::default(), Vector2F::default()); 3];
-    for i in 0..3 {
+    let mut lines = vec![(Vector2F::default(), Vector2F::default()); n];
+    for i in 0..n {
         let a = p[i];
-        let b = p[(i + 1) % 3];
-        let c = p[(i + 2) % 3];
+        let b = p[(i + 1) % n];
+        let c = p[(i + 2) % n];
         let e = b - a;
         let len = (e.x() * e.x() + e.y() * e.y()).sqrt();
         if len < 1e-9 {
             return;
         }
         // Outward normal: the one pointing away from the opposite corner.
-        let mut n = Vector2F::new(-e.y() / len, e.x() / len) * sign;
-        if n.x() * (c.x() - a.x()) + n.y() * (c.y() - a.y()) > 0.0 {
-            n = n * -1.0;
+        let mut normal = Vector2F::new(-e.y() / len, e.x() / len) * sign;
+        if normal.x() * (c.x() - a.x()) + normal.y() * (c.y() - a.y()) > 0.0 {
+            normal = normal * -1.0;
         }
-        lines[i] = (a + n * d, e);
+        lines[i] = (a + normal * d, e);
     }
-    let mut out = [Vector2F::default(); 3];
-    for i in 0..3 {
+    let mut out = vec![Vector2F::default(); n];
+    for i in 0..n {
         // The corner at p[i] is where edge i-1 and edge i meet once moved.
-        let (a1, e1) = lines[(i + 2) % 3];
+        let (a1, e1) = lines[(i + n - 1) % n];
         let (a2, e2) = lines[i];
         let den = e1.x() * e2.y() - e1.y() * e2.x();
         if den.abs() < 1e-9 {
@@ -1174,7 +1487,7 @@ fn inflate(p: &mut [Vector2F; 3], d: f32) {
         let t = ((a2.x() - a1.x()) * e2.y() - (a2.y() - a1.y()) * e2.x()) / den;
         out[i] = a1 + e1 * t;
     }
-    *p = out;
+    p.copy_from_slice(&out);
 }
 
 fn push_polygon(outline: &mut Outline, points: &[Vector2F], m: &Transform2F) {
@@ -1553,5 +1866,84 @@ mod tests {
         let sign = triangle_area(&cw).signum();
         inflate(&mut cw, 0.7);
         assert_eq!(triangle_area(&cw).signum(), sign);
+    }
+
+    /// Crossing count, for a polygon of any size: the test above is for a
+    /// triangle and a quad has four edges.
+    fn inside_poly(poly: &[Vector2F], q: Vector2F) -> bool {
+        let mut crossings = 0;
+        for i in 0..poly.len() {
+            let (a, b) = (poly[i], poly[(i + 1) % poly.len()]);
+            if (a.y() > q.y()) != (b.y() > q.y()) {
+                let t = (q.y() - a.y()) / (b.y() - a.y());
+                if a.x() + t * (b.x() - a.x()) > q.x() {
+                    crossings += 1;
+                }
+            }
+        }
+        crossings % 2 == 1
+    }
+
+    #[test]
+    fn a_quad_inflated_covers_its_own_edges() {
+        let mut q = [p(0.0, 0.0), p(4.0, 0.0), p(4.0, 4.0), p(0.0, 4.0)];
+        inflate(&mut q, 0.5);
+        // The middle of each old edge, and a little way past it, is covered:
+        // the quad on the other side of that edge grows into the same gap.
+        for probe in [p(2.0, -0.3), p(4.3, 2.0), p(2.0, 4.3), p(-0.3, 2.0)] {
+            assert!(inside_poly(&q, probe), "edge at {probe:?} is covered");
+        }
+        // Still the same way round: a fill is wound, not even-odd.
+        assert!(inside_poly(&q, p(2.0, 2.0)));
+        assert!(!inside_poly(&q, p(6.0, 6.0)));
+    }
+
+    #[test]
+    fn a_ramp_becomes_flat_quads_that_follow_the_function() {
+        let mut sample = |x: f32, y: f32| -> Result<(f32, f32, f32)> {
+            Ok((x / 100.0, y / 100.0, 0.5))
+        };
+        let m = Transform2F::default();
+        let page = RectF::new(p(0.0, 0.0), Vector2F::new(100.0, 100.0));
+        let c = [
+            sample(0.0, 0.0).unwrap(),
+            sample(100.0, 0.0).unwrap(),
+            sample(100.0, 100.0).unwrap(),
+            sample(0.0, 100.0).unwrap(),
+        ];
+        let mut quads = Vec::new();
+        let mut budget = FUNCTION_QUADS;
+        split_quads(
+            &mut sample,
+            &m,
+            [0.0, 100.0, 0.0, 100.0],
+            &c,
+            1.0,
+            0,
+            &mut budget,
+            &page,
+            &mut quads,
+        )
+        .unwrap();
+        assert!(!quads.is_empty());
+        // Every piece is as close to the function at its middle as the spread
+        // the split was aiming for, which is what keeps the banding invisible.
+        for (dev, colour) in &quads {
+            let cx = (dev[0].x() + dev[1].x() + dev[2].x() + dev[3].x()) / 4.0;
+            let cy = (dev[0].y() + dev[1].y() + dev[2].y() + dev[3].y()) / 4.0;
+            assert!((colour[0] - cx / 100.0).abs() <= FUNCTION_SPREAD, "{colour:?} at {cx},{cy}");
+            assert!((colour[1] - cy / 100.0).abs() <= FUNCTION_SPREAD, "{colour:?} at {cx},{cy}");
+            assert!((colour[2] - 0.5).abs() <= 1e-6);
+        }
+        // The quads tile the rectangle, no more and no less: the seam is a
+        // growth at paint time, not an overlap here.
+        let area: f32 = quads
+            .iter()
+            .map(|(d, _)| (d[1].x() - d[0].x()) * (d[3].y() - d[0].y()))
+            .sum();
+        assert!((area - 10_000.0).abs() < 1.0, "covered {area}");
+        // A full-range ramp stops when a step is under the spread, seven
+        // splits in: 4^7. A full page of that is what the budget is for.
+        assert!(quads.len() <= 4usize.pow(FUNCTION_DEPTH), "{} quads", quads.len());
     }
 }
