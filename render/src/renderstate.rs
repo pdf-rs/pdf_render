@@ -545,6 +545,24 @@ impl<'a, R: Resolve, B: Backend> RenderState<'a, R, B> {
         self.device_rect = r;
     }
 
+    /// Clips everything the page paints to the page's own rectangle.
+    ///
+    /// §14.11.2: the contents of a page are clipped to the crop box, which is
+    /// the media box when the file names none, and this is the only clip in
+    /// force before the content stream runs. Without it a page can paint
+    /// wherever it likes: a ground drawn to the media box, a shading that
+    /// covers "the region currently clipped", a producer that ends its clip
+    /// stack with a rectangle larger than the page.
+    ///
+    /// The clip is the root of the chain: a `W n` on the page, a form, a
+    /// pattern or an image can only narrow it, never widen it.
+    pub fn set_page_clip(&mut self, r: RectF) {
+        let path = Outline::from_rect(r);
+        let id = self.backend.create_clip_path(path, FillRule::Winding, None);
+        self.graphics_state.clip_path_id = Some(id);
+        self.graphics_state.clip_path_rect = Some(r);
+    }
+
     /// `sh`: paint the shading called `name` (§8.7.4.5).
     ///
     /// Types 2 and 3 are a function of one parameter and become a gradient;

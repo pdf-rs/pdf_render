@@ -143,6 +143,19 @@ pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Pa
 
     let mut renderstate = RenderState::new(backend, resolve, &resources, root_transformation);
     renderstate.set_device_rect(view_box);
+    // A page paints inside its own rectangle and nowhere else (§14.11.2). What
+    // a viewer shows is the crop box, which the file's own fallback makes the
+    // media box when it names none, and the ink on the waste around a sheet
+    // is ink nobody sees.
+    let crop = page.crop_box().unwrap_or_else(|_| page.media_box().expect("no media box"));
+    let crop_rect = RectF::from_points(
+        Vector2F::new(crop.left, crop.bottom),
+        Vector2F::new(crop.right, crop.top),
+    );
+    let visible = (root_transformation * crop_rect)
+        .intersection(view_box)
+        .unwrap_or(view_box);
+    renderstate.set_page_clip(visible);
     // Parse lazily: a `Vec<Op>` for one page of the spec is several megabytes.
     // A page with no /Contents at all (the entry is optional) is a blank page:
     // poppler draws it as one, and so does this.
