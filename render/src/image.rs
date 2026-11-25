@@ -410,7 +410,24 @@ pub fn load_image(image: &ImageXObject, resources: &Resources, resolve: &impl Re
             if !matches!(cs, Some(ColorSpace::DeviceCMYK)) {
                 info!("image has data/pixel ratio of 4, but colorspace is {:?}", cs);
             }
-            cmyk2color_arr(&raw_data[..pixel_count * 4], alpha, mode)
+            // `/Decode` is how a producer says the samples are stored the other
+            // way round, and `[1 0 1 0 1 0 1 0]` is common on an Adobe CMYK
+            // scan. Ignoring it paints white paper black:
+            // Muecher_Datenblatt_Uebergangsring.pdf page 1, the LRQA mark.
+            let samples: Cow<[u8]> = match image.decode.as_deref() {
+                Some(d) if d.len() >= 8 => {
+                    let mut v = Vec::with_capacity(pixel_count * 4);
+                    for (i, &s) in raw_data[..pixel_count * 4].iter().enumerate() {
+                        let ch = i % 4;
+                        let (lo, hi) = (d[2 * ch], d[2 * ch + 1]);
+                        let t = lo + (s as f32 / 255.) * (hi - lo);
+                        v.push((t.clamp(0., 1.) * 255.).round() as u8);
+                    }
+                    Cow::Owned(v)
+                }
+                _ => Cow::Borrowed(&raw_data[..pixel_count * 4]),
+            };
+            cmyk2color_arr(&samples, alpha, mode)
         }
         _ => unimplemented!("data/pixel ratio {}", data_ratio),
     };
@@ -450,28 +467,18 @@ fn rgb2rgb(r: f32, g: f32, b: f32, mode: BlendMode) -> [u8; 3] {
     }
 
 }
-/*
-red = 1.0 – min ( 1.0, cyan + black )
-green = 1.0 – min ( 1.0, magenta + black )
-blue = 1.0 – min ( 1.0, yellow + black )
-*/
-
+/// CMYK image samples to RGB, through the default press profile (see
+/// `crate::cmyk`) rather than `1 - min(1, c + k)`.
 #[inline]
-fn cmyk2rgb([c, m, y, k]: [u8; 4], mode: BlendMode) -> [u8; 3] {
+fn cmyk2rgb(cmyk: [u8; 4], mode: BlendMode) -> [u8; 3] {
+    let [r, g, b] = crate::cmyk::to_rgb_u8(cmyk);
     match mode {
-        BlendMode::Darken => {
-            let r = 255 - c.saturating_add(k);
-            let g = 255 - m.saturating_add(k);
-            let b = 255 - y.saturating_add(k);
-            [r, g, b]
-        }
-        BlendMode::Overlay => {
-            let (c, m, y, k) = (255 - c, 255 - m, 255 - y, 255 - k);
-            let r = 255 - c.saturating_add(k);
-            let g = 255 - m.saturating_add(k);
-            let b = 255 - y.saturating_add(k);
-            [r, g, b]
-        }
+        BlendMode::Overlay => [r, g, b],
+        // Overprint. `BlendMode::Darken` also negates the rgb path, but a CMYK
+        // image is ink, not light: the multiply the backend applies on top of
+        // the page is the whole of the overprint here, and negating as well
+        // turns every CMYK image on a page black.
+        BlendMode::Darken => [r, g, b],
     }
 }
 

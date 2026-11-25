@@ -33,18 +33,20 @@ use pathfinder_geometry::{rect::RectF, transform2d::Transform2F, vector::Vector2
 use vello_cpu::{
     color::Srgb,
     kurbo::{Affine, BezPath, Rect},
+    peniko,
     peniko::color::AlphaColor,
     peniko::{Blob, ImageData, ImageFormat},
-    Image, ImageSource, Pixmap, RenderContext, Resources,
+    Image, ImageSource, PaintType, Pixmap, RenderContext, Resources,
 };
 
+use crate::peniko_paint::{paint_transform, to_peniko_gradient};
 use crate::{cache::ImageResult, Backend, Cache, DrawMode, FillMode, FontRc};
 
 /// The CPU backend rasterises drawings immediately, so it has no image handles of
 /// its own; `Image` is only here to satisfy the associated type.
 pub struct VelloCpuBackend<'a> {
     ctx: RenderContext,
-    clip_paths: Vec<(BezPath, FillRule)>,
+    clip_paths: Vec<(BezPath, FillRule, Option<usize>)>,
     cache: &'a mut Cache<OutlineBuilder>,
 }
 
@@ -60,6 +62,21 @@ impl<'a> VelloCpuBackend<'a> {
 
     pub fn width(&self) -> u16 {
         self.ctx.width()
+    }
+
+    /// A clip path and its ancestors, outermost first.
+    fn clip_chain(&self, clip: Option<usize>) -> Vec<usize> {
+        let mut chain = Vec::new();
+        let mut cur = clip;
+        while let Some(id) = cur {
+            let Some((_, _, parent)) = self.clip_paths.get(id) else {
+                break;
+            };
+            chain.push(id);
+            cur = *parent;
+        }
+        chain.reverse();
+        chain
     }
 
     /// Paint the whole target a single colour before anything else is drawn, like the
@@ -95,20 +112,23 @@ impl<'a> VelloCpuBackend<'a> {
     /// Push the clip path as a layer.  The clip path is stored in device space, so the
     /// caller has to make sure the current transform is the identity.
     fn push_clip(&mut self, clip: Option<usize>) {
-        if let Some(id) = clip {
-            if let Some((path, fill_rule)) = self.clip_paths.get(id) {
-                self.ctx.set_transform(Affine::IDENTITY);
-                self.ctx.set_fill_rule(convert_fill_rule(*fill_rule));
-                self.ctx.push_clip_layer(path);
-            }
+        // A clip path id is the innermost link of a chain: the page a shading
+        // is cut to can be clipped first by a parallelogram, then by a
+        // rounded box, then by the sheet. Every link holds, so every link is
+        // pushed — keeping only the innermost one paints a whole page dark
+        // wherever a producer ends a clip stack with the full MediaBox
+        // (Grundfosliterature-6154082.pdf page 15).
+        for id in self.clip_chain(clip) {
+            let (path, fill_rule, _) = &self.clip_paths[id];
+            self.ctx.set_transform(Affine::IDENTITY);
+            self.ctx.set_fill_rule(convert_fill_rule(*fill_rule));
+            self.ctx.push_clip_layer(path);
         }
     }
 
     fn pop_clip(&mut self, clip: Option<usize>) {
-        if let Some(id) = clip {
-            if id < self.clip_paths.len() {
-                self.ctx.pop_layer();
-            }
+        for _ in self.clip_chain(clip) {
+            self.ctx.pop_layer();
         }
     }
 
@@ -228,15 +248,19 @@ fn convert_fill_rule(fill_rule: FillRule) -> vello_cpu::peniko::Fill {
     }
 }
 
-fn convert_fill(fill: &FillMode) -> AlphaColor<Srgb> {
-    match fill.color {
+fn convert_fill(fill: &FillMode) -> PaintType {
+    match &fill.color {
         crate::Fill::Solid(r, g, b) => {
-            let ColorU { r, g, b, a } = ColorF::new(r, g, b, fill.alpha).to_u8();
-            AlphaColor::from_rgba8(r, g, b, a)
+            let ColorU { r, g, b, a } = ColorF::new(*r, *g, *b, fill.alpha).to_u8();
+            PaintType::Solid(AlphaColor::from_rgba8(r, g, b, a))
         }
-        _ => AlphaColor::from_rgba8(255, 0, 0, 127),
+        crate::Fill::Pattern(_) => PaintType::Solid(AlphaColor::from_rgba8(255, 0, 0, 127)),
+        crate::Fill::Gradient(gradient) => {
+            PaintType::Gradient(to_peniko_gradient(gradient, fill.alpha))
+        }
     }
 }
+
 
 fn convert_stroke(stroke: &crate::backend::Stroke) -> vello_cpu::kurbo::Stroke {
     use vello_cpu::kurbo::{Cap, Join};
@@ -296,10 +320,10 @@ impl<'a> Backend for VelloCpuBackend<'a> {
         &mut self,
         path: Outline,
         fill_rule: FillRule,
-        _parent: Option<Self::ClipPathId>,
+        parent: Option<Self::ClipPathId>,
     ) -> Self::ClipPathId {
         let id = self.clip_paths.len();
-        self.clip_paths.push((outline_to_bez(&path), fill_rule));
+        self.clip_paths.push((outline_to_bez(&path), fill_rule, parent));
         id
     }
 
@@ -319,11 +343,19 @@ impl<'a> Backend for VelloCpuBackend<'a> {
         if let Some(fill) = mode.fill() {
             self.ctx.set_fill_rule(convert_fill_rule(fill_rule));
             self.ctx.set_paint(convert_fill(fill));
+            match paint_transform(fill) {
+                Some(t) => self.ctx.set_paint_transform(t),
+                None => self.ctx.reset_paint_transform(),
+            }
             self.ctx.fill_path(&shape);
         }
         if let Some((stroke, stroke_mode)) = mode.stroke() {
             self.ctx.set_fill_rule(convert_fill_rule(fill_rule));
             self.ctx.set_paint(convert_fill(stroke));
+            match paint_transform(stroke) {
+                Some(t) => self.ctx.set_paint_transform(t),
+                None => self.ctx.reset_paint_transform(),
+            }
             self.ctx.set_stroke(convert_stroke(stroke_mode));
             self.ctx.stroke_path(&shape);
         }

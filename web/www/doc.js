@@ -173,6 +173,13 @@ export class Doc {
         return bytes.length;
     }
 
+    /** Hand the module bytes we already hold, before it has asked for them —
+     *  a file the reader dropped, or any source that is not the network. */
+    give(bytes, start = 0) {
+        supply(this.#doc, start, bytes);
+        this.#remember(start, bytes.length);
+    }
+
     get numPages() {
         return mod.pdf_num_pages(this.#doc);
     }

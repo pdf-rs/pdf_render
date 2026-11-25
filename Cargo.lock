@@ -2029,9 +2029,9 @@ dependencies = [
 
 [[package]]
 name = "jpeg-decoder"
-version = "0.3.0"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc0000e42512c92e31c2252315bda326620a4e034105e900c98ec492fa077b3e"
+checksum = "00810f1d8b74be64b13dbf3db89ac67740615d6c891f0e7b6179326533011a07"
 
 [[package]]
 name = "js-sys"
@@ -2861,7 +2861,7 @@ version = "0.1.1"
 source = "git+https://github.com/s3bk/pathfinder_view#4c3b70bea706a896dcbbb35f60651680a54d6f23"
 dependencies = [
  "bincode",
- "cfg-if 0.1.10",
+ "cfg-if 1.0.0",
  "gl",
  "glutin 0.30.10",
  "glutin-winit",
@@ -2914,6 +2914,7 @@ dependencies = [
  "indexmap 2.14.2",
  "istring 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "itertools 0.13.0",
+ "jpeg-decoder",
  "libflate",
  "log",
  "md5",
@@ -2930,7 +2931,7 @@ dependencies = [
 [[package]]
 name = "pdf"
 version = "0.10.0"
-source = "git+ssh://git@github.com/s3bk/pdf.git?branch=master#c9d39f2b4e4ad71fb06162affe54e6599edea9e2"
+source = "git+https://github.com/pdf-rs/pdf#2f265c2d345e23b666c023801181e0fc54c2ad18"
 dependencies = [
  "aes",
  "bitflags 2.13.2",
@@ -2943,34 +2944,7 @@ dependencies = [
  "indexmap 2.14.2",
  "istring 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
  "itertools 0.13.0",
- "libflate",
- "log",
- "md5",
- "once_cell",
- "pdf_derive 0.3.0 (git+ssh://git@github.com/s3bk/pdf.git?branch=master)",
- "sha2 0.11.1",
- "snafu",
- "stringprep",
- "tempfile",
- "weezl",
- "zune-jpeg 0.5.15",
-]
-
-[[package]]
-name = "pdf"
-version = "0.10.0"
-source = "git+https://github.com/pdf-rs/pdf#c9d39f2b4e4ad71fb06162affe54e6599edea9e2"
-dependencies = [
- "aes",
- "bitflags 2.13.2",
- "brotli-decompressor",
- "cbc",
- "datasize",
- "deflate",
- "fax",
- "indexmap 2.14.2",
- "istring 0.3.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "itertools 0.13.0",
+ "jpeg-decoder",
  "libflate",
  "log",
  "md5",
@@ -2996,17 +2970,7 @@ dependencies = [
 [[package]]
 name = "pdf_derive"
 version = "0.3.0"
-source = "git+ssh://git@github.com/s3bk/pdf.git?branch=master#c9d39f2b4e4ad71fb06162affe54e6599edea9e2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.91",
-]
-
-[[package]]
-name = "pdf_derive"
-version = "0.3.0"
-source = "git+https://github.com/pdf-rs/pdf#c9d39f2b4e4ad71fb06162affe54e6599edea9e2"
+source = "git+https://github.com/pdf-rs/pdf#2f265c2d345e23b666c023801181e0fc54c2ad18"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3062,7 +3026,7 @@ dependencies = [
  "pathfinder_content",
  "pathfinder_geometry",
  "pathfinder_renderer",
- "pdf 0.10.0 (git+ssh://git@github.com/s3bk/pdf.git?branch=master)",
+ "pdf 0.10.0 (git+https://github.com/pdf-rs/pdf)",
  "pdf_encoding 0.4.0",
  "peniko",
  "rand 0.6.5",

@@ -51,7 +51,14 @@ impl<'a> SceneBackend<'a> {
     }
     fn paint(&mut self, fill: Fill, alpha: f32) -> PaintId {
         let paint = match fill {
-            Fill::Solid(r, g, b) => Paint::from_color(ColorF::new(r, g, b, alpha).to_u8()),
+            Fill::Solid(r, g, b) => Paint::from_color(ColorF::new(*r, *g, *b, alpha).to_u8()),
+            // pathfinder paints colours and patterns, not gradients; the
+            // average colour of the ramp is wrong but visible, which a page
+            // with a missing background is not.
+            Fill::Gradient(g) => {
+                let (r, g, b) = g.average_color();
+                Paint::from_color(ColorF::new(r, g, b, alpha).to_u8())
+            }
             Fill::Pattern(_) => {
                 Paint::black()
             }

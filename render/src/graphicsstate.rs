@@ -32,9 +32,9 @@ impl<'a, B: Backend> Clone for GraphicsState<'a, B> {
         GraphicsState {
             transform: self.transform,
             stroke_style: self.stroke_style,
-            fill_color: self.fill_color,
+            fill_color: self.fill_color.clone(),
             fill_color_alpha: self.fill_color_alpha,
-            stroke_color: self.stroke_color,
+            stroke_color: self.stroke_color.clone(),
             stroke_color_alpha: self.stroke_color_alpha,
             clip_path_id: self.clip_path_id,
             clip_path_rect: self.clip_path_rect,

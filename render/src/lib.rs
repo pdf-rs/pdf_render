@@ -14,6 +14,13 @@ macro_rules! unimplemented {
 }
 
 mod types;
+mod shading;
+/// Mesh shadings (§8.7.4.5.5): streams of coloured vertices, types 4 to 7.
+mod mesh;
+mod cmyk;
+/// Shading → peniko, shared by the two backends that paint with it.
+#[cfg(any(feature = "vello", feature = "vello_cpu"))]
+mod peniko_paint;
 
 mod cache;
 mod fontentry;
@@ -35,6 +42,7 @@ use pathfinder_geometry::vector::vec2f;
 use pdf::{t, try_opt};
 //pub use scene::SceneBackend;
 pub use crate::image::{load_image, ImageData};
+pub use crate::shading::{Extend as GradientExtend, Gradient, GradientKind, Stop};
 use custom_debug_derive::Debug;
 pub use ::font::Glyph;
 #[cfg(feature = "vello")]
@@ -134,6 +142,20 @@ pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Pa
     };
 
     let mut renderstate = RenderState::new(backend, resolve, &resources, root_transformation);
+    renderstate.set_device_rect(view_box);
+    // A page paints inside its own rectangle and nowhere else (§14.11.2). What
+    // a viewer shows is the crop box, which the file's own fallback makes the
+    // media box when it names none, and the ink on the waste around a sheet
+    // is ink nobody sees.
+    let crop = page.crop_box().unwrap_or_else(|_| page.media_box().expect("no media box"));
+    let crop_rect = RectF::from_points(
+        Vector2F::new(crop.left, crop.bottom),
+        Vector2F::new(crop.right, crop.top),
+    );
+    let visible = (root_transformation * crop_rect)
+        .intersection(view_box)
+        .unwrap_or(view_box);
+    renderstate.set_page_clip(visible);
     // Parse lazily: a `Vec<Op>` for one page of the spec is several megabytes.
     // A page with no /Contents at all (the entry is optional) is a blank page:
     // poppler draws it as one, and so does this.
@@ -167,7 +189,22 @@ pub fn render_page(backend: &mut impl Backend, resolve: &impl Resolve, page: &Pa
 pub fn render_pattern(backend: &mut impl Backend, pattern: &Pattern, resolve: &impl Resolve) -> Result<(), PdfError> {
     match pattern {
         Pattern::Stream(dict, ops) => {
-            let resources = resolve.get(dict.resources)?;
+            // A pattern's `/Resources` is optional and a shading pattern
+            // (`/PatternType 2`) has none at all: the cell then uses the
+            // resources of whoever paints it, and a stream with no resources
+            // of its own but operators in it has nothing to look up anyway.
+            let own;
+            let resolved;
+            let resources: &Resources = match dict.resources {
+                Some(r) => {
+                    resolved = resolve.get(r)?;
+                    &resolved
+                }
+                None => {
+                    own = Resources::default();
+                    &own
+                }
+            };
             let mut renderstate = RenderState::new(backend, resolve, &*resources, Transform2F::default());
             for (i, op) in ops.iter().enumerate() {
                 debug!("op {}: {:?}", i, op);
@@ -180,10 +217,15 @@ pub fn render_pattern(backend: &mut impl Backend, pattern: &Pattern, resolve: &i
 }
 
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+/// A paint. `Solid` is the overwhelmingly common case and is compared by
+/// value; a gradient is a whole paint object, so it is shared rather than
+/// copied — a page may fill a hundred shapes with one `sh` shading.
+#[derive(Clone, PartialEq, Debug)]
 pub enum Fill {
     Solid(f32, f32, f32),
     Pattern(Ref<Pattern>),
+    /// A gradient from a `sh` shading (or a type 2 pattern), in shading space.
+    Gradient(Arc<Gradient>),
 }
 impl Fill {
     pub fn black() -> Self {
