@@ -88,16 +88,15 @@ required-features = ["bundle-write"]
 name = "fonts_parts"
 required-features = ["bundle-write"]
 
-# Sebastian's fork, fetched over https: upstream master has not caught up with
-# the API this crate uses, and a path to a sibling checkout cannot be resolved
-# by anything that depends on pdf_render (cargo reads this manifest, not the
-# checkout). Public since 2026-11-13; it was over ssh until then, which made
-# every build that depended on this crate need s3bk's key.
+# Upstream, fetched over https. Sebastian's fork was needed while the shading
+# and /Decode work sat only there; pdf-rs/pdf master has both since 3c5d4de and
+# d8666e4, so there is nothing left to pull from the fork. A path to a sibling
+# checkout cannot be used: anything that depends on pdf_render resolves this
+# manifest, not the checkout.
 [dependencies.pdf]
 default-features = false
 features = ["cache", "dump"]
-git = "https://github.com/s3bk/pdf.git"
-branch = "master"
+git = "https://github.com/pdf-rs/pdf"
 
 [dependencies]
 log = "0.4"
